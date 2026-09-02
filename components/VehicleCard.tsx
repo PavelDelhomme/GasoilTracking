@@ -11,9 +11,17 @@ interface VehicleCardProps {
   onPress?: () => void;
   onLongPress?: () => void;
   onSelect?: () => void;
+  onEdit?: () => void;
 }
 
-export function VehicleCard({ vehicle, isActive, onPress, onLongPress, onSelect }: VehicleCardProps) {
+export function VehicleCard({
+  vehicle,
+  isActive,
+  onPress,
+  onLongPress,
+  onSelect,
+  onEdit,
+}: VehicleCardProps) {
   const { colors } = useTheme();
 
   return (
@@ -65,14 +73,24 @@ export function VehicleCard({ vehicle, isActive, onPress, onLongPress, onSelect 
         </View>
       </View>
 
-      {!isActive && onSelect && (
-        <TouchableOpacity
-          style={[styles.selectBtn, { borderColor: colors.accent }]}
-          onPress={onSelect}
-        >
-          <Text style={[styles.selectText, { color: colors.accent }]}>Sélectionner</Text>
-        </TouchableOpacity>
-      )}
+      <View style={styles.actions}>
+        {!isActive && onSelect && (
+          <TouchableOpacity
+            style={[styles.selectBtn, { borderColor: colors.accent, flex: 1 }]}
+            onPress={onSelect}
+          >
+            <Text style={[styles.selectText, { color: colors.accent }]}>Sélectionner</Text>
+          </TouchableOpacity>
+        )}
+        {onEdit && (
+          <TouchableOpacity
+            style={[styles.selectBtn, { borderColor: colors.border, flex: 1 }]}
+            onPress={onEdit}
+          >
+            <Text style={[styles.selectText, { color: colors.text }]}>Modifier</Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </TouchableOpacity>
   );
 }
@@ -113,4 +131,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   selectText: { fontSize: 14, fontWeight: '600' },
+  actions: { flexDirection: 'row', gap: 8 },
 });

@@ -13,13 +13,14 @@ import {
   formatConsumption,
   formatDistance,
   getConsumptionStats,
-  estimateRange,
+  getSinceLastFillStats,
 } from '@/lib/calculations';
 import { seedDemoData } from '@/lib/seedDemo';
+import { seedTodayCommuteAndFillUp } from '@/lib/seedToday';
 import { notify } from '@/lib/notify';
 import { isManagerEmail } from '@/lib/api';
 import { CountryPickerCard } from '@/components/CountryPickerCard';
-import type { ConsumptionStats } from '@/types';
+import type { ConsumptionStats, SinceLastFillStats } from '@/types';
 
 export default function HomeScreen() {
   const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles } = useApp();
@@ -27,12 +28,26 @@ export default function HomeScreen() {
   const { colors } = useTheme();
   const { locale } = useLocale();
   const [stats, setStats] = useState<ConsumptionStats | null>(null);
+  const [sinceFill, setSinceFill] = useState<SinceLastFillStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  const [seedingToday, setSeedingToday] = useState(false);
+
+  const reloadStats = async (vehicleId: number) => {
+    const [s, since] = await Promise.all([
+      getConsumptionStats(vehicleId),
+      getSinceLastFillStats(vehicleId),
+    ]);
+    setStats(s);
+    setSinceFill(since);
+  };
 
   useEffect(() => {
     if (activeVehicle) {
-      getConsumptionStats(activeVehicle.id).then(setStats);
+      void reloadStats(activeVehicle.id);
+    } else {
+      setStats(null);
+      setSinceFill(null);
     }
   }, [activeVehicle]);
 
@@ -44,10 +59,7 @@ export default function HomeScreen() {
     } catch {
       /* offline */
     }
-    if (activeVehicle) {
-      const s = await getConsumptionStats(activeVehicle.id);
-      setStats(s);
-    }
+    if (activeVehicle) await reloadStats(activeVehicle.id);
     setRefreshing(false);
   };
 
@@ -64,6 +76,29 @@ export default function HomeScreen() {
       notify('Démo', e instanceof Error ? e.message : 'Échec');
     } finally {
       setSeeding(false);
+    }
+  };
+
+  const loadToday = async () => {
+    if (!activeVehicle) {
+      notify('Véhicule', 'Sélectionnez un véhicule d’abord.');
+      return;
+    }
+    setSeedingToday(true);
+    try {
+      const res = await seedTodayCommuteAndFillUp(activeVehicle.id);
+      await refresh();
+      await reloadStats(activeVehicle.id);
+      notify(
+        'Journée ajoutée',
+        `${res.tripsAdded} trajet(s) domicile↔travail` +
+          (res.fillUpAdded ? ' + plein du jour' : ' (plein déjà présent)') +
+          '.'
+      );
+    } catch (e) {
+      notify('Aujourd’hui', e instanceof Error ? e.message : 'Échec');
+    } finally {
+      setSeedingToday(false);
     }
   };
 
@@ -196,17 +231,13 @@ export default function HomeScreen() {
               subtitle="Mesurée entre pleins"
             />
             <StatCard
-              label="Autonomie est."
-              value={formatDistance(
-                estimateRange(
-                  activeVehicle,
-                  undefined,
-                  stats && stats.averageConsumption > 0
-                    ? stats.averageConsumption
-                    : undefined
-                )
-              )}
-              subtitle={`Réservoir ${activeVehicle.tankCapacity} L · conso adaptée`}
+              label="Autonomie rest."
+              value={formatDistance(sinceFill?.rangeKm ?? 0)}
+              subtitle={
+                sinceFill?.lastFill
+                  ? `${formatDistance(sinceFill.tripKm)} depuis dernier plein · ~${sinceFill.fuelRemainingEst.toFixed(1)} L`
+                  : 'Après un plein + trajets'
+              }
             />
           </View>
 
@@ -266,6 +297,13 @@ export default function HomeScreen() {
               style={{ flex: 1 }}
             />
           </View>
+          <Button
+            title="Ajouter journée type (aujourd’hui)"
+            variant="outline"
+            loading={seedingToday}
+            onPress={loadToday}
+            style={{ marginTop: 10, marginBottom: 24 }}
+          />
         </>
       )}
     </ScrollView>

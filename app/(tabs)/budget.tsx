@@ -22,6 +22,7 @@ import {
   getMonthlySpend,
   getPlaces,
   getRecurringRoutes,
+  updateRecurringRoute,
 } from '@/lib/database';
 import {
   fetchCheapestStations,
@@ -99,10 +100,14 @@ export default function BudgetScreen() {
 
   const estimateMonthlyFromRoutes = () => {
     if (!activeVehicle) return 0;
+    const today = new Date().toISOString().slice(0, 10);
     let kmWeek = 0;
     for (const r of routes) {
-      // aller-retour approximé si domicile↔travail : times_per_week = allers
-      kmWeek += r.distanceKm * r.timesPerWeek;
+      const onVac =
+        r.isOnVacation && (!r.vacationUntil || r.vacationUntil >= today);
+      if (onVac) continue;
+      const days = r.workDaysPerWeek || r.timesPerWeek || 0;
+      kmWeek += r.distanceKm * days;
     }
     const kmMonth = kmWeek * 4.33;
     const liters = (kmMonth * activeVehicle.consumptionPer100) / 100;
@@ -300,12 +305,16 @@ export default function BudgetScreen() {
         <Card>
           {routes.length === 0 ? (
             <Text style={{ color: colors.textSecondary }}>
-              Ex. Domicile → Travail, 5×/semaine, pour estimer le budget.
+              Ex. Domicile → Travail, jours / semaine, vacances. Tap = vacances, long = supprimer.
             </Text>
           ) : (
             routes.map((r) => {
               const from = places.find((p) => p.id === r.fromPlaceId);
               const to = places.find((p) => p.id === r.toPlaceId);
+              const today = new Date().toISOString().slice(0, 10);
+              const onVac =
+                r.isOnVacation && (!r.vacationUntil || r.vacationUntil >= today);
+              const days = r.workDaysPerWeek || r.timesPerWeek;
               return (
                 <Pressable
                   key={r.id}
@@ -315,13 +324,35 @@ export default function BudgetScreen() {
                       await loadExtra();
                     }, 'Supprimer')
                   }
+                  onPress={() =>
+                    confirm(
+                      onVac ? 'Reprendre ?' : 'Mettre en vacances ?',
+                      onVac
+                        ? 'Réactiver l’estimation pour ce trajet ?'
+                        : 'Pause estimation (congés) jusqu’à nouvel ordre ?',
+                      async () => {
+                        await updateRecurringRoute(r.id, {
+                          isOnVacation: !onVac,
+                          vacationUntil: !onVac
+                            ? new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10)
+                            : null,
+                        });
+                        await loadExtra();
+                      },
+                      onVac ? 'Reprendre' : 'Vacances'
+                    )
+                  }
                   style={[styles.placeRow, { borderBottomColor: colors.border }]}
                 >
                   <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.text, fontWeight: '700' }}>{r.name}</Text>
+                    <Text style={{ color: colors.text, fontWeight: '700' }}>
+                      {r.name}
+                      {onVac ? ' · en vacances' : ''}
+                    </Text>
                     <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                      {from?.name || '?'} → {to?.name || '?'} · {r.distanceKm} km · {r.timesPerWeek}
-                      ×/sem.
+                      {from?.name || '?'} → {to?.name || '?'} · {r.distanceKm} km · {days}{' '}
+                      j/sem.
+                      {onVac && r.vacationUntil ? ` · reprise ${r.vacationUntil}` : ''}
                     </Text>
                   </View>
                 </Pressable>

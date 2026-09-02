@@ -50,6 +50,12 @@ async function load(): Promise<Store> {
         status: t.status || 'confirmed',
         source: t.source || 'gps',
       }));
+      parsed.routes = (parsed.routes || []).map((r) => ({
+        ...r,
+        workDaysPerWeek: r.workDaysPerWeek ?? r.timesPerWeek ?? 5,
+        isOnVacation: r.isOnVacation ?? false,
+        vacationUntil: r.vacationUntil ?? null,
+      }));
       cache = parsed;
       return cache;
     }
@@ -312,9 +318,26 @@ export async function getRecurringRoutes(vehicleId?: number): Promise<RecurringR
 export async function createRecurringRoute(route: Omit<RecurringRoute, 'id'>): Promise<number> {
   const s = await load();
   const id = s.seq.routes++;
-  s.routes.push({ ...route, id });
+  const workDays = route.workDaysPerWeek ?? route.timesPerWeek ?? 5;
+  s.routes.push({
+    ...route,
+    id,
+    workDaysPerWeek: workDays,
+    timesPerWeek: route.timesPerWeek ?? workDays,
+    isOnVacation: route.isOnVacation ?? false,
+    vacationUntil: route.vacationUntil ?? null,
+  });
   await save(s);
   return id;
+}
+
+export async function updateRecurringRoute(
+  id: number,
+  patch: Partial<Omit<RecurringRoute, 'id'>>
+): Promise<void> {
+  const s = await load();
+  s.routes = s.routes.map((r) => (r.id === id ? { ...r, ...patch, id } : r));
+  await save(s);
 }
 
 export async function deleteRecurringRoute(id: number): Promise<void> {

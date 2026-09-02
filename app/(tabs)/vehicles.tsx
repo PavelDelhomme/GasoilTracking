@@ -61,6 +61,9 @@ export default function VehiclesScreen() {
             isActive={activeVehicle?.id === item.id}
             onSelect={() => selectVehicle(item.id)}
             onPress={() => selectVehicle(item.id)}
+            onEdit={() =>
+              router.push({ pathname: '/vehicle/edit' as never, params: { id: String(item.id) } })
+            }
             onLongPress={() => handleDelete(item.id, item.name)}
           />
         )}

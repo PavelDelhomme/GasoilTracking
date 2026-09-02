@@ -56,7 +56,14 @@ export interface RecurringRoute {
   fromPlaceId: number;
   toPlaceId: number;
   distanceKm: number;
+  /** Allers (ou trajets) par semaine hors vacances — souvent = jours travaillés */
   timesPerWeek: number;
+  /** Jours travaillés typiques / semaine (1–7), pour l’estimation */
+  workDaysPerWeek: number;
+  /** Pause estimation (congés / vacances) */
+  isOnVacation: boolean;
+  /** Fin des vacances (AAAA-MM-JJ) — optionnel */
+  vacationUntil: string | null;
   isActive: boolean;
 }
 
@@ -113,6 +120,27 @@ export interface ConsumptionStats {
   totalFuel: number;
   totalCost: number;
   fillUpCount: number;
+}
+
+/** Stats depuis le dernier plein (trajets réels) */
+export interface SinceLastFillStats {
+  lastFill: FillUp | null;
+  tripKm: number;
+  tripCount: number;
+  fuelUsedEst: number;
+  fuelRemainingEst: number;
+  rangeKm: number;
+}
+
+/** Agrégat d’un mois de pleins */
+export interface MonthFillStats {
+  monthKey: string;
+  count: number;
+  totalCost: number;
+  totalLiters: number;
+  avgPricePerLiter: number;
+  avgConsumption: number | null;
+  totalDistanceKm: number;
 }
 
 export interface BudgetStatus {

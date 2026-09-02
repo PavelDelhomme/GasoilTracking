@@ -7,6 +7,7 @@ import {
   getVehicles,
 } from '@/lib/database';
 import { refreshBudgets } from '@/lib/calculations';
+import { seedTodayCommuteAndFillUp } from '@/lib/seedToday';
 
 function daysAgo(n: number, hour = 8, minute = 0): string {
   const d = new Date();
@@ -210,5 +211,12 @@ export async function seedDemoData(): Promise<{ vehicleId: number; trips: number
 
   await refreshBudgets(vehicleId);
 
-  return { vehicleId, trips: tripDefs.length, fillUps: 3 + (fill1 ? 0 : 0) };
+  // Journée d’aujourd’hui : domicile↔travail + plein
+  const today = await seedTodayCommuteAndFillUp(vehicleId);
+
+  return {
+    vehicleId,
+    trips: tripDefs.length + today.tripsAdded,
+    fillUps: 3 + (today.fillUpAdded ? 1 : 0),
+  };
 }

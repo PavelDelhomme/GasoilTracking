@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Switch } from 'react-native';
 import { router } from 'expo-router';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
+import { DatePickerField } from '@/components/DatePickerField';
 import { createRecurringRoute, getPlaces } from '@/lib/database';
 import { notify } from '@/lib/notify';
+import { toLocalYmd } from '@/lib/dates';
 import type { Place } from '@/types';
 
 export default function AddRouteScreen() {
@@ -17,7 +19,9 @@ export default function AddRouteScreen() {
   const [toId, setToId] = useState<number | null>(null);
   const [name, setName] = useState('');
   const [distanceKm, setDistanceKm] = useState('20');
-  const [times, setTimes] = useState('5');
+  const [workDays, setWorkDays] = useState('5');
+  const [onVacation, setOnVacation] = useState(false);
+  const [vacationUntil, setVacationUntil] = useState(toLocalYmd(new Date()));
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -37,9 +41,9 @@ export default function AddRouteScreen() {
       return;
     }
     const km = parseFloat(distanceKm.replace(',', '.'));
-    const tw = parseFloat(times.replace(',', '.'));
-    if (!km || km <= 0 || !tw || tw <= 0) {
-      notify('Erreur', 'Distance et fois/semaine requis.');
+    const days = parseFloat(workDays.replace(',', '.'));
+    if (!km || km <= 0 || !days || days <= 0 || days > 7) {
+      notify('Erreur', 'Distance et jours travaillés / semaine (1–7) requis.');
       return;
     }
     setLoading(true);
@@ -52,10 +56,18 @@ export default function AddRouteScreen() {
         fromPlaceId: fromId,
         toPlaceId: toId,
         distanceKm: km,
-        timesPerWeek: tw,
+        timesPerWeek: days,
+        workDaysPerWeek: days,
+        isOnVacation: onVacation,
+        vacationUntil: onVacation ? vacationUntil : null,
         isActive: true,
       });
-      notify('Trajet régulier', 'Ajouté pour l’estimation budget.');
+      notify(
+        'Trajet régulier',
+        onVacation
+          ? 'Ajouté (en vacances — estimation en pause jusqu’à la date indiquée).'
+          : 'Ajouté pour l’estimation budget.'
+      );
       router.back();
     } catch (e) {
       notify('Erreur', e instanceof Error ? e.message : 'Échec');
@@ -109,7 +121,8 @@ export default function AddRouteScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <Text style={{ color: colors.textSecondary, marginBottom: 12, lineHeight: 18 }}>
-        Trajet récurrent (ex. domicile–travail) pour estimer le budget mensuel.
+        Trajet récurrent pour estimer le budget. Indiquez vos jours travaillés ; en vacances,
+        l’estimation se met en pause (le réel des trajets GPS/pleins reste prioritaire).
       </Text>
       <Input label="Nom" value={name} onChangeText={setName} placeholder="Domicile → Travail" />
       <PlacePicker label="Départ" value={fromId} onChange={setFromId} />
@@ -121,13 +134,47 @@ export default function AddRouteScreen() {
         keyboardType="numeric"
       />
       <Input
-        label="Fréquence (fois / semaine)"
-        value={times}
-        onChangeText={setTimes}
+        label="Jours travaillés / semaine"
+        value={workDays}
+        onChangeText={setWorkDays}
         keyboardType="numeric"
-        placeholder="5 = tous les jours ouvrés"
+        placeholder="5 = lun–ven"
       />
+      <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 12, marginTop: -4 }}>
+        Ex. 5 jours → 5 allers/semaine pour ce trajet (créez aussi le retour si besoin).
+      </Text>
+
+      <View style={styles.switchRow}>
+        <View style={{ flex: 1, paddingRight: 12 }}>
+          <Text style={{ color: colors.text, fontWeight: '600' }}>En vacances / congés</Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+            Pause l’estimation budget jusqu’à la date de reprise.
+          </Text>
+        </View>
+        <Switch
+          value={onVacation}
+          onValueChange={setOnVacation}
+          trackColor={{ false: colors.border, true: colors.accent }}
+        />
+      </View>
+      {onVacation && (
+        <DatePickerField
+          label="Reprise le"
+          value={vacationUntil}
+          onChange={setVacationUntil}
+        />
+      )}
+
       <Button title="Enregistrer" onPress={save} loading={loading} />
     </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    marginTop: 4,
+  },
+});

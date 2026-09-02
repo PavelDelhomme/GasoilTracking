@@ -1,4 +1,12 @@
-import type { Budget, BudgetStatus, ConsumptionStats, FillUp, Vehicle } from '@/types';
+import type {
+  Budget,
+  BudgetStatus,
+  ConsumptionStats,
+  FillUp,
+  MonthFillStats,
+  SinceLastFillStats,
+  Vehicle,
+} from '@/types';
 import {
   getFillUps,
   getTrips,
@@ -7,6 +15,7 @@ import {
   updateVehicle,
   getVehicleById,
 } from './database';
+import { monthKeyFromDate } from './dates';
 
 /** Calcule la distance entre deux points GPS (formule Haversine) en km */
 export function haversineDistance(
@@ -115,6 +124,82 @@ export async function getConsumptionStats(vehicleId: number): Promise<Consumptio
     totalFuel,
     totalCost,
     fillUpCount: fillUps.length,
+  };
+}
+
+/** Agrégats pleins pour un mois (AAAA-MM) */
+export function getMonthFillStats(fillUps: FillUp[], monthKey: string): MonthFillStats {
+  const monthFills = fillUps.filter((f) => monthKeyFromDate(f.date) === monthKey);
+  const totalCost = monthFills.reduce((s, f) => s + f.totalCost, 0);
+  const totalLiters = monthFills.reduce((s, f) => s + f.liters, 0);
+  let totalDistanceKm = 0;
+  const consumptions: number[] = [];
+  for (const f of monthFills) {
+    if (f.distanceSinceLastKm && f.distanceSinceLastKm > 0 && f.liters > 0) {
+      totalDistanceKm += f.distanceSinceLastKm;
+      consumptions.push((f.liters / f.distanceSinceLastKm) * 100);
+    }
+  }
+  return {
+    monthKey,
+    count: monthFills.length,
+    totalCost,
+    totalLiters,
+    avgPricePerLiter: totalLiters > 0 ? totalCost / totalLiters : 0,
+    avgConsumption:
+      consumptions.length > 0
+        ? consumptions.reduce((a, b) => a + b, 0) / consumptions.length
+        : null,
+    totalDistanceKm,
+  };
+}
+
+/**
+ * Autonomie restante estimée à partir des trajets depuis le dernier plein
+ * (pas un demi-réservoir théorique).
+ */
+export async function getSinceLastFillStats(vehicleId: number): Promise<SinceLastFillStats> {
+  const [vehicle, fillUps, trips] = await Promise.all([
+    getVehicleById(vehicleId),
+    getFillUps(vehicleId),
+    getTrips(vehicleId),
+  ]);
+  const empty: SinceLastFillStats = {
+    lastFill: null,
+    tripKm: 0,
+    tripCount: 0,
+    fuelUsedEst: 0,
+    fuelRemainingEst: 0,
+    rangeKm: 0,
+  };
+  if (!vehicle || !fillUps.length) return empty;
+
+  const lastFill = [...fillUps].sort((a, b) => b.date.localeCompare(a.date))[0];
+  const since = trips.filter(
+    (t) =>
+      !t.isActive &&
+      t.status !== 'rejected' &&
+      t.distanceKm > 0 &&
+      t.startTime >= lastFill.date
+  );
+  const tripKm = Math.round(since.reduce((s, t) => s + t.distanceKm, 0) * 10) / 10;
+  const conso =
+    vehicle.consumptionPer100 > 0 ? vehicle.consumptionPer100 : 7;
+  const fuelUsedEst = Math.round(estimateFuelUsed(tripKm, conso) * 100) / 100;
+  const startFuel = lastFill.isFull
+    ? vehicle.tankCapacity
+    : Math.min(vehicle.tankCapacity, lastFill.liters);
+  const fuelRemainingEst = Math.max(0, Math.round((startFuel - fuelUsedEst) * 100) / 100);
+  const rangeKm =
+    conso > 0 ? Math.round((fuelRemainingEst / conso) * 1000) / 10 : 0;
+
+  return {
+    lastFill,
+    tripKm,
+    tripCount: since.length,
+    fuelUsedEst,
+    fuelRemainingEst,
+    rangeKm,
   };
 }
 

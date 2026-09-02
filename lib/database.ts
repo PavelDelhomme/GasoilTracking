@@ -97,6 +97,9 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
       to_place_id INTEGER NOT NULL,
       distance_km REAL NOT NULL DEFAULT 0,
       times_per_week REAL NOT NULL DEFAULT 5,
+      work_days_per_week REAL NOT NULL DEFAULT 5,
+      is_on_vacation INTEGER NOT NULL DEFAULT 0,
+      vacation_until TEXT,
       is_active INTEGER NOT NULL DEFAULT 1,
       FOREIGN KEY (from_place_id) REFERENCES places(id) ON DELETE CASCADE,
       FOREIGN KEY (to_place_id) REFERENCES places(id) ON DELETE CASCADE
@@ -121,6 +124,9 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
   await alterSafe('ALTER TABLE trips ADD COLUMN fill_up_id INTEGER');
   await alterSafe('ALTER TABLE trips ADD COLUMN note TEXT');
   await alterSafe('ALTER TABLE trips ADD COLUMN is_paused INTEGER NOT NULL DEFAULT 0');
+  await alterSafe('ALTER TABLE recurring_routes ADD COLUMN work_days_per_week REAL NOT NULL DEFAULT 5');
+  await alterSafe('ALTER TABLE recurring_routes ADD COLUMN is_on_vacation INTEGER NOT NULL DEFAULT 0');
+  await alterSafe('ALTER TABLE recurring_routes ADD COLUMN vacation_until TEXT');
 }
 
 function mapVehicle(row: unknown): Vehicle {
@@ -566,6 +572,7 @@ function mapPlace(row: unknown): Place {
 
 function mapRoute(row: unknown): RecurringRoute {
   const r = row as Record<string, unknown>;
+  const times = (r.times_per_week as number) ?? 5;
   return {
     id: r.id as number,
     vehicleId: r.vehicle_id == null ? null : (r.vehicle_id as number),
@@ -573,7 +580,10 @@ function mapRoute(row: unknown): RecurringRoute {
     fromPlaceId: r.from_place_id as number,
     toPlaceId: r.to_place_id as number,
     distanceKm: r.distance_km as number,
-    timesPerWeek: r.times_per_week as number,
+    timesPerWeek: times,
+    workDaysPerWeek: (r.work_days_per_week as number) ?? times,
+    isOnVacation: Boolean(r.is_on_vacation),
+    vacationUntil: (r.vacation_until as string) || null,
     isActive: Boolean(r.is_active),
   };
 }
@@ -632,20 +642,64 @@ export async function createRecurringRoute(
   route: Omit<RecurringRoute, 'id'>
 ): Promise<number> {
   const database = await getDatabase();
+  const workDays = route.workDaysPerWeek ?? route.timesPerWeek ?? 5;
   const result = await database.runAsync(
-    `INSERT INTO recurring_routes (vehicle_id, name, from_place_id, to_place_id, distance_km, times_per_week, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO recurring_routes (vehicle_id, name, from_place_id, to_place_id, distance_km, times_per_week, work_days_per_week, is_on_vacation, vacation_until, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       route.vehicleId,
       route.name,
       route.fromPlaceId,
       route.toPlaceId,
       route.distanceKm,
-      route.timesPerWeek,
+      route.timesPerWeek ?? workDays,
+      workDays,
+      route.isOnVacation ? 1 : 0,
+      route.vacationUntil || null,
       route.isActive ? 1 : 0,
     ]
   );
   return Number(result.lastInsertRowId);
+}
+
+export async function updateRecurringRoute(
+  id: number,
+  patch: Partial<Omit<RecurringRoute, 'id'>>
+): Promise<void> {
+  const database = await getDatabase();
+  const fields: string[] = [];
+  const values: (string | number | null)[] = [];
+  if (patch.name !== undefined) {
+    fields.push('name = ?');
+    values.push(patch.name);
+  }
+  if (patch.distanceKm !== undefined) {
+    fields.push('distance_km = ?');
+    values.push(patch.distanceKm);
+  }
+  if (patch.timesPerWeek !== undefined) {
+    fields.push('times_per_week = ?');
+    values.push(patch.timesPerWeek);
+  }
+  if (patch.workDaysPerWeek !== undefined) {
+    fields.push('work_days_per_week = ?');
+    values.push(patch.workDaysPerWeek);
+  }
+  if (patch.isOnVacation !== undefined) {
+    fields.push('is_on_vacation = ?');
+    values.push(patch.isOnVacation ? 1 : 0);
+  }
+  if (patch.vacationUntil !== undefined) {
+    fields.push('vacation_until = ?');
+    values.push(patch.vacationUntil);
+  }
+  if (patch.isActive !== undefined) {
+    fields.push('is_active = ?');
+    values.push(patch.isActive ? 1 : 0);
+  }
+  if (!fields.length) return;
+  values.push(id);
+  await database.runAsync(`UPDATE recurring_routes SET ${fields.join(', ')} WHERE id = ?`, values);
 }
 
 export async function deleteRecurringRoute(id: number): Promise<void> {
@@ -792,8 +846,8 @@ export async function replaceAllData(data: {
 
       for (const r of data.recurringRoutes || []) {
         await database.runAsync(
-          `INSERT INTO recurring_routes (id, vehicle_id, name, from_place_id, to_place_id, distance_km, times_per_week, is_active)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO recurring_routes (id, vehicle_id, name, from_place_id, to_place_id, distance_km, times_per_week, work_days_per_week, is_on_vacation, vacation_until, is_active)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             r.id,
             r.vehicleId,
@@ -802,6 +856,9 @@ export async function replaceAllData(data: {
             r.toPlaceId,
             r.distanceKm,
             r.timesPerWeek,
+            r.workDaysPerWeek ?? r.timesPerWeek ?? 5,
+            r.isOnVacation ? 1 : 0,
+            r.vacationUntil || null,
             r.isActive ? 1 : 0,
           ]
         );
