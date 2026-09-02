@@ -268,9 +268,9 @@ export default function AddVehicleScreen() {
 
       <View style={styles.switchRow}>
         <View style={{ flex: 1, paddingRight: 12 }}>
-          <Text style={[styles.switchLabel, { color: colors.text }]}>Compteur kilométrique OK</Text>
+          <Text style={[styles.switchLabel, { color: colors.text }]}>Utiliser le compteur</Text>
           <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-            Désactive si le compteur est HS — les km viendront du GPS / saisie manuelle.
+            Sinon les kilomètres viennent du GPS ou d’une saisie manuelle.
           </Text>
         </View>
         <Switch

@@ -7,7 +7,7 @@ export type VehiclePreset = {
   consumption: number;
   fuel: FuelType;
   tank: number;
-  /** Si true : compteur souvent peu fiable → défaut hasOdometer=false (sans texte UI) */
+  /** Si true : défaut hasOdometer=false (sans message UI) */
   odometerUnreliable?: boolean;
 };
 
