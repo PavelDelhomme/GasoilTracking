@@ -1,0 +1,70 @@
+{
+  "expo": {
+    "name": "Gasoil Tracking",
+    "slug": "gasoil-tracking",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "gasoiltracking",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a1a2e"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.gasoiltracking.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Gasoil Tracking utilise votre position pour suivre vos trajets et calculer la consommation en temps réel.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Gasoil Tracking suit vos trajets en arrière-plan pendant la navigation pour estimer la consommation de carburant.",
+        "UIBackgroundModes": [
+          "location"
+        ]
+      },
+      "config": {
+        "googleMapsApiKey": "VOTRE_CLE_GOOGLE_MAPS_IOS"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1a1a2e"
+      },
+      "package": "com.gasoiltracking.app",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "VOTRE_CLE_GOOGLE_MAPS_ANDROID"
+        }
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Gasoil Tracking suit vos trajets en arrière-plan pour calculer la consommation.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      "expo-asset"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

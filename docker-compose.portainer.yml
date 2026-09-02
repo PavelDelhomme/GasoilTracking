@@ -1,0 +1,19 @@
+# Overlay Portainer / VPS : attache le conteneur au réseau « web » (Nginx Proxy Manager)
+# Usage :
+#   docker compose -f docker-compose.yml -f docker-compose.portainer.yml up -d
+#
+# Nginx Proxy Manager → Proxy Host :
+#   Domain     : gasoil-tracking.delhomme.ovh
+#   Forward to : gasoil-tracking-web:80
+#   SSL        : Let's Encrypt
+
+services:
+  web:
+    networks:
+      - gasoil-network
+      - web
+
+networks:
+  web:
+    external: true
+    name: web
