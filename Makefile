@@ -129,7 +129,13 @@ mobile-install-expo:
 mobile-start mobile-android:
 	@echo "${GREEN}📱 Lancement sur Samsung $(SAMSUNG_SERIAL)...${NC}"
 	@adb -s $(SAMSUNG_SERIAL) wait-for-device
-	@ANDROID_SERIAL=$(SAMSUNG_SERIAL) npx expo start --android --device
+	@echo "${YELLOW}Démarrage Metro puis ouverture Expo Go (évite le prompt version)...${NC}"
+	@CI=1 npx expo start --port 8081 & \
+	  sleep 8; \
+	  IP=$$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($$i=="src") print $$(i+1)}' | head -1); \
+	  echo "${GREEN}Ouverture exp://$${IP}:8081${NC}"; \
+	  adb -s $(SAMSUNG_SERIAL) shell am start -a android.intent.action.VIEW -d "exp://$${IP}:8081"; \
+	  wait
 
 mobile-tunnel:
 	@echo "${GREEN}🌐 Expo tunnel (pour Samsung hors LAN)...${NC}"
