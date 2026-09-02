@@ -11,7 +11,7 @@ import {
   setSession,
 } from '@/lib/api';
 import { applySnapshot, hasLocalUserData, normalizeSnapshot } from '@/lib/dataSnapshot';
-import { saveLocalBackup, syncFullBackup } from '@/lib/backup';
+import { saveLocalBackup, refreshFromCloud, syncPreferNewer } from '@/lib/backup';
 
 type User = { id: string; email: string; name: string };
 
@@ -27,6 +27,8 @@ type AuthContextType = {
   ) => Promise<{ ok: boolean; pending?: boolean; message?: string }>;
   logout: () => Promise<void>;
   syncNow: () => Promise<void>;
+  /** Remplace le local par les données cloud du compte */
+  refreshCloudNow: () => Promise<{ ok: boolean; reason: string; updatedAt?: string | null }>;
   applySession: (token: string, user: User, refreshToken?: string | null) => Promise<void>;
 };
 
@@ -48,7 +50,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const syncNow = useCallback(async () => {
     const token = await getToken();
     if (!token) return;
-    await syncFullBackup();
+    await syncPreferNewer();
+  }, []);
+
+  const refreshCloudNow = useCallback(async () => {
+    return refreshFromCloud();
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
@@ -63,7 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await applySnapshot(remoteSnap, 'replace');
         await saveLocalBackup(remoteSnap);
       } else {
-        await syncFullBackup();
+        await syncPreferNewer();
       }
     } catch {
       try {
@@ -102,7 +108,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, syncNow, applySession }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, register, logout, syncNow, refreshCloudNow, applySession }}
+    >
       {children}
     </AuthContext.Provider>
   );

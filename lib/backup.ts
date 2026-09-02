@@ -86,13 +86,11 @@ export async function recoverDataAfterUpdateIfNeeded(): Promise<'ok' | 'restored
 
   if (hasData) {
     if (pending) await clearUpdatePending();
-    // Compte connecté : refresh cloud sans écraser le local
+    // Compte connecté : privilégier le cloud s’il est plus récent (évite d’écraser une correction serveur)
     const token = await getToken();
     if (token) {
       try {
-        const snap = await collectSnapshot();
-        await pushSync(snap);
-        await saveLocalBackup(snap);
+        await syncPreferNewer();
       } catch {
         /* offline */
       }
@@ -134,4 +132,45 @@ export async function syncFullBackup(): Promise<boolean> {
   if (!token) return false;
   await pushSync(snap);
   return true;
+}
+
+/**
+ * Tire les données cloud du compte connecté et remplace le local.
+ * Utile après une correction côté serveur / autre appareil.
+ */
+export async function refreshFromCloud(): Promise<{
+  ok: boolean;
+  reason: 'no-auth' | 'empty' | 'applied';
+  updatedAt?: string | null;
+}> {
+  const token = await getToken();
+  if (!token) return { ok: false, reason: 'no-auth' };
+  const remote = await fetchSync();
+  const snap = normalizeSnapshot(remote?.data);
+  if (!snap) return { ok: false, reason: 'empty', updatedAt: remote?.updatedAt ?? null };
+  await applySnapshot(snap, 'replace');
+  await saveLocalBackup(snap);
+  return { ok: true, reason: 'applied', updatedAt: remote?.updatedAt ?? null };
+}
+
+/**
+ * Si le cloud est plus récent que le snapshot local, tire ; sinon pousse.
+ */
+export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'> {
+  const token = await getToken();
+  if (!token) return 'skipped';
+  const remote = await fetchSync();
+  const remoteSnap = normalizeSnapshot(remote?.data);
+  const local = await collectSnapshot();
+  const remoteAt = remote?.updatedAt ? Date.parse(remote.updatedAt) : 0;
+  const localAt = local.exportedAt ? Date.parse(local.exportedAt) : 0;
+
+  if (remoteSnap && remoteAt > localAt + 2000) {
+    await applySnapshot(remoteSnap, 'replace');
+    await saveLocalBackup(remoteSnap);
+    return 'pulled';
+  }
+  await pushSync(local);
+  await saveLocalBackup(local);
+  return 'pushed';
 }

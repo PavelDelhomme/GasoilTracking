@@ -24,7 +24,7 @@ import type { ConsumptionStats, SinceLastFillStats } from '@/types';
 
 export default function HomeScreen() {
   const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles } = useApp();
-  const { user, logout, syncNow } = useAuth();
+  const { user, logout, syncNow, refreshCloudNow } = useAuth();
   const { colors } = useTheme();
   const { locale } = useLocale();
   const [stats, setStats] = useState<ConsumptionStats | null>(null);
@@ -32,6 +32,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [seedingToday, setSeedingToday] = useState(false);
+  const [refreshingCloud, setRefreshingCloud] = useState(false);
 
   const reloadStats = async (vehicleId: number) => {
     const [s, since] = await Promise.all([
@@ -127,7 +128,9 @@ export default function HomeScreen() {
               onPress={async () => {
                 try {
                   await syncNow();
-                  notify('Synchronisé', 'Sauvegarde locale + cloud à jour.');
+                  if (activeVehicle) await reloadStats(activeVehicle.id);
+                  await refresh();
+                  notify('Synchronisé', 'Local ↔ cloud (le plus récent gagne).');
                 } catch (e) {
                   notify('Sync', e instanceof Error ? e.message : 'Échec');
                 }
@@ -138,6 +141,38 @@ export default function HomeScreen() {
           </View>
         ) : (
           <Button title="Connexion / Inscription" onPress={() => router.push('/auth' as never)} />
+        )}
+        {user && (
+          <Button
+            title="Actualiser depuis le cloud"
+            variant="outline"
+            loading={refreshingCloud}
+            onPress={async () => {
+              setRefreshingCloud(true);
+              try {
+                const res = await refreshCloudNow();
+                await refresh();
+                if (activeVehicle) await reloadStats(activeVehicle.id);
+                if (res.ok) {
+                  notify(
+                    'Données cloud appliquées',
+                    res.updatedAt
+                      ? `Compte mis à jour (${new Date(res.updatedAt).toLocaleString('fr-FR')}).`
+                      : 'Snapshot cloud chargé sur cet appareil.'
+                  );
+                } else if (res.reason === 'empty') {
+                  notify('Cloud', 'Aucune donnée cloud pour ce compte.');
+                } else {
+                  notify('Cloud', 'Connectez-vous pour actualiser.');
+                }
+              } catch (e) {
+                notify('Cloud', e instanceof Error ? e.message : 'Échec');
+              } finally {
+                setRefreshingCloud(false);
+              }
+            }}
+            style={{ marginTop: 10 }}
+          />
         )}
         {user && isManagerEmail(user.email) && (
           <Button
