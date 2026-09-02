@@ -1,38 +1,46 @@
-# Production live
+# Production
 
-**https://gasoil-tracking.delhomme.ovh** — déployé depuis Git sur le VPS Contabo.
+- Site : https://gasoil-tracking.delhomme.ovh  
+- Download APK : https://gasoil-tracking.delhomme.ovh/download  
+- API version : https://gasoil-tracking.delhomme.ovh/api/version  
+- Branche Git : **prod**  
+- Stack Portainer : `gasoil-tracking` (Git → `docker-compose.yml` → `refs/heads/prod`)
 
-| | |
-|--|--|
-| Conteneur | `gasoil-tracking-web` (réseaux `gasoil-network` + `web`) |
-| Clone Git VPS | `/home/pavel/apps/gasoil-tracking` |
-| Compose | `docker-compose.portainer.yml` |
-| NPM | Proxy Host → `gasoil-tracking-web:80` + Let's Encrypt |
-| DNS | `gasoil-tracking.delhomme.ovh` → `95.111.227.204` |
-
-## Mises à jour (Makefile)
+## Mise à jour
 
 ```bash
-# Après commit local
-make update          # push GitHub + git pull VPS + rebuild
-# ou séparément :
-make release         # push seulement
-make deploy          # rebuild VPS depuis Git
-make status-prod     # curl /health
+# après commit sur prod
+make update    # push + redeploy Portainer Git
+# ou
+make release && make deploy
 ```
 
-`scripts/deploy-vps.sh` : SSH → `git fetch/reset origin/main` → `docker compose -f docker-compose.portainer.yml up -d --build`
+`scripts/deploy-portainer-git.sh` utilise `PORTAINER_ACCESS_TOKEN` du `.env`.
 
-## Stack Portainer UI (optionnel)
+## Portainer upgrade (déjà fait 2.19.5 → 2.45.0)
 
-Le conteneur tourne déjà (compose projet `gasoil-tracking`). Pour le gérer aussi dans Portainer en mode **Repository** :
+Backup : `/home/pavel/backups/portainer_data_*.tar.gz`  
+Ancien conteneur : `portainer-ce-2.19.5-backup` (arrêtable/supprimable après validation)
 
-1. https://portainer.delhomme.ovh → login
-2. Stacks → Add stack → Repository  
-   - Name: `gasoil-tracking`  
-   - URL: `https://github.com/PavelDelhomme/GasoilTracking.git`  
-   - Compose: `docker-compose.portainer.yml`  
-   - Auth: PAT GitHub  
-3. Avant : `make` n’utilise plus le clone local, ou arrête le compose SSH pour éviter le conflit de nom de conteneur.
+Rollback si besoin :
+```bash
+ssh pavel-server
+docker stop portainer && docker rename portainer portainer-bad
+docker rename portainer-ce-2.19.5-backup portainer && docker start portainer
+# ou restaurer le tar dans le volume portainer_data
+```
 
-Sinon, **`make update` suffit** pour les mises à jour en production.
+## Comptes & sync
+
+- `POST /api/auth/register` / `login`
+- `GET|PUT /api/sync` (Bearer JWT)
+- App mobile : écran Compte + sync + check version au démarrage
+
+## APK prod
+
+Build EAS / local puis upload admin :
+```bash
+curl -X POST https://gasoil-tracking.delhomme.ovh/api/admin/releases \
+  -H "Authorization: Bearer <token-admin>" \
+  -F version=1.0.1 -F apk=@gasoil.apk -F releaseNotes="Correctifs"
+```
