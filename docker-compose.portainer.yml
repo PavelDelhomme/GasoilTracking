@@ -1,19 +1,46 @@
-# Overlay Portainer / VPS : attache le conteneur au réseau « web » (Nginx Proxy Manager)
-# Usage :
-#   docker compose -f docker-compose.yml -f docker-compose.portainer.yml up -d
+# =============================================================================
+# Gasoil Tracking — COMPOSE UNIQUE pour Portainer (déploiement Git)
+# =============================================================================
+# Portainer → Stacks → Add stack → Repository
+#   Name:            gasoil-tracking
+#   Repository URL:  https://github.com/PavelDelhomme/GasoilTracking.git
+#   Reference:       refs/heads/main
+#   Compose path:    docker-compose.portainer.yml
+#   Auto-update:     optionnel (webhook / Pull and redeploy)
 #
-# Nginx Proxy Manager → Proxy Host :
-#   Domain     : gasoil-tracking.delhomme.ovh
-#   Forward to : gasoil-tracking-web:80
-#   SSL        : Let's Encrypt
+# Prérequis VPS : réseau Docker externe « web » (Nginx Proxy Manager y est déjà)
+# Domaine NPM   : gasoil-tracking.delhomme.ovh → gasoil-tracking-web:80
+# =============================================================================
 
 services:
   web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gasoil-tracking-web:latest
+    container_name: gasoil-tracking-web
+    restart: unless-stopped
+    # Pas de ports hôte : NPM joint le conteneur via le réseau « web »
+    expose:
+      - "80"
     networks:
       - gasoil-network
       - web
+    labels:
+      - "com.gasoiltracking.project=gasoil-tracking"
+      - "com.gasoiltracking.service=web"
+      - "com.gasoiltracking.deploy=portainer-git"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
 networks:
+  gasoil-network:
+    name: gasoil-network
+    driver: bridge
   web:
     external: true
     name: web

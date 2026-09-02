@@ -1,0 +1,23 @@
+name: Deploy Portainer
+
+# Rebuild la stack Portainer à chaque push sur main (nécessite le secret PORTAINER_WEBHOOK_URL)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  trigger-portainer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Portainer webhook
+        env:
+          WEBHOOK_URL: ${{ secrets.PORTAINER_WEBHOOK_URL }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "Secret PORTAINER_WEBHOOK_URL absent — skip (configure le secret GitHub ou utilise make deploy)"
+            exit 0
+          fi
+          curl -fsS -X POST "$WEBHOOK_URL"
+          echo "Webhook Portainer déclenché"
