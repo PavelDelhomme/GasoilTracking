@@ -10,7 +10,9 @@ export default function AuthScreen() {
   const { login, register } = useAuth();
   const { colors } = useTheme();
   const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(
+    process.env.EXPO_PUBLIC_PERSONAL_MAIL || ''
+  );
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [name, setName] = useState('');
@@ -94,7 +96,7 @@ export default function AuthScreen() {
           label="Mot de passe"
           value={password}
           onChangeText={setPassword}
-          secureTextEntry
+          passwordToggle
           placeholder="••••••••"
         />
         {mode === 'register' && (
@@ -102,7 +104,7 @@ export default function AuthScreen() {
             label="Confirmer le mot de passe"
             value={passwordConfirm}
             onChangeText={setPasswordConfirm}
-            secureTextEntry
+            passwordToggle
             placeholder="••••••••"
           />
         )}

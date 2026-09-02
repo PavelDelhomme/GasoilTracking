@@ -39,6 +39,8 @@ function RootNavigation() {
         <Stack.Screen name="auth" options={{ title: 'Compte', presentation: 'modal' }} />
         <Stack.Screen name="verify" options={{ title: 'Vérification email', headerShown: true }} />
         <Stack.Screen name="admin" options={{ title: 'Administration' }} />
+        <Stack.Screen name="trip/add" options={{ title: 'Trajet manuel', presentation: 'modal' }} />
+        <Stack.Screen name="trip/import" options={{ title: 'Import Google Maps', presentation: 'modal' }} />
       </Stack>
     </>
   );

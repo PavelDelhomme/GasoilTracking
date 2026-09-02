@@ -9,10 +9,11 @@ interface VehicleCardProps {
   vehicle: Vehicle;
   isActive?: boolean;
   onPress?: () => void;
+  onLongPress?: () => void;
   onSelect?: () => void;
 }
 
-export function VehicleCard({ vehicle, isActive, onPress, onSelect }: VehicleCardProps) {
+export function VehicleCard({ vehicle, isActive, onPress, onLongPress, onSelect }: VehicleCardProps) {
   const { colors } = useTheme();
 
   return (
@@ -26,6 +27,7 @@ export function VehicleCard({ vehicle, isActive, onPress, onSelect }: VehicleCar
         },
       ]}
       onPress={onPress}
+      onLongPress={onLongPress}
       activeOpacity={0.7}
     >
       <View style={styles.header}>

@@ -1,12 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  Alert,
   Linking,
   ScrollView,
+  TouchableOpacity,
 } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
@@ -15,11 +16,14 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import TripMap from '@/components/TripMap';
 import type { TripMapRef } from '@/components/TripMap.types';
+import type { Trip } from '@/types';
 import {
   createTrip,
   stopActiveTrips,
   updateTrip,
   addTrackedKm,
+  getTrips,
+  getPendingTrips,
 } from '@/lib/database';
 import {
   startBackgroundTracking,
@@ -34,6 +38,7 @@ import {
   formatDistance,
   parseRoutePoints,
 } from '@/lib/calculations';
+import { notify, confirm } from '@/lib/notify';
 
 export default function TripScreen() {
   const { activeVehicle, activeTrip, refresh } = useApp();
@@ -41,12 +46,34 @@ export default function TripScreen() {
   const mapRef = useRef<TripMapRef>(null);
   const [destination, setDestination] = useState('');
   const [isStarting, setIsStarting] = useState(false);
+  const [history, setHistory] = useState<Trip[]>([]);
+  const [pending, setPending] = useState<Trip[]>([]);
   const [currentRegion, setCurrentRegion] = useState({
     latitude: 48.8566,
     longitude: 2.3522,
     latitudeDelta: 0.05,
     longitudeDelta: 0.05,
   });
+
+  const loadLists = useCallback(async () => {
+    if (!activeVehicle) {
+      setHistory([]);
+      setPending([]);
+      return;
+    }
+    const [trips, pend] = await Promise.all([
+      getTrips(activeVehicle.id),
+      getPendingTrips(activeVehicle.id),
+    ]);
+    setHistory(trips.filter((t) => !t.isActive).slice(0, 30));
+    setPending(pend);
+  }, [activeVehicle]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadLists();
+    }, [loadLists])
+  );
 
   useEffect(() => {
     getCurrentLocation().then((loc) => {
@@ -75,7 +102,7 @@ export default function TripScreen() {
 
   const handleStartTrip = async () => {
     if (!activeVehicle) {
-      Alert.alert('Erreur', 'Sélectionnez un véhicule avant de démarrer un trajet.');
+      notify('Erreur', 'Sélectionnez un véhicule avant de démarrer un trajet.');
       return;
     }
 
@@ -97,19 +124,23 @@ export default function TripScreen() {
         routePoints: JSON.stringify(startPoint),
         destinationName: destination || undefined,
         isActive: true,
+        status: 'confirmed',
+        source: 'gps',
+        fillUpId: null,
       });
 
       const trackingStarted = await startBackgroundTracking();
       if (!trackingStarted) {
-        Alert.alert(
+        notify(
           'Permission requise',
           'Autorisez la localisation en arrière-plan pour suivre votre trajet pendant la navigation.'
         );
       }
 
       await refresh();
-    } catch (error) {
-      Alert.alert('Erreur', 'Impossible de démarrer le trajet.');
+      await loadLists();
+    } catch {
+      notify('Erreur', 'Impossible de démarrer le trajet.');
     } finally {
       setIsStarting(false);
     }
@@ -118,23 +149,19 @@ export default function TripScreen() {
   const handleStopTrip = async () => {
     if (!activeTrip) return;
 
-    Alert.alert('Terminer le trajet', 'Voulez-vous arrêter le suivi ?', [
-      { text: 'Continuer', style: 'cancel' },
-      {
-        text: 'Terminer',
-        onPress: async () => {
-          await stopBackgroundTracking();
-          await updateTrip(activeTrip.id, {
-            isActive: false,
-            endTime: new Date().toISOString(),
-          });
-          if (activeTrip.distanceKm > 0) {
-            await addTrackedKm(activeTrip.vehicleId, activeTrip.distanceKm);
-          }
-          await refresh();
-        },
-      },
-    ]);
+    confirm('Terminer le trajet', 'Arrêter le suivi GPS ?', async () => {
+      await stopBackgroundTracking();
+      await updateTrip(activeTrip.id, {
+        isActive: false,
+        endTime: new Date().toISOString(),
+        status: 'confirmed',
+      });
+      if (activeTrip.distanceKm > 0) {
+        await addTrackedKm(activeTrip.vehicleId, activeTrip.distanceKm);
+      }
+      await refresh();
+      await loadLists();
+    }, 'Terminer');
   };
 
   const handleOpenGoogleMaps = async () => {
@@ -152,6 +179,15 @@ export default function TripScreen() {
         await Linking.openURL(url);
       }
     }
+  };
+
+  const validateTrip = async (trip: Trip, status: 'confirmed' | 'rejected') => {
+    await updateTrip(trip.id, { status });
+    if (status === 'confirmed' && trip.distanceKm > 0) {
+      await addTrackedKm(trip.vehicleId, trip.distanceKm);
+    }
+    await refresh();
+    await loadLists();
   };
 
   const tripStats =
@@ -173,10 +209,25 @@ export default function TripScreen() {
       </View>
 
       <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
+        <View style={styles.toolbar}>
+          <Button
+            title="Saisie manuelle"
+            variant="outline"
+            onPress={() => router.push('/trip/add' as never)}
+            style={{ flex: 1 }}
+          />
+          <Button
+            title="Import Maps"
+            variant="secondary"
+            onPress={() => router.push('/trip/import' as never)}
+            style={{ flex: 1 }}
+          />
+        </View>
+
         {!activeVehicle ? (
           <Card>
             <Text style={[styles.warning, { color: colors.warning }]}>
-              Sélectionnez un véhicule dans l'onglet Véhicules pour démarrer un trajet.
+              Sélectionnez un véhicule dans l&apos;onglet Véhicules pour démarrer un trajet.
             </Text>
           </Card>
         ) : activeTrip ? (
@@ -188,37 +239,28 @@ export default function TripScreen() {
                   Trajet en cours
                 </Text>
               </View>
-              {activeTrip.destinationName && (
+              {(activeTrip.originName || activeTrip.destinationName) && (
                 <Text style={[styles.destination, { color: colors.text }]}>
-                  → {activeTrip.destinationName}
+                  {activeTrip.originName ? `${activeTrip.originName} → ` : '→ '}
+                  {activeTrip.destinationName || '…'}
                 </Text>
               )}
             </Card>
 
             <View style={styles.statsRow}>
-              <StatCard
-                label="Distance"
-                value={formatDistance(activeTrip.distanceKm)}
-              />
+              <StatCard label="Distance" value={formatDistance(activeTrip.distanceKm)} />
               <StatCard
                 label="Carburant est."
                 value={`${activeTrip.estimatedFuelUsed.toFixed(2)} L`}
               />
             </View>
             <View style={styles.statsRow}>
-              <StatCard
-                label="Coût est."
-                value={formatEuro(activeTrip.estimatedCost)}
-              />
+              <StatCard label="Coût est." value={formatEuro(activeTrip.estimatedCost)} />
               <StatCard
                 label="Durée"
                 value={`${Math.floor(tripStats?.durationMinutes ?? 0)} min`}
               />
             </View>
-
-            <Text style={[styles.hint, { color: colors.textSecondary }]}>
-              Le suivi continue en arrière-plan même si vous ouvrez Google Maps pour la navigation.
-            </Text>
 
             <Button
               title="Ouvrir Google Maps"
@@ -232,7 +274,7 @@ export default function TripScreen() {
           <>
             <Card>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                Démarrer un trajet
+                Démarrer un trajet GPS
               </Text>
               <Text style={[styles.description, { color: colors.textSecondary }]}>
                 Véhicule : {activeVehicle.name} ({activeVehicle.consumptionPer100} L/100km)
@@ -256,12 +298,63 @@ export default function TripScreen() {
               variant="outline"
               onPress={handleOpenGoogleMaps}
             />
-
-            <Text style={[styles.hint, { color: colors.textSecondary }]}>
-              Lancez d'abord le suivi GPS, puis ouvrez Google Maps. L'application calculera
-              la consommation en temps réel pendant votre trajet, même en arrière-plan.
-            </Text>
           </>
+        )}
+
+        {pending.length > 0 && (
+          <View style={{ marginTop: 24 }}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+              À valider ({pending.length})
+            </Text>
+            <Text style={[styles.hint, { color: colors.textSecondary, marginTop: 0 }]}>
+              Trajets importés / détectés — validez les trajets voiture, ignorez les autres.
+            </Text>
+            {pending.map((t) => (
+              <Card key={t.id} style={{ marginTop: 10 }}>
+                <Text style={{ color: colors.text, fontWeight: '700' }}>
+                  {t.originName || '?'} → {t.destinationName || '?'}
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
+                  {new Date(t.startTime).toLocaleString('fr-FR')} · {formatDistance(t.distanceKm)} ·{' '}
+                  {t.source}
+                </Text>
+                {!!t.note && (
+                  <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{t.note}</Text>
+                )}
+                <View style={styles.pendingActions}>
+                  <TouchableOpacity onPress={() => validateTrip(t, 'confirmed')}>
+                    <Text style={{ color: colors.success, fontWeight: '700' }}>Valider</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => validateTrip(t, 'rejected')}>
+                    <Text style={{ color: colors.danger, fontWeight: '700' }}>Ignorer</Text>
+                  </TouchableOpacity>
+                </View>
+              </Card>
+            ))}
+          </View>
+        )}
+
+        {history.length > 0 && (
+          <View style={{ marginTop: 24 }}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Historique</Text>
+            {history.map((t) => (
+              <View
+                key={t.id}
+                style={[styles.histRow, { borderBottomColor: colors.border }]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1}>
+                    {t.originName || 'Départ'} → {t.destinationName || 'Arrivée'}
+                  </Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                    {new Date(t.startTime).toLocaleDateString('fr-FR')} ·{' '}
+                    {formatDistance(t.distanceKm)} · {formatEuro(t.estimatedCost)}
+                    {t.status === 'pending' ? ' · en attente' : ''}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
         )}
       </ScrollView>
     </View>
@@ -270,9 +363,10 @@ export default function TripScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  map: { height: '45%' },
+  map: { height: '38%' },
   panel: { flex: 1 },
-  panelContent: { padding: 16, paddingBottom: 32 },
+  panelContent: { padding: 16, paddingBottom: 40 },
+  toolbar: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   sectionTitle: { fontSize: 18, fontWeight: '700', marginBottom: 8 },
   description: { fontSize: 14, marginBottom: 16 },
   statsRow: { flexDirection: 'row', gap: 12, marginBottom: 12 },
@@ -280,6 +374,11 @@ const styles = StyleSheet.create({
   tripActiveHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   tripActiveTitle: { fontSize: 16, fontWeight: '700' },
   destination: { fontSize: 15, marginTop: 4 },
-  hint: { fontSize: 13, textAlign: 'center', marginTop: 16, lineHeight: 20 },
+  hint: { fontSize: 13, textAlign: 'left', marginTop: 8, lineHeight: 18, marginBottom: 4 },
   warning: { fontSize: 15, textAlign: 'center' },
+  pendingActions: { flexDirection: 'row', gap: 24, marginTop: 10 },
+  histRow: {
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
 });

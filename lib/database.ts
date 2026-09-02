@@ -43,6 +43,7 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
       distance_since_last_km REAL,
       is_full INTEGER NOT NULL DEFAULT 1,
       note TEXT,
+      trip_id INTEGER,
       FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
     );
 
@@ -68,8 +69,13 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
       estimated_fuel_used REAL NOT NULL DEFAULT 0,
       estimated_cost REAL NOT NULL DEFAULT 0,
       route_points TEXT NOT NULL DEFAULT '[]',
+      origin_name TEXT,
       destination_name TEXT,
       is_active INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'confirmed',
+      source TEXT NOT NULL DEFAULT 'gps',
+      fill_up_id INTEGER,
+      note TEXT,
       FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
     );
   `);
@@ -85,6 +91,12 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
   await alterSafe('ALTER TABLE vehicles ADD COLUMN has_odometer INTEGER NOT NULL DEFAULT 1');
   await alterSafe('ALTER TABLE vehicles ADD COLUMN tracked_km REAL NOT NULL DEFAULT 0');
   await alterSafe('ALTER TABLE fill_ups ADD COLUMN distance_since_last_km REAL');
+  await alterSafe('ALTER TABLE fill_ups ADD COLUMN trip_id INTEGER');
+  await alterSafe('ALTER TABLE trips ADD COLUMN origin_name TEXT');
+  await alterSafe("ALTER TABLE trips ADD COLUMN status TEXT NOT NULL DEFAULT 'confirmed'");
+  await alterSafe("ALTER TABLE trips ADD COLUMN source TEXT NOT NULL DEFAULT 'gps'");
+  await alterSafe('ALTER TABLE trips ADD COLUMN fill_up_id INTEGER');
+  await alterSafe('ALTER TABLE trips ADD COLUMN note TEXT');
 }
 
 function mapVehicle(row: unknown): Vehicle {
@@ -123,6 +135,7 @@ function mapFillUp(row: unknown): FillUp {
         : (r.distance_since_last_km as number),
     isFull: Boolean(r.is_full),
     note: r.note as string | undefined,
+    tripId: r.trip_id === null || r.trip_id === undefined ? null : (r.trip_id as number),
   };
 }
 
@@ -152,8 +165,13 @@ function mapTrip(row: unknown): Trip {
     estimatedFuelUsed: r.estimated_fuel_used as number,
     estimatedCost: r.estimated_cost as number,
     routePoints: r.route_points as string,
+    originName: (r.origin_name as string) || undefined,
     destinationName: r.destination_name as string | undefined,
     isActive: Boolean(r.is_active),
+    status: ((r.status as string) || 'confirmed') as Trip['status'],
+    source: ((r.source as string) || 'gps') as Trip['source'],
+    fillUpId: r.fill_up_id === null || r.fill_up_id === undefined ? null : (r.fill_up_id as number),
+    note: (r.note as string) || undefined,
   };
 }
 
@@ -241,8 +259,8 @@ export async function addTrackedKm(vehicleId: number, km: number): Promise<void>
 export async function createFillUp(fillUp: Omit<FillUp, 'id'>): Promise<number> {
   const database = await getDatabase();
   const result = await database.runAsync(
-    `INSERT INTO fill_ups (vehicle_id, date, liters, price_per_liter, total_cost, odometer, distance_since_last_km, is_full, note)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO fill_ups (vehicle_id, date, liters, price_per_liter, total_cost, odometer, distance_since_last_km, is_full, note, trip_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       fillUp.vehicleId,
       fillUp.date,
@@ -253,12 +271,19 @@ export async function createFillUp(fillUp: Omit<FillUp, 'id'>): Promise<number> 
       fillUp.distanceSinceLastKm,
       fillUp.isFull ? 1 : 0,
       fillUp.note ?? null,
+      fillUp.tripId ?? null,
     ]
   );
   if (fillUp.odometer != null) {
     await database.runAsync('UPDATE vehicles SET current_odometer = ? WHERE id = ?', [
       fillUp.odometer,
       fillUp.vehicleId,
+    ]);
+  }
+  if (fillUp.tripId) {
+    await database.runAsync('UPDATE trips SET fill_up_id = ? WHERE id = ?', [
+      result.lastInsertRowId,
+      fillUp.tripId,
     ]);
   }
   return result.lastInsertRowId;
@@ -339,16 +364,39 @@ export async function deleteBudget(id: number): Promise<void> {
 
 // --- Trips ---
 
-export async function getTrips(vehicleId?: number): Promise<Trip[]> {
+export async function getTrips(vehicleId?: number, opts?: { includeRejected?: boolean }): Promise<Trip[]> {
+  const database = await getDatabase();
+  const includeRejected = opts?.includeRejected === true;
+  if (vehicleId) {
+    const rows = includeRejected
+      ? await database.getAllAsync(
+          'SELECT * FROM trips WHERE vehicle_id = ? ORDER BY start_time DESC',
+          [vehicleId]
+        )
+      : await database.getAllAsync(
+          "SELECT * FROM trips WHERE vehicle_id = ? AND status != 'rejected' ORDER BY start_time DESC",
+          [vehicleId]
+        );
+    return rows.map(mapTrip);
+  }
+  const rows = includeRejected
+    ? await database.getAllAsync('SELECT * FROM trips ORDER BY start_time DESC')
+    : await database.getAllAsync("SELECT * FROM trips WHERE status != 'rejected' ORDER BY start_time DESC");
+  return rows.map(mapTrip);
+}
+
+export async function getPendingTrips(vehicleId?: number): Promise<Trip[]> {
   const database = await getDatabase();
   if (vehicleId) {
     const rows = await database.getAllAsync(
-      'SELECT * FROM trips WHERE vehicle_id = ? ORDER BY start_time DESC',
+      "SELECT * FROM trips WHERE vehicle_id = ? AND status = 'pending' ORDER BY start_time DESC",
       [vehicleId]
     );
     return rows.map(mapTrip);
   }
-  const rows = await database.getAllAsync('SELECT * FROM trips ORDER BY start_time DESC');
+  const rows = await database.getAllAsync(
+    "SELECT * FROM trips WHERE status = 'pending' ORDER BY start_time DESC"
+  );
   return rows.map(mapTrip);
 }
 
@@ -361,8 +409,8 @@ export async function getActiveTrip(): Promise<Trip | null> {
 export async function createTrip(trip: Omit<Trip, 'id'>): Promise<number> {
   const database = await getDatabase();
   const result = await database.runAsync(
-    `INSERT INTO trips (vehicle_id, start_time, end_time, distance_km, estimated_fuel_used, estimated_cost, route_points, destination_name, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO trips (vehicle_id, start_time, end_time, distance_km, estimated_fuel_used, estimated_cost, route_points, origin_name, destination_name, is_active, status, source, fill_up_id, note)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       trip.vehicleId,
       trip.startTime,
@@ -371,8 +419,13 @@ export async function createTrip(trip: Omit<Trip, 'id'>): Promise<number> {
       trip.estimatedFuelUsed,
       trip.estimatedCost,
       trip.routePoints,
+      trip.originName ?? null,
       trip.destinationName ?? null,
       trip.isActive ? 1 : 0,
+      trip.status || 'confirmed',
+      trip.source || 'gps',
+      trip.fillUpId ?? null,
+      trip.note ?? null,
     ]
   );
   return result.lastInsertRowId;
@@ -388,11 +441,22 @@ export async function updateTrip(id: number, trip: Partial<Trip>): Promise<void>
   if (trip.estimatedFuelUsed !== undefined) { fields.push('estimated_fuel_used = ?'); values.push(trip.estimatedFuelUsed); }
   if (trip.estimatedCost !== undefined) { fields.push('estimated_cost = ?'); values.push(trip.estimatedCost); }
   if (trip.routePoints !== undefined) { fields.push('route_points = ?'); values.push(trip.routePoints); }
+  if (trip.originName !== undefined) { fields.push('origin_name = ?'); values.push(trip.originName); }
+  if (trip.destinationName !== undefined) { fields.push('destination_name = ?'); values.push(trip.destinationName); }
   if (trip.isActive !== undefined) { fields.push('is_active = ?'); values.push(trip.isActive ? 1 : 0); }
+  if (trip.status !== undefined) { fields.push('status = ?'); values.push(trip.status); }
+  if (trip.source !== undefined) { fields.push('source = ?'); values.push(trip.source); }
+  if (trip.fillUpId !== undefined) { fields.push('fill_up_id = ?'); values.push(trip.fillUpId); }
+  if (trip.note !== undefined) { fields.push('note = ?'); values.push(trip.note); }
 
   if (fields.length === 0) return;
   values.push(id);
   await database.runAsync(`UPDATE trips SET ${fields.join(', ')} WHERE id = ?`, values);
+}
+
+export async function deleteTrip(id: number): Promise<void> {
+  const database = await getDatabase();
+  await database.runAsync('DELETE FROM trips WHERE id = ?', [id]);
 }
 
 export async function stopActiveTrips(): Promise<void> {

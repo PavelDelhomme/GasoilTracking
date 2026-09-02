@@ -14,14 +14,17 @@ import {
   getConsumptionStats,
   estimateRange,
 } from '@/lib/calculations';
+import { seedDemoData } from '@/lib/seedDemo';
+import { notify } from '@/lib/notify';
 import type { ConsumptionStats } from '@/types';
 
 export default function HomeScreen() {
-  const { activeVehicle, activeTrip, budgetStatuses, refresh } = useApp();
+  const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles } = useApp();
   const { user, logout, syncNow } = useAuth();
   const { colors } = useTheme();
   const [stats, setStats] = useState<ConsumptionStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [seeding, setSeeding] = useState(false);
 
   useEffect(() => {
     if (activeVehicle) {
@@ -42,6 +45,22 @@ export default function HomeScreen() {
       setStats(s);
     }
     setRefreshing(false);
+  };
+
+  const loadDemo = async () => {
+    setSeeding(true);
+    try {
+      const res = await seedDemoData();
+      await refresh();
+      notify(
+        'Données démo chargées',
+        `${res.trips} trajets + pleins + budget sur le véhicule #${res.vehicleId}.`
+      );
+    } catch (e) {
+      notify('Démo', e instanceof Error ? e.message : 'Échec');
+    } finally {
+      setSeeding(false);
+    }
   };
 
   const mainBudget = budgetStatuses[0];
@@ -92,6 +111,15 @@ export default function HomeScreen() {
             onPress={() => router.push('/vehicle/add')}
             style={{ marginTop: 16 }}
           />
+          {vehicles.length === 0 && (
+            <Button
+              title="Charger un exemple (trajets + pleins)"
+              variant="outline"
+              loading={seeding}
+              onPress={loadDemo}
+              style={{ marginTop: 10 }}
+            />
+          )}
         </Card>
       ) : (
         <>

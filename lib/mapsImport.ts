@@ -1,0 +1,206 @@
+import type { TripSource, TripStatus } from '@/types';
+
+export type ImportedTripDraft = {
+  originName: string;
+  destinationName: string;
+  startTime: string;
+  endTime: string | null;
+  distanceKm: number;
+  activityType: 'driving' | 'unknown' | 'other';
+  source: TripSource;
+  status: TripStatus;
+  note?: string;
+};
+
+/**
+ * Parse une URL Google Maps Directions :
+ * https://www.google.com/maps/dir/Origin/Destination/...
+ * ou /dir/?api=1&origin=...&destination=...
+ */
+export function parseGoogleMapsUrl(raw: string): ImportedTripDraft | null {
+  const text = raw.trim();
+  if (!text) return null;
+
+  try {
+    // Format /maps/dir/A/B/
+    const dirMatch = text.match(/\/maps\/dir\/([^/?#]+)\/([^/?#]+)/i);
+    if (dirMatch) {
+      const originName = decodeURIComponent(dirMatch[1].replace(/\+/g, ' '));
+      const destinationName = decodeURIComponent(dirMatch[2].replace(/\+/g, ' '));
+      const now = new Date();
+      return {
+        originName,
+        destinationName,
+        startTime: new Date(now.getTime() - 45 * 60_000).toISOString(),
+        endTime: now.toISOString(),
+        distanceKm: 0,
+        activityType: 'driving',
+        source: 'maps_import',
+        status: 'pending',
+        note: 'Import URL Google Maps — distance à confirmer',
+      };
+    }
+
+    const url = new URL(text.startsWith('http') ? text : `https://${text}`);
+    const origin =
+      url.searchParams.get('origin') ||
+      url.searchParams.get('saddr') ||
+      '';
+    const destination =
+      url.searchParams.get('destination') ||
+      url.searchParams.get('daddr') ||
+      '';
+    if (origin && destination) {
+      const now = new Date();
+      return {
+        originName: origin,
+        destinationName: destination,
+        startTime: new Date(now.getTime() - 45 * 60_000).toISOString(),
+        endTime: now.toISOString(),
+        distanceKm: Number(url.searchParams.get('distanceKm') || 0),
+        activityType: 'driving',
+        source: 'maps_import',
+        status: 'pending',
+        note: 'Import URL Google Maps',
+      };
+    }
+  } catch {
+    /* fallthrough */
+  }
+
+  // Texte libre "A → B" ou "A -> B"
+  const arrow = text.split(/\s*(?:→|->|=>)\s*/);
+  if (arrow.length === 2 && arrow[0] && arrow[1]) {
+    const now = new Date();
+    return {
+      originName: arrow[0].trim(),
+      destinationName: arrow[1].trim(),
+      startTime: new Date(now.getTime() - 30 * 60_000).toISOString(),
+      endTime: now.toISOString(),
+      distanceKm: 0,
+      activityType: 'driving',
+      source: 'manual',
+      status: 'pending',
+    };
+  }
+
+  return null;
+}
+
+type TimelineActivity = {
+  activityType?: string;
+  probability?: number;
+};
+
+type TimelineSegment = {
+  activitySegment?: {
+    startLocation?: { latitudeE7?: number; longitudeE7?: number; name?: string; address?: string };
+    endLocation?: { latitudeE7?: number; longitudeE7?: number; name?: string; address?: string };
+    duration?: { startTimestamp?: string; endTimestamp?: string; startTimestampMs?: string; endTimestampMs?: string };
+    distance?: number;
+    activityType?: string;
+    activities?: TimelineActivity[];
+    waypointPath?: { distanceMeters?: number };
+  };
+};
+
+function placeName(loc?: {
+  name?: string;
+  address?: string;
+  latitudeE7?: number;
+  longitudeE7?: number;
+}): string {
+  if (!loc) return 'Lieu inconnu';
+  if (loc.name) return loc.name;
+  if (loc.address) return loc.address;
+  if (loc.latitudeE7 != null && loc.longitudeE7 != null) {
+    return `${(loc.latitudeE7 / 1e7).toFixed(4)}, ${(loc.longitudeE7 / 1e7).toFixed(4)}`;
+  }
+  return 'Lieu inconnu';
+}
+
+function classifyActivity(seg: NonNullable<TimelineSegment['activitySegment']>): {
+  activityType: ImportedTripDraft['activityType'];
+  status: TripStatus;
+} {
+  const types = [
+    seg.activityType,
+    ...(seg.activities || []).map((a) => a.activityType),
+  ]
+    .filter(Boolean)
+    .map((t) => String(t).toUpperCase());
+
+  const driving = types.some((t) =>
+    /IN_PASSENGER_VEHICLE|IN_VEHICLE|MOTORCYCLING|DRIVING/.test(t)
+  );
+  const other = types.some((t) =>
+    /WALKING|RUNNING|CYCLING|ON_BICYCLE|ON_FOOT|IN_BUS|IN_TRAIN|IN_SUBWAY|FLYING|STILL/.test(t)
+  );
+
+  if (driving) return { activityType: 'driving', status: 'pending' };
+  if (other) return { activityType: 'other', status: 'pending' };
+  return { activityType: 'unknown', status: 'pending' };
+}
+
+/**
+ * Import Google Takeout Semantic Location History (JSON).
+ * Détecte les trajets voiture vs autres ; tous en status pending pour validation.
+ */
+export function parseGoogleTimelineJson(raw: string): ImportedTripDraft[] {
+  let data: { timelineObjects?: TimelineSegment[] } | TimelineSegment[];
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new Error('JSON invalide — exportez l’historique Google (Takeout) en JSON.');
+  }
+
+  const objects = Array.isArray(data)
+    ? data
+    : data.timelineObjects || [];
+
+  const drafts: ImportedTripDraft[] = [];
+
+  for (const obj of objects) {
+    const seg = obj.activitySegment;
+    if (!seg) continue;
+
+    const { activityType, status } = classifyActivity(seg);
+    const start =
+      seg.duration?.startTimestamp ||
+      (seg.duration?.startTimestampMs
+        ? new Date(Number(seg.duration.startTimestampMs)).toISOString()
+        : null);
+    const end =
+      seg.duration?.endTimestamp ||
+      (seg.duration?.endTimestampMs
+        ? new Date(Number(seg.duration.endTimestampMs)).toISOString()
+        : null);
+    if (!start) continue;
+
+    const meters =
+      seg.distance ??
+      seg.waypointPath?.distanceMeters ??
+      0;
+    const distanceKm = meters > 0 ? meters / 1000 : 0;
+    if (distanceKm < 0.2 && activityType !== 'driving') continue;
+
+    drafts.push({
+      originName: placeName(seg.startLocation),
+      destinationName: placeName(seg.endLocation),
+      startTime: start,
+      endTime: end,
+      distanceKm: Math.round(distanceKm * 100) / 100,
+      activityType,
+      source: 'detected',
+      status,
+      note:
+        activityType === 'driving'
+          ? 'Détecté : trajet voiture (à valider)'
+          : activityType === 'other'
+            ? 'Détecté : autre mode (à valider ou ignorer)'
+            : 'Détecté : mode indéfini (à classer)',
+    });
+  }
+
+  return drafts.sort((a, b) => b.startTime.localeCompare(a.startTime));
+}

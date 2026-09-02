@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   Switch,
 } from 'react-native';
 import { router } from 'expo-router';
@@ -14,6 +13,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { createVehicle } from '@/lib/database';
+import { notify } from '@/lib/notify';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
 import { PRESET_VEHICLES, searchVehicles, type VehiclePreset } from '@/constants/vehicles';
 import type { FuelType } from '@/types';
@@ -49,12 +49,12 @@ export default function AddVehicleScreen() {
 
   const handleSave = async () => {
     if (!name.trim() || !brand.trim() || !model.trim()) {
-      Alert.alert('Erreur', 'Nom, marque et modèle sont requis.');
+      notify('Erreur', 'Nom, marque et modèle sont requis.');
       return;
     }
     setLoading(true);
     try {
-      await createVehicle({
+      const id = await createVehicle({
         name: name.trim(),
         brand: brand.trim(),
         model: model.trim(),
@@ -68,10 +68,18 @@ export default function AddVehicleScreen() {
         trackedKm: 0,
         isActive: true,
       });
+      if (!id) throw new Error('Création sans id');
       await refresh();
+      notify('Véhicule ajouté', `${name.trim()} est maintenant actif.`);
       router.back();
-    } catch {
-      Alert.alert('Erreur', 'Impossible de créer le véhicule.');
+    } catch (e) {
+      console.error('createVehicle', e);
+      notify(
+        'Erreur',
+        e instanceof Error
+          ? `Impossible de créer le véhicule : ${e.message}`
+          : 'Impossible de créer le véhicule.'
+      );
     } finally {
       setLoading(false);
     }

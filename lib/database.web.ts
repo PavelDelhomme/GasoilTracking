@@ -31,7 +31,14 @@ async function load(): Promise<Store> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (raw) {
-      cache = { ...emptyStore(), ...JSON.parse(raw) } as Store;
+      const parsed = { ...emptyStore(), ...JSON.parse(raw) } as Store;
+      // migrations soft
+      parsed.trips = (parsed.trips || []).map((t) => ({
+        ...t,
+        status: t.status || 'confirmed',
+        source: t.source || 'gps',
+      }));
+      cache = parsed;
       return cache;
     }
   } catch (e) {
@@ -130,6 +137,9 @@ export async function createFillUp(fillUp: Omit<FillUp, 'id'>): Promise<number> 
       v.id === fillUp.vehicleId ? { ...v, currentOdometer: fillUp.odometer! } : v
     );
   }
+  if (fillUp.tripId) {
+    s.trips = s.trips.map((t) => (t.id === fillUp.tripId ? { ...t, fillUpId: id } : t));
+  }
   await save(s);
   return id;
 }
@@ -179,9 +189,19 @@ export async function deleteBudget(id: number): Promise<void> {
 
 // --- Trips ---
 
-export async function getTrips(vehicleId?: number): Promise<Trip[]> {
+export async function getTrips(vehicleId?: number, opts?: { includeRejected?: boolean }): Promise<Trip[]> {
   const s = await load();
-  const list = vehicleId ? s.trips.filter((t) => t.vehicleId === vehicleId) : s.trips;
+  let list = vehicleId ? s.trips.filter((t) => t.vehicleId === vehicleId) : s.trips;
+  if (!opts?.includeRejected) {
+    list = list.filter((t) => t.status !== 'rejected');
+  }
+  return [...list].sort((a, b) => b.startTime.localeCompare(a.startTime));
+}
+
+export async function getPendingTrips(vehicleId?: number): Promise<Trip[]> {
+  const s = await load();
+  let list = s.trips.filter((t) => t.status === 'pending');
+  if (vehicleId) list = list.filter((t) => t.vehicleId === vehicleId);
   return [...list].sort((a, b) => b.startTime.localeCompare(a.startTime));
 }
 
@@ -193,7 +213,12 @@ export async function getActiveTrip(): Promise<Trip | null> {
 export async function createTrip(trip: Omit<Trip, 'id'>): Promise<number> {
   const s = await load();
   const id = s.seq.trips++;
-  s.trips.push({ ...trip, id });
+  s.trips.push({
+    ...trip,
+    id,
+    status: trip.status || 'confirmed',
+    source: trip.source || 'gps',
+  });
   await save(s);
   return id;
 }
@@ -201,6 +226,12 @@ export async function createTrip(trip: Omit<Trip, 'id'>): Promise<number> {
 export async function updateTrip(id: number, trip: Partial<Trip>): Promise<void> {
   const s = await load();
   s.trips = s.trips.map((t) => (t.id === id ? { ...t, ...trip, id } : t));
+  await save(s);
+}
+
+export async function deleteTrip(id: number): Promise<void> {
+  const s = await load();
+  s.trips = s.trips.filter((t) => t.id !== id);
   await save(s);
 }
 

@@ -33,7 +33,12 @@ export interface FillUp {
   distanceSinceLastKm: number | null;
   isFull: boolean;
   note?: string;
+  /** Trajet lié (optionnel) */
+  tripId?: number | null;
 }
+
+export type TripStatus = 'pending' | 'confirmed' | 'rejected';
+export type TripSource = 'gps' | 'manual' | 'maps_import' | 'detected';
 
 export interface Budget {
   id: number;
@@ -59,8 +64,15 @@ export interface Trip {
   estimatedCost: number;
   /** Polyline encodée ou JSON des points GPS */
   routePoints: string;
+  originName?: string;
   destinationName?: string;
   isActive: boolean;
+  /** pending = à valider (import / détection) */
+  status: TripStatus;
+  source: TripSource;
+  /** Lien optionnel vers un plein */
+  fillUpId?: number | null;
+  note?: string;
 }
 
 export interface TripStats {
