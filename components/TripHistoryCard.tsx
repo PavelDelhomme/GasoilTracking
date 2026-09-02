@@ -13,14 +13,10 @@ type Props = {
   onDelete: (trip: Trip) => void;
 };
 
-/**
- * Carte historique : mini-carte départ/arrivée + infos + suppression.
- */
+/** Carte historique : mini-carte départ/arrivée + suppression. */
 export function TripHistoryCard({ trip, onDelete }: Props) {
   const { colors } = useTheme();
   const points = useMemo(() => parseRoutePoints(trip.routePoints), [trip.routePoints]);
-  const start = points[0] || null;
-  const end = points.length > 1 ? points[points.length - 1] : start;
 
   const timeLabel = (() => {
     try {
@@ -32,17 +28,6 @@ export function TripHistoryCard({ trip, onDelete }: Props) {
     }
   })();
 
-  const sourceLabel =
-    trip.source === 'gps'
-      ? 'GPS'
-      : trip.source === 'maps_import'
-        ? 'Import Maps'
-        : trip.source === 'manual'
-          ? 'Manuel'
-          : trip.source === 'detected'
-            ? 'Détecté'
-            : trip.source || '';
-
   return (
     <Card style={styles.card}>
       <TripMiniMap
@@ -50,46 +35,43 @@ export function TripHistoryCard({ trip, onDelete }: Props) {
         originName={trip.originName}
         destinationName={trip.destinationName}
         accentColor={colors.accent}
-        height={140}
+        height={128}
       />
 
       <View style={styles.ends}>
         <View style={styles.endCol}>
-          <View style={styles.endTitleRow}>
-            <View style={[styles.dot, { backgroundColor: '#22c55e' }]} />
-            <Text style={[styles.endLabel, { color: colors.success }]}>Départ</Text>
-          </View>
+          <Text style={[styles.endLabel, { color: colors.success }]}>Départ</Text>
           <Text style={[styles.endValue, { color: colors.text }]} numberOfLines={2}>
             {trip.originName ||
-              (start ? `${start.latitude.toFixed(4)}, ${start.longitude.toFixed(4)}` : '—')}
+              (points[0]
+                ? `${points[0].latitude.toFixed(4)}, ${points[0].longitude.toFixed(4)}`
+                : '—')}
           </Text>
         </View>
         <Ionicons
           name="arrow-forward"
           size={16}
           color={colors.textSecondary}
-          style={{ marginTop: 18 }}
+          style={{ marginTop: 14 }}
         />
         <View style={styles.endCol}>
-          <View style={styles.endTitleRow}>
-            <View style={[styles.dot, { backgroundColor: '#ef4444' }]} />
-            <Text style={[styles.endLabel, { color: colors.accent }]}>Arrivée</Text>
-          </View>
+          <Text style={[styles.endLabel, { color: colors.accent }]}>Arrivée</Text>
           <Text style={[styles.endValue, { color: colors.text }]} numberOfLines={2}>
             {trip.destinationName ||
-              (end ? `${end.latitude.toFixed(4)}, ${end.longitude.toFixed(4)}` : '—')}
+              (points.length > 1
+                ? `${points[points.length - 1].latitude.toFixed(4)}, ${points[points.length - 1].longitude.toFixed(4)}`
+                : '—')}
           </Text>
         </View>
       </View>
 
       <View style={styles.meta}>
-        <Text style={{ color: colors.textSecondary, fontSize: 12, flex: 1, lineHeight: 18 }}>
+        <Text style={{ color: colors.textSecondary, fontSize: 12, flex: 1 }}>
           {timeLabel}
           {'\n'}
           {formatDistance(trip.distanceKm)} · {formatEuro(trip.estimatedCost)}
-          {sourceLabel ? ` · ${sourceLabel}` : ''}
+          {trip.source ? ` · ${trip.source}` : ''}
           {trip.status === 'pending' ? ' · en attente' : ''}
-          {points.length > 1 ? ` · ${points.length} pts` : ''}
         </Text>
         <Pressable
           onPress={() => onDelete(trip)}
@@ -110,17 +92,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 8,
-    paddingTop: 4,
+    marginTop: 4,
   },
   endCol: { flex: 1 },
-  endTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
-  endLabel: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
+  endLabel: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase', marginBottom: 2 },
   endValue: { fontSize: 13, fontWeight: '600', lineHeight: 18 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
   meta: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 10,
+    marginTop: 10,
     gap: 8,
   },
   deleteBtn: {
