@@ -6,6 +6,7 @@ import {
   getStoredUser,
   getToken,
   login as apiLogin,
+  logoutRemote,
   pushSync,
   register as apiRegister,
   setSession,
@@ -26,7 +27,7 @@ type AuthContextType = {
   ) => Promise<{ ok: boolean; pending?: boolean; message?: string }>;
   logout: () => Promise<void>;
   syncNow: () => Promise<void>;
-  applySession: (token: string, user: User) => Promise<void>;
+  applySession: (token: string, user: User, refreshToken?: string | null) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -56,41 +57,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await pushSync({ vehicles, fillUps, budgets, trips });
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const res = await apiLogin(email, password);
-    await setSession(res.token, res.user);
-    setUser(res.user);
-    try {
-      const remote = await fetchSync();
-      // La sync complète d'import DB peut être ajoutée plus tard ; on pousse d'abord le local
-      await syncNow();
-      if (remote?.data) {
-        // remote payload disponible pour restauration future
+  const login = useCallback(
+    async (email: string, password: string) => {
+      const res = await apiLogin(email, password);
+      setUser(res.user);
+      try {
+        const remote = await fetchSync();
+        await syncNow();
+        if (remote?.data) {
+          // remote payload disponible pour restauration future
+        }
+      } catch {
+        /* offline ok */
       }
-    } catch {
-      /* offline ok */
-    }
-  }, [syncNow]);
+    },
+    [syncNow]
+  );
 
   const register = useCallback(
     async (email: string, password: string, name: string, inviteCode: string) => {
       const platform = Platform.OS === 'web' ? 'web' : 'mobile';
-      const res = await apiRegister(email, password, name, inviteCode, platform);
-      // Compte activé seulement après clic email — pas de session ici
-      return res;
+      return apiRegister(email, password, name, inviteCode, platform);
     },
     []
   );
 
   const logout = useCallback(async () => {
+    await logoutRemote();
     await clearSession();
     setUser(null);
   }, []);
 
-  const applySession = useCallback(async (token: string, next: User) => {
-    await setSession(token, next);
-    setUser(next);
-  }, []);
+  const applySession = useCallback(
+    async (token: string, next: User, refreshToken?: string | null) => {
+      await setSession(token, next, refreshToken);
+      setUser(next);
+    },
+    []
+  );
 
   return (
     <AuthContext.Provider value={{ user, loading, login, register, logout, syncNow, applySession }}>

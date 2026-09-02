@@ -12,7 +12,12 @@ import { Button } from '@/components/Button';
 export default function VerifyScreen() {
   const { colors } = useTheme();
   const { applySession } = useAuth();
-  const params = useLocalSearchParams<{ ok?: string; msg?: string; session?: string }>();
+  const params = useLocalSearchParams<{
+    ok?: string;
+    msg?: string;
+    session?: string;
+    refresh?: string;
+  }>();
   const [done, setDone] = useState(false);
   const ok = params.ok === '1' || params.ok === 'true';
   const msg =
@@ -25,16 +30,21 @@ export default function VerifyScreen() {
   useEffect(() => {
     (async () => {
       const session = typeof params.session === 'string' ? params.session : '';
+      const refresh = typeof params.refresh === 'string' ? params.refresh : null;
       if (ok && session) {
         try {
           const mid = session.split('.')[1];
           if (mid) {
             const json = JSON.parse(atob(mid.replace(/-/g, '+').replace(/_/g, '/')));
-            await applySession(session, {
-              id: json.sub,
-              email: json.email || '',
-              name: (json.email && String(json.email).split('@')[0]) || 'Utilisateur',
-            });
+            await applySession(
+              session,
+              {
+                id: json.sub,
+                email: json.email || '',
+                name: (json.email && String(json.email).split('@')[0]) || 'Utilisateur',
+              },
+              refresh
+            );
           }
         } catch {
           /* ignore */
@@ -42,7 +52,7 @@ export default function VerifyScreen() {
       }
       setDone(true);
     })();
-  }, [ok, params.session, applySession]);
+  }, [ok, params.session, params.refresh, applySession]);
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]}>

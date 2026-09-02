@@ -12,6 +12,7 @@ export default function AuthScreen() {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordConfirm, setPasswordConfirm] = useState('');
   const [name, setName] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [loading, setLoading] = useState(false);
@@ -25,9 +26,15 @@ export default function AuthScreen() {
     try {
       if (mode === 'login') {
         await login(email.trim(), password);
-        router.back();
+        router.replace('/' as never);
       } else {
         if (!inviteCode.trim()) throw new Error('Code d’invitation requis');
+        if (password !== passwordConfirm) {
+          throw new Error('Les mots de passe ne correspondent pas');
+        }
+        if (password.length < 8) {
+          throw new Error('Mot de passe : au moins 8 caractères');
+        }
         const res = await register(
           email.trim(),
           password,
@@ -40,6 +47,7 @@ export default function AuthScreen() {
         );
         setMode('login');
         setPassword('');
+        setPasswordConfirm('');
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
@@ -60,7 +68,7 @@ export default function AuthScreen() {
         <Text style={[styles.sub, { color: colors.textSecondary }]}>
           {mode === 'login'
             ? 'Même formulaire pour tous (y compris admin). Données privées par compte.'
-            : 'Code d’invitation requis. Un email de confirmation sera envoyé avant activation.'}
+            : 'Code d’invitation requis. Confirmez le mot de passe deux fois. Un email de validation activera le compte.'}
         </Text>
         {mode === 'register' && (
           <>
@@ -89,6 +97,15 @@ export default function AuthScreen() {
           secureTextEntry
           placeholder="••••••••"
         />
+        {mode === 'register' && (
+          <Input
+            label="Confirmer le mot de passe"
+            value={passwordConfirm}
+            onChangeText={setPasswordConfirm}
+            secureTextEntry
+            placeholder="••••••••"
+          />
+        )}
         {!!error && <Text style={{ color: colors.danger, marginBottom: 12 }}>{error}</Text>}
         {!!info && <Text style={{ color: colors.success, marginBottom: 12 }}>{info}</Text>}
         <Button

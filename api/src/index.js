@@ -68,12 +68,71 @@ db.exec(`
     force_update INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    revoked_at TEXT,
+    replaced_by TEXT,
+    user_agent TEXT,
+    ip TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_refresh_user ON refresh_tokens(user_id);
 `);
 
 try {
   db.exec('ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1');
 } catch {
   /* déjà présent */
+}
+
+/** Access JWT court ; refresh opaque rotatif (révocation possible) */
+const ACCESS_TTL = process.env.JWT_ACCESS_TTL || '20m';
+const REFRESH_TTL_MS = Number(process.env.JWT_REFRESH_TTL_MS || 30 * 24 * 60 * 60 * 1000);
+
+function hashToken(raw) {
+  return crypto.createHash('sha256').update(raw).digest('hex');
+}
+
+function issueAccessToken(user) {
+  return jwt.sign(
+    { sub: user.id, email: user.email, typ: 'access' },
+    JWT_SECRET,
+    { expiresIn: ACCESS_TTL, algorithm: 'HS256' }
+  );
+}
+
+function issueRefreshToken(userId, meta = {}) {
+  const raw = crypto.randomBytes(48).toString('base64url');
+  const id = uuid();
+  const now = new Date();
+  const expires = new Date(now.getTime() + REFRESH_TTL_MS).toISOString();
+  db.prepare(
+    `INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at, user_agent, ip)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, userId, hashToken(raw), expires, now.toISOString(), meta.userAgent || null, meta.ip || null);
+  return { refreshToken: raw, refreshExpiresAt: expires };
+}
+
+function revokeRefreshFamily(userId) {
+  db.prepare(
+    `UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`
+  ).run(new Date().toISOString(), userId);
+}
+
+function createSession(user, meta = {}) {
+  const token = issueAccessToken(user);
+  const { refreshToken, refreshExpiresAt } = issueRefreshToken(user.id, meta);
+  return {
+    token,
+    refreshToken,
+    expiresIn: ACCESS_TTL,
+    refreshExpiresAt,
+    user: { id: user.id, email: user.email, name: user.name },
+  };
 }
 
 /** Crée / met à jour le compte admin (email vérifié, sans passer par l’invite) */
@@ -202,11 +261,22 @@ function auth(req, res, next) {
   try {
     const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
     if (!payload?.sub) return res.status(401).json({ error: 'Token invalide' });
+    // Accepte les anciens JWT sans typ ; refuse les refresh JWT s’il y en avait
+    if (payload.typ && payload.typ !== 'access') {
+      return res.status(401).json({ error: 'Token invalide' });
+    }
     req.user = payload;
     next();
   } catch {
     return res.status(401).json({ error: 'Token invalide ou expiré' });
   }
+}
+
+function sessionMeta(req) {
+  return {
+    ip: clientIp(req),
+    userAgent: String(req.headers['user-agent'] || '').slice(0, 200),
+  };
 }
 
 function isValidEmail(email) {
@@ -264,8 +334,14 @@ async function sendVerificationEmail({ to, name, token, platform }) {
   return { ok: true, verifyUrl };
 }
 
-function verifyPageHtml({ ok, message, platform, token }) {
-  const q = `ok=${ok ? '1' : '0'}&msg=${encodeURIComponent(message)}${token ? `&session=${encodeURIComponent(token)}` : ''}`;
+function verifyPageHtml({ ok, message, platform, token, refreshToken }) {
+  const parts = [
+    `ok=${ok ? '1' : '0'}`,
+    `msg=${encodeURIComponent(message)}`,
+  ];
+  if (token) parts.push(`session=${encodeURIComponent(token)}`);
+  if (refreshToken) parts.push(`refresh=${encodeURIComponent(refreshToken)}`);
+  const q = parts.join('&');
   const webUrl = `${PUBLIC_URL}/verify?${q}`;
   const deep = `${APP_SCHEME}://verify?${q}`;
   const primary = platform === 'mobile' ? deep : webUrl;
@@ -364,18 +440,17 @@ app.post('/api/auth/register', authLimiter, registerLimiter, async (req, res) =>
       token: rawToken,
       platform: plat,
     });
+    // Log serveur uniquement (jamais exposé au client si mail OK) — utile pour ops
+    console.log(`[mail] verification ${mail.ok ? 'sent' : 'fallback'} to=${cleanEmail}`);
 
     res.status(201).json({
       ok: true,
       pending: true,
       message:
         'Un email de vérification a été envoyé. Cliquez le lien pour activer votre compte (valide 24 h).',
-      // Dev only if SMTP down — never in prod response when mail ok
-      ...(mail.ok ? {} : process.env.NODE_ENV === 'production' && mail.logged
+      ...(mail.ok
         ? {}
-        : !mail.ok
-          ? { debugVerifyUrl: mail.verifyUrl }
-          : {}),
+        : { debugVerifyUrl: mail.verifyUrl }),
     });
   } catch (e) {
     console.error('register', e);
@@ -430,17 +505,18 @@ app.get('/api/auth/verify-email', authLimiter, (req, res) => {
       .send(verifyPageHtml({ ok: false, message: 'Compte déjà créé. Connectez-vous.', platform: plat }));
   }
 
-  const session = jwt.sign({ sub: userId, email: pending.email }, JWT_SECRET, {
-    expiresIn: '30d',
-    algorithm: 'HS256',
-  });
+  const session = createSession(
+    { id: userId, email: pending.email, name: pending.name },
+    sessionMeta(req)
+  );
 
   res.type('html').send(
     verifyPageHtml({
       ok: true,
       message: 'Votre email est confirmé. Vous pouvez utiliser Gasoil Tracking.',
       platform: plat,
-      token: session,
+      token: session.token,
+      refreshToken: session.refreshToken,
     })
   );
 });
@@ -461,11 +537,66 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
   if (user.email_verified === 0) {
     return res.status(403).json({ error: 'Email non vérifié. Consultez votre boîte mail.' });
   }
-  const token = jwt.sign({ sub: user.id, email: user.email }, JWT_SECRET, {
-    expiresIn: '30d',
-    algorithm: 'HS256',
+  res.json(createSession(user, sessionMeta(req)));
+});
+
+/** Rotation du refresh token → nouvel access + nouveau refresh */
+app.post('/api/auth/refresh', authLimiter, (req, res) => {
+  const raw = String(req.body?.refreshToken || '');
+  if (!raw || raw.length < 20) {
+    return res.status(400).json({ error: 'refreshToken requis' });
+  }
+  const row = db.prepare('SELECT * FROM refresh_tokens WHERE token_hash = ?').get(hashToken(raw));
+  if (!row) {
+    return res.status(401).json({ error: 'Session expirée. Reconnectez-vous.' });
+  }
+  if (row.revoked_at) {
+    // Réutilisation d’un token déjà tourné → révoque toute la famille (vol possible)
+    revokeRefreshFamily(row.user_id);
+    return res.status(401).json({ error: 'Session invalidée. Reconnectez-vous.' });
+  }
+  if (new Date(row.expires_at).getTime() < Date.now()) {
+    db.prepare('UPDATE refresh_tokens SET revoked_at = ? WHERE id = ?').run(
+      new Date().toISOString(),
+      row.id
+    );
+    return res.status(401).json({ error: 'Session expirée. Reconnectez-vous.' });
+  }
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
+  if (!user) {
+    return res.status(401).json({ error: 'Session expirée. Reconnectez-vous.' });
+  }
+
+  const now = new Date().toISOString();
+  const next = issueRefreshToken(user.id, sessionMeta(req));
+  const newRow = db
+    .prepare('SELECT id FROM refresh_tokens WHERE token_hash = ?')
+    .get(hashToken(next.refreshToken));
+  db.prepare('UPDATE refresh_tokens SET revoked_at = ?, replaced_by = ? WHERE id = ?').run(
+    now,
+    newRow?.id || null,
+    row.id
+  );
+
+  res.json({
+    token: issueAccessToken(user),
+    refreshToken: next.refreshToken,
+    expiresIn: ACCESS_TTL,
+    refreshExpiresAt: next.refreshExpiresAt,
+    user: { id: user.id, email: user.email, name: user.name },
   });
-  res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
+});
+
+app.post('/api/auth/logout', auth, (req, res) => {
+  const raw = String(req.body?.refreshToken || '');
+  if (raw) {
+    db.prepare(
+      `UPDATE refresh_tokens SET revoked_at = ? WHERE token_hash = ? AND user_id = ? AND revoked_at IS NULL`
+    ).run(new Date().toISOString(), hashToken(raw), req.user.sub);
+  } else {
+    revokeRefreshFamily(req.user.sub);
+  }
+  res.json({ ok: true });
 });
 
 app.get('/api/auth/me', auth, (req, res) => {
@@ -560,6 +691,41 @@ app.get('/api/admin/overview', auth, requireAdmin, (_req, res) => {
     userCount: users.length,
     pendingCount: pending.length,
   });
+});
+
+/** Admin : renvoie un nouveau lien de vérif pour un pending (ops / support) */
+app.post('/api/admin/resend-verification', auth, requireAdmin, async (req, res) => {
+  try {
+    const email = String(req.body?.email || '')
+      .toLowerCase()
+      .trim();
+    if (!email) return res.status(400).json({ error: 'email requis' });
+    const pending = db.prepare('SELECT * FROM pending_registrations WHERE email = ?').get(email);
+    if (!pending) return res.status(404).json({ error: 'Aucune inscription en attente pour cet email' });
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = hashToken(rawToken);
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    db.prepare(
+      'UPDATE pending_registrations SET token_hash = ?, expires_at = ? WHERE id = ?'
+    ).run(tokenHash, expires, pending.id);
+
+    const mail = await sendVerificationEmail({
+      to: pending.email,
+      name: pending.name,
+      token: rawToken,
+      platform: pending.platform || 'web',
+    });
+    res.json({
+      ok: true,
+      mailed: mail.ok,
+      verifyUrl: mail.verifyUrl,
+      message: mail.ok ? 'Email renvoyé' : 'SMTP KO — utilisez verifyUrl',
+    });
+  } catch (e) {
+    console.error('resend-verification', e);
+    res.status(500).json({ error: 'Échec renvoi' });
+  }
 });
 
 app.post('/api/admin/releases', auth, requireAdmin, upload.single('apk'), (req, res) => {
