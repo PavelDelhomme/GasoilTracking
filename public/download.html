@@ -11,24 +11,44 @@
     .box { max-width:420px; width:100%; background:var(--card); border:1px solid #2d2d44; border-radius:20px; padding:32px; }
     h1 { margin:0 0 8px; font-size:1.6rem; }
     p { color:var(--muted); line-height:1.5; }
-    .btn { display:block; text-align:center; background:var(--accent); color:#fff; text-decoration:none; padding:14px 18px; border-radius:12px; font-weight:700; margin-top:20px; }
+    .btn { display:block; text-align:center; background:var(--accent); color:#fff; text-decoration:none; padding:14px 18px; border-radius:12px; font-weight:700; margin-top:16px; }
+    .btn.secondary { background:transparent; border:1px solid #2d2d44; color:var(--text); font-weight:600; }
+    .btn[aria-disabled="true"] { opacity:.45; pointer-events:none; }
     .meta { margin-top:16px; font-size:.9rem; color:var(--muted); }
-    code { color:#fff; word-break:break-all; }
+    .ver { margin-top:12px; font-size:1.05rem; font-weight:700; color:#fff; }
   </style>
 </head>
 <body>
   <div class="box">
     <h1>Gasoil Tracking</h1>
-    <p>Application Android. Pour installer, utilisez le <strong>lien sécurisé</strong> reçu par email (ou fourni par l’admin). Les liens publics directs sont limités.</p>
-    <a class="btn" id="dl" href="/">Version en ligne (web)</a>
-    <p class="meta" id="info">Chargement…</p>
+    <p>Application Android (APK). Installez la dernière version publiée, ou utilisez la version web.</p>
+    <p class="ver" id="ver">Chargement…</p>
+    <a class="btn" id="dl" href="#" aria-disabled="true">Télécharger l’APK</a>
+    <a class="btn secondary" href="/">Ouvrir la version web</a>
+    <p class="meta" id="info"></p>
   </div>
   <script>
-    fetch('/api/version').then(r => r.json()).then(v => {
-      document.getElementById('info').textContent = 'Dernière version publiée : ' + v.version + (v.releaseNotes ? ' — ' + v.releaseNotes : '') + '. Demandez un lien /get-app?t=… à l’administrateur.';
-    }).catch(() => {
-      document.getElementById('info').textContent = 'API version indisponible pour le moment.';
-    });
+    fetch('/api/version')
+      .then(function (r) { return r.json(); })
+      .then(function (v) {
+        var ver = document.getElementById('ver');
+        var dl = document.getElementById('dl');
+        var info = document.getElementById('info');
+        ver.textContent = 'Version ' + (v.version || '—');
+        if (v.apkUrl) {
+          dl.href = v.apkUrl;
+          dl.removeAttribute('aria-disabled');
+          dl.textContent = 'Télécharger APK ' + v.version;
+          dl.setAttribute('download', 'gasoil-tracking-' + v.version + '.apk');
+        } else {
+          dl.textContent = 'APK indisponible';
+        }
+        info.textContent = v.releaseNotes || '';
+      })
+      .catch(function () {
+        document.getElementById('ver').textContent = 'API indisponible';
+        document.getElementById('info').textContent = 'Réessayez dans un instant.';
+      });
   </script>
 </body>
 </html>
