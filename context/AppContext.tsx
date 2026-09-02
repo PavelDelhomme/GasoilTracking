@@ -7,6 +7,8 @@ import {
   setActiveVehicle as dbSetActiveVehicle,
 } from '@/lib/database';
 import { refreshBudgets } from '@/lib/calculations';
+import { recoverDataAfterUpdateIfNeeded } from '@/lib/backup';
+import { notify } from '@/lib/notify';
 
 interface AppContextType {
   activeVehicle: Vehicle | null;
@@ -52,15 +54,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const selectVehicle = useCallback(async (id: number) => {
-    await dbSetActiveVehicle(id);
-    await refresh();
-  }, [refresh]);
+  const selectVehicle = useCallback(
+    async (id: number) => {
+      await dbSetActiveVehicle(id);
+      await refresh();
+    },
+    [refresh]
+  );
 
   useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, activeTrip ? 5000 : 30000);
-    return () => clearInterval(interval);
+    let cancelled = false;
+    (async () => {
+      try {
+        const recovery = await recoverDataAfterUpdateIfNeeded();
+        if (!cancelled && (recovery === 'restored-local' || recovery === 'restored-cloud')) {
+          notify(
+            'Données restaurées',
+            recovery === 'restored-cloud'
+              ? 'Vos données cloud ont été récupérées.'
+              : 'Votre sauvegarde locale a été récupérée.'
+          );
+        }
+      } catch {
+        /* ignore */
+      }
+      if (!cancelled) await refresh();
+    })();
+    const interval = setInterval(() => {
+      void refresh();
+    }, activeTrip ? 5000 : 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [refresh, activeTrip]);
 
   return (

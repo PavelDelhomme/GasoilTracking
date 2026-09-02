@@ -619,3 +619,162 @@ export async function getMonthlySpend(months = 6): Promise<{ month: string; spen
   );
   return rows.map((r) => ({ month: r.month, spent: Number(r.spent) || 0 })).reverse();
 }
+
+/** Remplace tout le contenu local (préserve les ids) — utilisé backup / sync. */
+export async function replaceAllData(data: {
+  vehicles: Vehicle[];
+  fillUps: FillUp[];
+  budgets: Budget[];
+  trips: Trip[];
+  places: Place[];
+  recurringRoutes: RecurringRoute[];
+}): Promise<void> {
+  const database = await getDatabase();
+  await database.execAsync('PRAGMA foreign_keys = OFF;');
+  try {
+    await database.withTransactionAsync(async () => {
+      await database.execAsync(`
+        DELETE FROM recurring_routes;
+        DELETE FROM places;
+        DELETE FROM fill_ups;
+        DELETE FROM trips;
+        DELETE FROM budgets;
+        DELETE FROM vehicles;
+      `);
+
+      for (const v of data.vehicles || []) {
+        await database.runAsync(
+          `INSERT INTO vehicles (id, name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, is_active, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            v.id,
+            v.name,
+            v.brand,
+            v.model,
+            v.year,
+            v.fuelType,
+            v.consumptionPer100,
+            v.tankCapacity,
+            v.defaultFuelPrice,
+            v.currentOdometer,
+            v.hasOdometer ? 1 : 0,
+            v.trackedKm ?? 0,
+            v.isActive ? 1 : 0,
+            v.createdAt || new Date().toISOString(),
+          ]
+        );
+      }
+
+      for (const t of data.trips || []) {
+        await database.runAsync(
+          `INSERT INTO trips (id, vehicle_id, start_time, end_time, distance_km, estimated_fuel_used, estimated_cost, route_points, origin_name, destination_name, is_active, status, source, fill_up_id, note)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            t.id,
+            t.vehicleId,
+            t.startTime,
+            t.endTime,
+            t.distanceKm,
+            t.estimatedFuelUsed,
+            t.estimatedCost,
+            t.routePoints || '[]',
+            t.originName || null,
+            t.destinationName || null,
+            t.isActive ? 1 : 0,
+            t.status || 'confirmed',
+            t.source || 'gps',
+            t.fillUpId ?? null,
+            t.note || null,
+          ]
+        );
+      }
+
+      for (const f of data.fillUps || []) {
+        await database.runAsync(
+          `INSERT INTO fill_ups (id, vehicle_id, date, liters, price_per_liter, total_cost, odometer, distance_since_last_km, is_full, note, trip_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            f.id,
+            f.vehicleId,
+            f.date,
+            f.liters,
+            f.pricePerLiter,
+            f.totalCost,
+            f.odometer,
+            f.distanceSinceLastKm,
+            f.isFull ? 1 : 0,
+            f.note || null,
+            f.tripId ?? null,
+          ]
+        );
+      }
+
+      for (const b of data.budgets || []) {
+        await database.runAsync(
+          `INSERT INTO budgets (id, vehicle_id, name, amount, spent, period, start_date, end_date, is_active)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            b.id,
+            b.vehicleId,
+            b.name,
+            b.amount,
+            b.spent,
+            b.period,
+            b.startDate,
+            b.endDate,
+            b.isActive ? 1 : 0,
+          ]
+        );
+      }
+
+      for (const p of data.places || []) {
+        await database.runAsync(
+          `INSERT INTO places (id, name, address, kind, latitude, longitude, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            p.id,
+            p.name,
+            p.address || '',
+            p.kind || 'other',
+            p.latitude,
+            p.longitude,
+            p.createdAt || new Date().toISOString(),
+          ]
+        );
+      }
+
+      for (const r of data.recurringRoutes || []) {
+        await database.runAsync(
+          `INSERT INTO recurring_routes (id, vehicle_id, name, from_place_id, to_place_id, distance_km, times_per_week, is_active)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            r.id,
+            r.vehicleId,
+            r.name,
+            r.fromPlaceId,
+            r.toPlaceId,
+            r.distanceKm,
+            r.timesPerWeek,
+            r.isActive ? 1 : 0,
+          ]
+        );
+      }
+    });
+  } finally {
+    await database.execAsync('PRAGMA foreign_keys = ON;');
+  }
+}
+
+export async function hasLocalUserData(): Promise<boolean> {
+  const database = await getDatabase();
+  const row = await database.getFirstAsync<{ n: number }>(
+    `SELECT (
+       (SELECT COUNT(*) FROM vehicles) +
+       (SELECT COUNT(*) FROM fill_ups) +
+       (SELECT COUNT(*) FROM trips) +
+       (SELECT COUNT(*) FROM budgets) +
+       (SELECT COUNT(*) FROM places)
+     ) AS n`
+  );
+  return (row?.n || 0) > 0;
+}

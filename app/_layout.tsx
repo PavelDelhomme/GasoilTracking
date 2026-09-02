@@ -5,11 +5,12 @@ import { AuthProvider } from '@/context/AuthContext';
 import { ThemeProvider, useTheme } from '@/context/ThemeContext';
 import { ThemeToggleButton } from '@/components/ThemeToggleButton';
 import { ClientOnly } from '@/components/ClientOnly';
+import { AppUpdateModal } from '@/components/AppUpdateModal';
 import { useAppUpdateCheck } from '@/hooks/useAppUpdateCheck';
 
 function RootNavigation() {
   const { colors, scheme } = useTheme();
-  useAppUpdateCheck();
+  const update = useAppUpdateCheck();
 
   return (
     <>
@@ -45,6 +46,16 @@ function RootNavigation() {
         <Stack.Screen name="place/route" options={{ title: 'Trajet régulier', presentation: 'modal' }} />
         <Stack.Screen name="fillup/station" options={{ title: 'Station essence', presentation: 'modal' }} />
       </Stack>
+      <AppUpdateModal
+        visible={update.visible}
+        info={update.info}
+        force={update.force}
+        busy={update.busy}
+        progress={update.progress}
+        error={update.error}
+        onUpdate={update.startUpdate}
+        onLater={update.dismiss}
+      />
     </>
   );
 }

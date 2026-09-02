@@ -7,11 +7,11 @@ import {
   getToken,
   login as apiLogin,
   logoutRemote,
-  pushSync,
   register as apiRegister,
   setSession,
 } from '@/lib/api';
-import { getVehicles, getFillUps, getBudgets, getTrips } from '@/lib/database';
+import { applySnapshot, hasLocalUserData, normalizeSnapshot } from '@/lib/dataSnapshot';
+import { saveLocalBackup, syncFullBackup } from '@/lib/backup';
 
 type User = { id: string; email: string; name: string };
 
@@ -48,31 +48,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const syncNow = useCallback(async () => {
     const token = await getToken();
     if (!token) return;
-    const [vehicles, fillUps, budgets, trips] = await Promise.all([
-      getVehicles(),
-      getFillUps(),
-      getBudgets(),
-      getTrips(),
-    ]);
-    await pushSync({ vehicles, fillUps, budgets, trips });
+    await syncFullBackup();
   }, []);
 
-  const login = useCallback(
-    async (email: string, password: string) => {
-      const res = await apiLogin(email, password);
-      setUser(res.user);
-      try {
-        const remote = await fetchSync();
-        await syncNow();
-        if (remote?.data) {
-          // remote payload disponible pour restauration future
-        }
-      } catch {
-        /* offline ok */
+  const login = useCallback(async (email: string, password: string) => {
+    const res = await apiLogin(email, password);
+    setUser(res.user);
+    try {
+      const localHas = await hasLocalUserData();
+      const remote = await fetchSync();
+      const remoteSnap = normalizeSnapshot(remote?.data);
+
+      if (!localHas && remoteSnap) {
+        await applySnapshot(remoteSnap, 'replace');
+        await saveLocalBackup(remoteSnap);
+      } else {
+        await syncFullBackup();
       }
-    },
-    [syncNow]
-  );
+    } catch {
+      try {
+        await saveLocalBackup();
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
 
   const register = useCallback(
     async (email: string, password: string, name: string, inviteCode: string) => {
@@ -83,6 +83,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    try {
+      await saveLocalBackup();
+    } catch {
+      /* ignore */
+    }
     await logoutRemote();
     await clearSession();
     setUser(null);

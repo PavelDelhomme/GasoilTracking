@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
+import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 
 export default function AuthScreen() {
   const { login, register } = useAuth();
+  const { refresh } = useApp();
   const { colors } = useTheme();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState(
@@ -28,6 +30,7 @@ export default function AuthScreen() {
     try {
       if (mode === 'login') {
         await login(email.trim(), password);
+        await refresh();
         router.replace('/' as never);
       } else {
         if (!inviteCode.trim()) throw new Error('Code d’invitation requis');

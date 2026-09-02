@@ -77,12 +77,24 @@ export default function HomeScreen() {
         </Text>
         <Text style={{ color: colors.textSecondary, marginBottom: 10, fontSize: 13 }}>
           {user
-            ? 'Vos données peuvent être synchronisées sur le serveur.'
-            : 'Connectez-vous pour sauvegarder et retrouver vos données.'}
+            ? 'Synchroniser envoie une copie cloud (véhicules, pleins, trajets…). Les données restent aussi en local.'
+            : 'Sans compte : tout reste en local. Avec un compte : sauvegarde cloud + restauration possible.'}
         </Text>
         {user ? (
           <View style={styles.actions}>
-            <Button title="Synchroniser" variant="secondary" onPress={() => syncNow()} style={{ flex: 1 }} />
+            <Button
+              title="Synchroniser"
+              variant="secondary"
+              onPress={async () => {
+                try {
+                  await syncNow();
+                  notify('Synchronisé', 'Sauvegarde locale + cloud à jour.');
+                } catch (e) {
+                  notify('Sync', e instanceof Error ? e.message : 'Échec');
+                }
+              }}
+              style={{ flex: 1 }}
+            />
             <Button title="Déconnexion" variant="outline" onPress={() => logout()} style={{ flex: 1 }} />
           </View>
         ) : (

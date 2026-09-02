@@ -297,6 +297,49 @@ export async function deleteRecurringRoute(id: number): Promise<void> {
   await save(s);
 }
 
+/** Remplace tout le contenu local (préserve les ids) — utilisé backup / sync. */
+export async function replaceAllData(data: {
+  vehicles: Vehicle[];
+  fillUps: FillUp[];
+  budgets: Budget[];
+  trips: Trip[];
+  places: Place[];
+  recurringRoutes: RecurringRoute[];
+}): Promise<void> {
+  const vehicles = data.vehicles || [];
+  const fillUps = data.fillUps || [];
+  const budgets = data.budgets || [];
+  const trips = data.trips || [];
+  const places = data.places || [];
+  const routes = data.recurringRoutes || [];
+  const max = (arr: { id: number }[]) => arr.reduce((m, x) => Math.max(m, x.id || 0), 0);
+  const store: Store = {
+    seq: {
+      vehicles: max(vehicles) + 1,
+      fillUps: max(fillUps) + 1,
+      budgets: max(budgets) + 1,
+      trips: max(trips) + 1,
+      places: max(places) + 1,
+      routes: max(routes) + 1,
+    },
+    vehicles: [...vehicles],
+    fillUps: [...fillUps],
+    budgets: [...budgets],
+    trips: [...trips],
+    places: [...places],
+    routes: [...routes],
+  };
+  cache = store;
+  await save(store);
+}
+
+export async function hasLocalUserData(): Promise<boolean> {
+  const s = await load();
+  return (
+    s.vehicles.length + s.fillUps.length + s.trips.length + s.budgets.length + s.places.length > 0
+  );
+}
+
 export async function getMonthlySpend(months = 6): Promise<{ month: string; spent: number }[]> {
   const s = await load();
   const map = new Map<string, number>();
