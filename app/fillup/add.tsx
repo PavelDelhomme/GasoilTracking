@@ -14,11 +14,13 @@ import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
+import { DatePickerField } from '@/components/DatePickerField';
 import { createFillUp, updateVehicle } from '@/lib/database';
 import { adaptVehicleConsumption, formatEuro, refreshBudgets } from '@/lib/calculations';
 import { fetchCheapestStations, fuelLabel, type FuelStationPrice } from '@/lib/fuelPrices';
 import { getCurrentLocation } from '@/lib/locationService';
 import { notify } from '@/lib/notify';
+import { toLocalYmd } from '@/lib/dates';
 
 function parseNum(v: string): number {
   const n = parseFloat(String(v).replace(',', '.'));
@@ -39,11 +41,7 @@ export default function AddFillUpScreen() {
     activeVehicle?.hasOdometer ? String(activeVehicle.currentOdometer || '') : ''
   );
   const [distanceKm, setDistanceKm] = useState('');
-  const [dateLocal, setDateLocal] = useState(() => {
-    const d = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  });
+  const [dateLocal, setDateLocal] = useState(() => toLocalYmd(new Date()));
   const [isFull, setIsFull] = useState(true);
   const [note, setNote] = useState('');
   const [station, setStation] = useState<FuelStationPrice | null>(null);
@@ -107,6 +105,8 @@ export default function AddFillUpScreen() {
 
   const findStations = async () => {
     setLocating(true);
+    setStation(null);
+    setNearby([]);
     try {
       const loc = await getCurrentLocation();
       if (!loc) {
@@ -120,7 +120,6 @@ export default function AddFillUpScreen() {
         fuel: activeVehicle?.fuelType || 'diesel',
         limit: 10,
       });
-      // Tri par distance pour « où je suis »
       list.sort((a, b) => (a.distanceKm || 99) - (b.distanceKm || 99));
       setNearby(list);
       if (!list.length) notify('Stations', 'Aucune station dans un rayon de 3 km.');
@@ -132,7 +131,9 @@ export default function AddFillUpScreen() {
   };
 
   const pickStation = (s: FuelStationPrice) => {
+    // Remplace entièrement la sélection précédente (pas d’empilement)
     setStation(s);
+    setNearby([]);
     const apiPrice = s.prices[fuelKey];
     if (apiPrice != null) {
       setPricePerLiter(apiPrice.toFixed(3));
@@ -140,8 +141,11 @@ export default function AddFillUpScreen() {
       const L = parseNum(liters);
       if (L > 0) setTotalPaid((L * apiPrice).toFixed(2));
     }
-    const label = `${s.name} — ${s.address} ${s.city}`.trim();
-    setNote((prev) => (prev.includes(s.name) ? prev : label));
+    setNote(`${s.name} — ${s.address} ${s.city}`.trim());
+  };
+
+  const clearStation = () => {
+    setStation(null);
   };
 
   const envelopePreview = useMemo(() => {
@@ -238,16 +242,22 @@ export default function AddFillUpScreen() {
         {!hasOdo ? ' · suivi sans compteur' : ''}
       </Text>
 
-      <Input
-        label="Date du plein (AAAA-MM-JJ)"
+      <DatePickerField
+        label="Date du plein"
         value={dateLocal}
-        onChangeText={setDateLocal}
-        placeholder="2024-06-15"
+        onChange={setDateLocal}
+        maximumDate={new Date()}
       />
 
       <Text style={[styles.section, { color: colors.text }]}>Station</Text>
       <Button
-        title={locating ? 'Recherche…' : 'Trouver la station (GPS)'}
+        title={
+          locating
+            ? 'Recherche…'
+            : station
+              ? 'Changer de station (GPS)'
+              : 'Trouver la station (GPS)'
+        }
         variant="secondary"
         onPress={findStations}
         loading={locating}
@@ -261,31 +271,42 @@ export default function AddFillUpScreen() {
               ? ` · ${fuelLabel(fuelKey)} ${station.prices[fuelKey]!.toFixed(3)} €/L`
               : ''}
           </Text>
+          <Pressable onPress={clearStation} style={{ marginTop: 8 }}>
+            <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 13 }}>
+              Retirer la station
+            </Text>
+          </Pressable>
         </Card>
       )}
-      {nearby.map((s) => (
-        <Pressable
-          key={s.id}
-          onPress={() => pickStation(s)}
-          style={[
-            styles.stationRow,
-            {
-              borderColor: station?.id === s.id ? colors.accent : colors.border,
-              backgroundColor: colors.card,
-            },
-          ]}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.text, fontWeight: '600' }}>{s.name}</Text>
-            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-              {s.distanceKm} km · {s.address} {s.city}
+      {!station &&
+        nearby.map((s) => (
+          <Pressable
+            key={s.id}
+            onPress={() => pickStation(s)}
+            style={[
+              styles.stationRow,
+              {
+                borderColor: colors.border,
+                backgroundColor: colors.card,
+              },
+            ]}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.text, fontWeight: '600' }}>{s.name}</Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                {s.distanceKm} km · {s.address} {s.city}
+              </Text>
+            </View>
+            <Text style={{ color: colors.accent, fontWeight: '700' }}>
+              {s.prices[fuelKey] != null ? `${s.prices[fuelKey]!.toFixed(3)}€` : '—'}
             </Text>
-          </View>
-          <Text style={{ color: colors.accent, fontWeight: '700' }}>
-            {s.prices[fuelKey] != null ? `${s.prices[fuelKey]!.toFixed(3)}€` : '—'}
-          </Text>
-        </Pressable>
-      ))}
+          </Pressable>
+        ))}
+      {!station && nearby.length > 0 && (
+        <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 6, marginBottom: 4 }}>
+          Tapez une station pour la sélectionner (remplace le choix précédent).
+        </Text>
+      )}
 
       <Text style={[styles.section, { color: colors.text }]}>Quantité & montant</Text>
       <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
