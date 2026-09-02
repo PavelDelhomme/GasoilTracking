@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Linking, Switch } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp } from '@/context/AppContext';
+import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
@@ -25,6 +26,7 @@ export default function StationTripScreen() {
   }>();
   const { activeVehicle, refresh } = useApp();
   const { colors } = useTheme();
+  const { moneySymbol, formatPerLiter } = useLocale();
   const [doFillUp, setDoFillUp] = useState(true);
   const [isFull, setIsFull] = useState(true);
   const [liters, setLiters] = useState('');
@@ -117,7 +119,7 @@ export default function StationTripScreen() {
       <Text style={[styles.title, { color: colors.text }]}>{stationName}</Text>
       <Text style={{ color: colors.textSecondary, marginBottom: 16 }}>
         {params.address || 'Station essence'}
-        {params.price ? ` · ${params.price} €/L` : ''}
+        {params.price ? ` · ${formatPerLiter(parseFloat(params.price))}` : ''}
       </Text>
 
       {!activeVehicle && (
@@ -154,7 +156,7 @@ export default function StationTripScreen() {
             placeholder="45"
           />
           <Input
-            label="Prix au litre (€)"
+            label={`Prix au litre (${moneySymbol})`}
             value={price}
             onChangeText={setPrice}
             keyboardType="numeric"

@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
+import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Card, StatCard, ProgressBar } from '@/components/Card';
 import { Button } from '@/components/Button';
@@ -17,12 +18,14 @@ import {
 import { seedDemoData } from '@/lib/seedDemo';
 import { notify } from '@/lib/notify';
 import { isManagerEmail } from '@/lib/api';
+import { CountryPickerCard } from '@/components/CountryPickerCard';
 import type { ConsumptionStats } from '@/types';
 
 export default function HomeScreen() {
   const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles } = useApp();
   const { user, logout, syncNow } = useAuth();
   const { colors } = useTheme();
+  const { locale } = useLocale();
   const [stats, setStats] = useState<ConsumptionStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [seeding, setSeeding] = useState(false);
@@ -71,6 +74,7 @@ export default function HomeScreen() {
       style={[styles.container, { backgroundColor: colors.background }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
+      <CountryPickerCard />
       <Card style={{ marginBottom: 12 }}>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>
           {user ? `Bonjour, ${user.name}` : 'Compte cloud'}
@@ -149,7 +153,7 @@ export default function HomeScreen() {
               </View>
             </View>
             <Text style={[styles.odometer, { color: colors.textSecondary }]}>
-              {activeVehicle.currentOdometer.toLocaleString('fr-FR')} km
+              {activeVehicle.currentOdometer.toLocaleString(locale)} km
             </Text>
           </Card>
 

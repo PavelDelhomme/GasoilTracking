@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp } from '@/context/AppContext';
+import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
@@ -17,7 +18,7 @@ import { Card } from '@/components/Card';
 import { DatePickerField } from '@/components/DatePickerField';
 import { createFillUp, updateVehicle, updateTrip } from '@/lib/database';
 import { adaptVehicleConsumption, formatEuro, refreshBudgets } from '@/lib/calculations';
-import { fetchCheapestStations, fuelLabel, type FuelStationPrice } from '@/lib/fuelPrices';
+import { fetchCheapestStations, fuelLabel, isFrenchFuelOpenDataAvailable, type FuelStationPrice } from '@/lib/fuelPrices';
 import { getCurrentLocation } from '@/lib/locationService';
 import { notify } from '@/lib/notify';
 import { toLocalYmd } from '@/lib/dates';
@@ -32,6 +33,7 @@ export default function AddFillUpScreen() {
   const linkedTripId = params.tripId ? Number(params.tripId) : null;
   const { activeVehicle, budgetStatuses, refresh } = useApp();
   const { colors } = useTheme();
+  const { countryCode, moneySymbol, formatPerLiter, currency } = useLocale();
   const [liters, setLiters] = useState('');
   const [totalPaid, setTotalPaid] = useState('');
   const [pricePerLiter, setPricePerLiter] = useState(
@@ -106,6 +108,13 @@ export default function AddFillUpScreen() {
   };
 
   const findStations = async () => {
+    if (!isFrenchFuelOpenDataAvailable(countryCode)) {
+      notify(
+        'Stations',
+        'Les prix open data ne sont disponibles qu’en France. Saisissez litres et montant manuellement (tous pays Europe OK).'
+      );
+      return;
+    }
     setLocating(true);
     setStation(null);
     setNearby([]);
@@ -121,6 +130,7 @@ export default function AddFillUpScreen() {
         radiusKm: 3,
         fuel: activeVehicle?.fuelType || 'diesel',
         limit: 10,
+        countryCode,
       });
       list.sort((a, b) => (a.distanceKm || 99) - (b.distanceKm || 99));
       setNearby(list);
@@ -262,9 +272,11 @@ export default function AddFillUpScreen() {
         title={
           locating
             ? 'Recherche…'
-            : station
-              ? 'Changer de station (GPS)'
-              : 'Trouver la station (GPS)'
+            : !isFrenchFuelOpenDataAvailable(countryCode)
+              ? 'Stations auto (France uniquement)'
+              : station
+                ? 'Changer de station (GPS)'
+                : 'Trouver la station (GPS)'
         }
         variant="secondary"
         onPress={findStations}
@@ -276,7 +288,7 @@ export default function AddFillUpScreen() {
           <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
             {station.address} {station.city}
             {station.prices[fuelKey] != null
-              ? ` · ${fuelLabel(fuelKey)} ${station.prices[fuelKey]!.toFixed(3)} €/L`
+              ? ` · ${fuelLabel(fuelKey)} ${formatPerLiter(station.prices[fuelKey]!)}`
               : ''}
           </Text>
           <Pressable onPress={clearStation} style={{ marginTop: 8 }}>
@@ -306,7 +318,7 @@ export default function AddFillUpScreen() {
               </Text>
             </View>
             <Text style={{ color: colors.accent, fontWeight: '700' }}>
-              {s.prices[fuelKey] != null ? `${s.prices[fuelKey]!.toFixed(3)}€` : '—'}
+              {s.prices[fuelKey] != null ? formatPerLiter(s.prices[fuelKey]!) : '—'}
             </Text>
           </Pressable>
         ))}
@@ -328,14 +340,14 @@ export default function AddFillUpScreen() {
         keyboardType="decimal-pad"
       />
       <Input
-        label="Montant payé (€)"
+        label={`Montant payé (${currency})`}
         placeholder="78.50"
         value={totalPaid}
         onChangeText={onTotal}
         keyboardType="decimal-pad"
       />
       <Input
-        label="Prix au litre (€) — auto"
+        label={`Prix au litre (${moneySymbol}/L) — auto`}
         value={pricePerLiter}
         onChangeText={onPpl}
         keyboardType="decimal-pad"
@@ -343,7 +355,7 @@ export default function AddFillUpScreen() {
 
       {derived.total > 0 && derived.liters > 0 && (
         <Text style={[styles.total, { color: colors.accent }]}>
-          {derived.liters.toFixed(2)} L × {derived.ppl.toFixed(3)} €/L ={' '}
+          {derived.liters.toFixed(2)} L × {formatPerLiter(derived.ppl)} ={' '}
           {formatEuro(derived.total)}
         </Text>
       )}

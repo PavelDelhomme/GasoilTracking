@@ -1,4 +1,14 @@
-/** Dates affichage FR : JJ/MM/AAAA */
+/** Dates affichage (locale app, défaut fr-FR) */
+
+let appLocale = 'fr-FR';
+
+export function setAppDateLocale(locale: string) {
+  appLocale = locale || 'fr-FR';
+}
+
+export function getAppDateLocale(): string {
+  return appLocale;
+}
 
 export function pad2(n: number): string {
   return String(n).padStart(2, '0');
@@ -49,6 +59,6 @@ export function monthKeyFromDate(input: string | Date): string {
 export function formatMonthLabel(ym: string): string {
   const [y, m] = ym.split('-').map(Number);
   const d = new Date(y, m - 1, 1);
-  const label = d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+  const label = d.toLocaleDateString(appLocale, { month: 'long', year: 'numeric' });
   return label.charAt(0).toUpperCase() + label.slice(1);
 }

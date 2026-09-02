@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity, Text } from 'react-native';
 import { router } from 'expo-router';
 import { useApp } from '@/context/AppContext';
+import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
@@ -13,6 +14,7 @@ import type { Budget } from '@/types';
 export default function AddBudgetScreen() {
   const { activeVehicle, refresh } = useApp();
   const { colors } = useTheme();
+  const { currency } = useLocale();
   const [name, setName] = useState('Carburant mensuel');
   const [amount, setAmount] = useState('');
   const [period, setPeriod] = useState<Budget['period']>('monthly');
@@ -65,7 +67,7 @@ export default function AddBudgetScreen() {
         isActive: true,
       });
       await refresh();
-      notify('Enveloppe créée', `${name.trim()} — ${amount} €`);
+      notify('Enveloppe créée', `${name.trim()} — ${amount} ${currency}`);
       router.back();
     } catch {
       notify('Erreur', 'Impossible de créer le budget.');
@@ -107,7 +109,7 @@ export default function AddBudgetScreen() {
         onChangeText={setName}
       />
       <Input
-        label="Montant enveloppe (€)"
+        label={`Montant enveloppe (${currency})`}
         placeholder="200"
         value={amount}
         onChangeText={setAmount}

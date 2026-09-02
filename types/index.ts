@@ -64,7 +64,7 @@ export interface Budget {
   id: number;
   vehicleId: number | null;
   name: string;
-  /** Montant total du budget en € */
+  /** Montant total du budget (devise du pays choisi) */
   amount: number;
   /** Montant déjà consommé (calculé dynamiquement) */
   spent: number;

@@ -396,6 +396,42 @@ export async function updateBudgetSpent(id: number, spent: number): Promise<void
   await database.runAsync('UPDATE budgets SET spent = ? WHERE id = ?', [spent, id]);
 }
 
+export async function updateBudget(
+  id: number,
+  patch: { amount?: number; name?: string; spent?: number }
+): Promise<void> {
+  const database = await getDatabase();
+  const fields: string[] = [];
+  const values: (string | number)[] = [];
+  if (patch.amount !== undefined) {
+    fields.push('amount = ?');
+    values.push(patch.amount);
+  }
+  if (patch.name !== undefined) {
+    fields.push('name = ?');
+    values.push(patch.name);
+  }
+  if (patch.spent !== undefined) {
+    fields.push('spent = ?');
+    values.push(patch.spent);
+  }
+  if (!fields.length) return;
+  values.push(id);
+  await database.runAsync(`UPDATE budgets SET ${fields.join(', ')} WHERE id = ?`, values);
+}
+
+export async function updateFillUpMoney(
+  id: number,
+  pricePerLiter: number,
+  totalCost: number
+): Promise<void> {
+  const database = await getDatabase();
+  await database.runAsync(
+    'UPDATE fill_ups SET price_per_liter = ?, total_cost = ? WHERE id = ?',
+    [pricePerLiter, totalCost, id]
+  );
+}
+
 export async function deleteBudget(id: number): Promise<void> {
   const database = await getDatabase();
   await database.runAsync('DELETE FROM budgets WHERE id = ?', [id]);

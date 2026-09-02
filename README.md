@@ -2,6 +2,8 @@
 
 Application mobile (iOS & Android) + version web pour suivre la consommation de carburant, les budgets dynamiques et les trajets GPS.
 
+Utilisable en **voyage dans toute l’Europe** (UK, Espagne, Portugal, Islande, Finlande, Norvège, Allemagne, Italie, Suisse, …) avec **devise locale** et conversion des montants — voir [docs/EUROPE.md](docs/EUROPE.md).
+
 **Domaine** : https://gasoil-tracking.delhomme.ovh  
 **Portainer** : https://portainer.delhomme.ovh  
 **Nginx Proxy Manager** : https://nginx.delhomme.ovh

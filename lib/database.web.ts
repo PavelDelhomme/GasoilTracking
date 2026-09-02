@@ -190,6 +190,27 @@ export async function updateBudgetSpent(id: number, spent: number): Promise<void
   await save(s);
 }
 
+export async function updateBudget(
+  id: number,
+  patch: { amount?: number; name?: string; spent?: number }
+): Promise<void> {
+  const s = await load();
+  s.budgets = s.budgets.map((b) => (b.id === id ? { ...b, ...patch, id } : b));
+  await save(s);
+}
+
+export async function updateFillUpMoney(
+  id: number,
+  pricePerLiter: number,
+  totalCost: number
+): Promise<void> {
+  const s = await load();
+  s.fillUps = s.fillUps.map((f) =>
+    f.id === id ? { ...f, pricePerLiter, totalCost } : f
+  );
+  await save(s);
+}
+
 export async function deleteBudget(id: number): Promise<void> {
   const s = await load();
   s.budgets = s.budgets.filter((b) => b.id !== id);

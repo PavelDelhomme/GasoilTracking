@@ -31,15 +31,25 @@ export function fuelLabel(key: string): string {
 }
 
 /**
- * Stations autour d’un point — open data data.economie.gouv.fr
+ * Stations autour d’un point — open data data.economie.gouv.fr (France uniquement).
  */
+export function isFrenchFuelOpenDataAvailable(countryCode: string): boolean {
+  return countryCode === 'FR';
+}
+
 export async function fetchCheapestStations(opts: {
   latitude: number;
   longitude: number;
   radiusKm?: number;
   fuel?: FuelType;
   limit?: number;
+  countryCode?: string;
 }): Promise<FuelStationPrice[]> {
+  if (opts.countryCode && !isFrenchFuelOpenDataAvailable(opts.countryCode)) {
+    throw new Error(
+      'Les prix stations open data ne sont disponibles qu’en France. Saisissez le montant manuellement.'
+    );
+  }
   const radius = Math.max(1, Math.min(opts.radiusKm ?? 10, 30));
   const limit = opts.limit ?? 15;
   const fuelKey = mapAppFuel(opts.fuel || 'diesel');

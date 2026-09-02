@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { useApp } from '@/context/AppContext';
+import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
@@ -31,6 +32,7 @@ const PAGE = 12;
 export default function FillUpsScreen() {
   const { activeVehicle, refresh } = useApp();
   const { colors } = useTheme();
+  const { formatPerLiter, locale } = useLocale();
   const [allFillUps, setAllFillUps] = useState<FillUp[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedYear, setSelectedYear] = useState<string | 'all'>('all');
@@ -328,11 +330,11 @@ export default function FillUpsScreen() {
                 </View>
                 <View style={styles.fillUpDetails}>
                   <Text style={[styles.detail, { color: colors.textSecondary }]}>
-                    {fill.liters.toFixed(2)} L à {fill.pricePerLiter.toFixed(3)} €/L
+                    {fill.liters.toFixed(2)} L à {formatPerLiter(fill.pricePerLiter)}
                   </Text>
                   <Text style={[styles.detail, { color: colors.textSecondary }]}>
                     {fill.odometer != null
-                      ? `${fill.odometer.toLocaleString('fr-FR')} km`
+                      ? `${fill.odometer.toLocaleString(locale)} km`
                       : fill.distanceSinceLastKm != null
                         ? `+${fill.distanceSinceLastKm.toFixed(0)} km`
                         : 'km N/D'}

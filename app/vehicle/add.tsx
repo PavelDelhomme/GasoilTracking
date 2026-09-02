@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { useApp } from '@/context/AppContext';
+import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
@@ -22,6 +23,7 @@ import type { FuelType } from '@/types';
 export default function AddVehicleScreen() {
   const { refresh } = useApp();
   const { colors } = useTheme();
+  const { country, moneySymbol } = useLocale();
   const [name, setName] = useState('');
   const [brand, setBrand] = useState('');
   const [model, setModel] = useState('');
@@ -29,7 +31,7 @@ export default function AddVehicleScreen() {
   const [fuelType, setFuelType] = useState<FuelType>('diesel');
   const [consumption, setConsumption] = useState('6.0');
   const [tankCapacity, setTankCapacity] = useState('50');
-  const [fuelPrice, setFuelPrice] = useState('1.75');
+  const [fuelPrice, setFuelPrice] = useState(String(country.defaultFuelPrice));
   const [odometer, setOdometer] = useState('0');
   const [hasOdometer, setHasOdometer] = useState(true);
   const [search, setSearch] = useState('');
@@ -94,7 +96,7 @@ export default function AddVehicleScreen() {
       fuelType: preset.fuel,
       consumptionPer100: preset.consumption,
       tankCapacity: preset.tank,
-      defaultFuelPrice: parseFloat(fuelPrice) || 1.75,
+      defaultFuelPrice: parseFloat(fuelPrice) || country.defaultFuelPrice,
       currentOdometer: 0,
       hasOdometer: !preset.odometerUnreliable,
     });
@@ -126,7 +128,7 @@ export default function AddVehicleScreen() {
       fuelType,
       consumptionPer100: parseFloat(consumption.replace(',', '.')) || 6,
       tankCapacity: parseFloat(tankCapacity.replace(',', '.')) || 50,
-      defaultFuelPrice: parseFloat(fuelPrice.replace(',', '.')) || 1.75,
+      defaultFuelPrice: parseFloat(fuelPrice.replace(',', '.')) || country.defaultFuelPrice,
       currentOdometer: hasOdometer ? parseFloat(odometer.replace(',', '.')) || 0 : 0,
       hasOdometer,
     });
@@ -260,7 +262,7 @@ export default function AddVehicleScreen() {
         keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
       />
       <Input
-        label="Prix carburant par défaut (€/L)"
+        label={`Prix carburant par défaut (${moneySymbol}/L)`}
         value={fuelPrice}
         onChangeText={setFuelPrice}
         keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}

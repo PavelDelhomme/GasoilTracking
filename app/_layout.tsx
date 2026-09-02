@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AppProvider } from '@/context/AppContext';
 import { AuthProvider } from '@/context/AuthContext';
+import { LocaleProvider } from '@/context/LocaleContext';
 import { ThemeProvider, useTheme } from '@/context/ThemeContext';
 import { ThemeToggleButton } from '@/components/ThemeToggleButton';
 import { ClientOnly } from '@/components/ClientOnly';
@@ -65,11 +66,13 @@ export default function RootLayout() {
   return (
     <ClientOnly>
       <ThemeProvider>
-        <AuthProvider>
-          <AppProvider>
-            <RootNavigation />
-          </AppProvider>
-        </AuthProvider>
+        <LocaleProvider>
+          <AuthProvider>
+            <AppProvider>
+              <RootNavigation />
+            </AppProvider>
+          </AuthProvider>
+        </LocaleProvider>
       </ThemeProvider>
     </ClientOnly>
   );

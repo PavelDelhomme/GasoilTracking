@@ -216,9 +216,15 @@ export function averageSpeedKmh(distanceKm: number, durationMinutes: number): nu
   return (distanceKm / durationMinutes) * 60;
 }
 
-/** Formate un montant en euros */
+/** Formate un montant (devise selon le pays choisi) */
+let moneyFormatter: (amount: number) => string = (amount) => `${amount.toFixed(2)} €`;
+
+export function setMoneyFormatter(fn: (amount: number) => string) {
+  moneyFormatter = fn;
+}
+
 export function formatEuro(amount: number): string {
-  return `${amount.toFixed(2)} €`;
+  return moneyFormatter(amount);
 }
 
 /** Formate une consommation */

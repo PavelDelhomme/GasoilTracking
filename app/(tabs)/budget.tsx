@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useApp } from '@/context/AppContext';
+import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Card, ProgressBar } from '@/components/Card';
 import { Button } from '@/components/Button';
@@ -22,7 +23,12 @@ import {
   getPlaces,
   getRecurringRoutes,
 } from '@/lib/database';
-import { fetchCheapestStations, fuelLabel, type FuelStationPrice } from '@/lib/fuelPrices';
+import {
+  fetchCheapestStations,
+  fuelLabel,
+  isFrenchFuelOpenDataAvailable,
+  type FuelStationPrice,
+} from '@/lib/fuelPrices';
 import { getCurrentLocation } from '@/lib/locationService';
 import { confirm } from '@/lib/notify';
 import type { BudgetStatus, FillUp, Place, RecurringRoute } from '@/types';
@@ -37,6 +43,7 @@ const KIND_LABEL: Record<string, string> = {
 export default function BudgetScreen() {
   const { budgetStatuses, activeVehicle, refresh } = useApp();
   const { colors } = useTheme();
+  const { countryCode, formatPerLiter, locale } = useLocale();
   const [refreshing, setRefreshing] = useState(false);
   const [places, setPlaces] = useState<Place[]>([]);
   const [routes, setRoutes] = useState<RecurringRoute[]>([]);
@@ -105,6 +112,14 @@ export default function BudgetScreen() {
   const loadFuelPrices = async () => {
     setFuelLoading(true);
     setFuelError('');
+    setStations([]);
+    if (!isFrenchFuelOpenDataAvailable(countryCode)) {
+      setFuelError(
+        'Prix stations open data : France uniquement. Ailleurs en Europe, saisissez vos pleins manuellement (devise du pays).'
+      );
+      setFuelLoading(false);
+      return;
+    }
     try {
       let lat = 50.6292;
       let lon = 3.0573; // Lille défaut
@@ -125,6 +140,7 @@ export default function BudgetScreen() {
         radiusKm: 12,
         fuel: activeVehicle?.fuelType || 'diesel',
         limit: 8,
+        countryCode,
       });
       setStations(list);
       if (!list.length) setFuelError('Aucune station trouvée dans ce rayon.');
@@ -212,11 +228,11 @@ export default function BudgetScreen() {
                     }}
                   >
                     <Text style={{ color: colors.text, fontWeight: '600' }}>
-                      {new Date(f.date).toLocaleDateString('fr-FR')} · {f.liters.toFixed(1)} L ·{' '}
+                      {new Date(f.date).toLocaleDateString(locale)} · {f.liters.toFixed(1)} L ·{' '}
                       {formatEuro(f.totalCost)}
                     </Text>
                     <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                      {f.pricePerLiter.toFixed(3)} €/L
+                      {formatPerLiter(f.pricePerLiter)}
                       {f.note ? ` · ${f.note}` : ''}
                     </Text>
                   </View>
@@ -372,7 +388,7 @@ export default function BudgetScreen() {
                   </Text>
                 </View>
                 <Text style={{ color: colors.accent, fontWeight: '700' }}>
-                  {price != null ? `${price.toFixed(3)} €` : '—'}
+                  {price != null ? formatPerLiter(price) : '—'}
                 </Text>
               </Pressable>
             );
