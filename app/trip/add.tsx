@@ -1,28 +1,101 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { router } from 'expo-router';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
-import { createTrip, addTrackedKm } from '@/lib/database';
+import { DatePickerField } from '@/components/DatePickerField';
+import { PlaceSuggestField } from '@/components/PlaceSuggestField';
+import {
+  createTrip,
+  addTrackedKm,
+  getPlaces,
+  getRecurringRoutes,
+} from '@/lib/database';
 import { notify } from '@/lib/notify';
+import { toLocalYmd } from '@/lib/dates';
+import type { Place, RecurringRoute } from '@/types';
 
 export default function AddTripScreen() {
   const { activeVehicle, refresh } = useApp();
   const { colors } = useTheme();
+  const [places, setPlaces] = useState<Place[]>([]);
+  const [routes, setRoutes] = useState<RecurringRoute[]>([]);
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
-  const [dateLocal, setDateLocal] = useState(() => {
-    const d = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  });
+  const [fromPlace, setFromPlace] = useState<Place | null>(null);
+  const [toPlace, setToPlace] = useState<Place | null>(null);
+  const [dateLocal, setDateLocal] = useState(() => toLocalYmd(new Date()));
   const [startTime, setStartTime] = useState('08:30');
   const [endTime, setEndTime] = useState('09:15');
   const [distanceKm, setDistanceKm] = useState('');
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const [p, r] = await Promise.all([
+        getPlaces(),
+        getRecurringRoutes(activeVehicle?.id),
+      ]);
+      if (cancelled) return;
+      setPlaces(p);
+      setRoutes(r);
+      setOrigin((prev) => {
+        if (prev) return prev;
+        const home = p.find((x) => x.kind === 'home');
+        if (!home) return prev;
+        setFromPlace(home);
+        return home.address ? `${home.name} — ${home.address}` : home.name;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeVehicle?.id]);
+
+  // Préremplit la distance si un trajet régulier correspond
+  useEffect(() => {
+    if (!fromPlace || !toPlace) return;
+    const match = routes.find(
+      (r) =>
+        (r.fromPlaceId === fromPlace.id && r.toPlaceId === toPlace.id) ||
+        (r.fromPlaceId === toPlace.id && r.toPlaceId === fromPlace.id)
+    );
+    if (match?.distanceKm) {
+      setDistanceKm(String(match.distanceKm));
+    }
+  }, [fromPlace, toPlace, routes]);
+
+  const swap = () => {
+    setOrigin(destination);
+    setDestination(origin);
+    setFromPlace(toPlace);
+    setToPlace(fromPlace);
+  };
+
+  const applyCommute = (dir: 'toWork' | 'toHome') => {
+    const home = places.find((p) => p.kind === 'home');
+    const work = places.find((p) => p.kind === 'work');
+    if (!home || !work) {
+      notify('Lieux', 'Ajoutez d’abord un Domicile et un Travail (onglet Budget).');
+      return;
+    }
+    const label = (p: Place) => (p.address ? `${p.name} — ${p.address}` : p.name);
+    if (dir === 'toWork') {
+      setOrigin(label(home));
+      setDestination(label(work));
+      setFromPlace(home);
+      setToPlace(work);
+    } else {
+      setOrigin(label(work));
+      setDestination(label(home));
+      setFromPlace(work);
+      setToPlace(home);
+    }
+  };
 
   const handleSave = async () => {
     if (!activeVehicle) {
@@ -33,7 +106,7 @@ export default function AddTripScreen() {
       notify('Erreur', 'Indiquez une destination.');
       return;
     }
-    const km = parseFloat(distanceKm);
+    const km = parseFloat(distanceKm.replace(',', '.'));
     if (!km || km <= 0) {
       notify('Erreur', 'Distance (km) requise.');
       return;
@@ -44,7 +117,7 @@ export default function AddTripScreen() {
       const start = new Date(`${dateLocal}T${startTime}:00`);
       const end = new Date(`${dateLocal}T${endTime}:00`);
       if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-        throw new Error('Date / heure invalide (AAAA-MM-JJ et HH:MM).');
+        throw new Error('Date / heure invalide.');
       }
       const fuel = (km * activeVehicle.consumptionPer100) / 100;
       const cost = fuel * activeVehicle.defaultFuelPrice;
@@ -92,16 +165,59 @@ export default function AddTripScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <Text style={[styles.sub, { color: colors.textSecondary }]}>
-        Véhicule : {activeVehicle.name} — saisie manuelle avec date & lieux.
+        Véhicule : {activeVehicle.name} — suggestions depuis vos lieux (domicile, travail…).
       </Text>
-      <Input label="Départ (adresse / lieu)" value={origin} onChangeText={setOrigin} placeholder="Domicile, 12 rue…" />
-      <Input
+
+      <View style={styles.quickRow}>
+        <Pressable
+          onPress={() => applyCommute('toWork')}
+          style={[styles.quickBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
+        >
+          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>
+            Domicile → Travail
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => applyCommute('toHome')}
+          style={[styles.quickBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
+        >
+          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>
+            Travail → Domicile
+          </Text>
+        </Pressable>
+      </View>
+
+      <PlaceSuggestField
+        label="Départ (adresse / lieu)"
+        value={origin}
+        onChangeText={(t) => {
+          setOrigin(t);
+          setFromPlace(null);
+        }}
+        onPickPlace={setFromPlace}
+        places={places}
+        placeholder="Domicile, 12 rue…"
+        preferKinds={['home', 'work']}
+      />
+
+      <Pressable onPress={swap} style={{ alignSelf: 'center', marginBottom: 8 }}>
+        <Text style={{ color: colors.accent, fontWeight: '700' }}>↕ Inverser</Text>
+      </Pressable>
+
+      <PlaceSuggestField
         label="Arrivée"
         value={destination}
-        onChangeText={setDestination}
+        onChangeText={(t) => {
+          setDestination(t);
+          setToPlace(null);
+        }}
+        onPickPlace={setToPlace}
+        places={places}
         placeholder="Bureau, Paris…"
+        preferKinds={['work', 'home']}
       />
-      <Input label="Date (AAAA-MM-JJ)" value={dateLocal} onChangeText={setDateLocal} />
+
+      <DatePickerField label="Date du trajet" value={dateLocal} onChange={setDateLocal} />
       <Input label="Heure départ (HH:MM)" value={startTime} onChangeText={setStartTime} />
       <Input label="Heure arrivée (HH:MM)" value={endTime} onChangeText={setEndTime} />
       <Input
@@ -113,6 +229,12 @@ export default function AddTripScreen() {
       />
       <Input label="Note (optionnel)" value={note} onChangeText={setNote} />
       <Button title="Enregistrer le trajet" onPress={handleSave} loading={loading} />
+      <Button
+        title="Importer Timeline Google"
+        variant="outline"
+        onPress={() => router.push('/trip/import' as never)}
+        style={{ marginTop: 10 }}
+      />
     </ScrollView>
   );
 }
@@ -120,5 +242,14 @@ export default function AddTripScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 16, paddingBottom: 40 },
-  sub: { fontSize: 13, marginBottom: 16, lineHeight: 18 },
+  sub: { fontSize: 13, marginBottom: 12, lineHeight: 18 },
+  quickRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  quickBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+  },
 });

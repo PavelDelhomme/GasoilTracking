@@ -143,21 +143,33 @@ function classifyActivity(seg: NonNullable<TimelineSegment['activitySegment']>):
 }
 
 /**
- * Import Google Takeout Semantic Location History (JSON).
- * Détecte les trajets voiture vs autres ; tous en status pending pour validation.
+ * Import Google Timeline / Takeout (JSON).
+ * Formats supportés :
+ * - Takeout classique `timelineObjects[].activitySegment`
+ * - Export Maps récent `semanticSegments[].activity` (stockage appareil)
  */
 export function parseGoogleTimelineJson(raw: string): ImportedTripDraft[] {
-  let data: { timelineObjects?: TimelineSegment[] } | TimelineSegment[];
+  let data: unknown;
   try {
     data = JSON.parse(raw);
   } catch {
-    throw new Error('JSON invalide — exportez l’historique Google (Takeout) en JSON.');
+    throw new Error(
+      'JSON invalide — exportez Timeline depuis Google Maps (menu → Exporter les données Timeline).'
+    );
   }
 
-  const objects = Array.isArray(data)
-    ? data
-    : data.timelineObjects || [];
+  const classic = parseClassicTimeline(data);
+  if (classic.length) return classic;
 
+  const semantic = parseSemanticSegments(data);
+  if (semantic.length) return semantic;
+
+  return [];
+}
+
+function parseClassicTimeline(data: unknown): ImportedTripDraft[] {
+  const root = data as { timelineObjects?: TimelineSegment[] } | TimelineSegment[];
+  const objects = Array.isArray(root) ? root : root.timelineObjects || [];
   const drafts: ImportedTripDraft[] = [];
 
   for (const obj of objects) {
@@ -177,10 +189,7 @@ export function parseGoogleTimelineJson(raw: string): ImportedTripDraft[] {
         : null);
     if (!start) continue;
 
-    const meters =
-      seg.distance ??
-      seg.waypointPath?.distanceMeters ??
-      0;
+    const meters = seg.distance ?? seg.waypointPath?.distanceMeters ?? 0;
     const distanceKm = meters > 0 ? meters / 1000 : 0;
     if (distanceKm < 0.2 && activityType !== 'driving') continue;
 
@@ -199,6 +208,67 @@ export function parseGoogleTimelineJson(raw: string): ImportedTripDraft[] {
           : activityType === 'other'
             ? 'Détecté : autre mode (à valider ou ignorer)'
             : 'Détecté : mode indéfini (à classer)',
+    });
+  }
+
+  return drafts.sort((a, b) => b.startTime.localeCompare(a.startTime));
+}
+
+function parseLatLng(raw?: string): string | null {
+  if (!raw) return null;
+  // "48.8566°, 2.3522°" ou "48.8566, 2.3522"
+  const m = raw.match(/(-?\d+(?:\.\d+)?)\s*°?\s*,\s*(-?\d+(?:\.\d+)?)\s*°?/);
+  if (!m) return raw;
+  return `${Number(m[1]).toFixed(4)}, ${Number(m[2]).toFixed(4)}`;
+}
+
+function parseSemanticSegments(data: unknown): ImportedTripDraft[] {
+  const root = data as {
+    semanticSegments?: Array<{
+      startTime?: string;
+      endTime?: string;
+      activity?: {
+        distanceMeters?: number;
+        start?: { latLng?: string; name?: string };
+        end?: { latLng?: string; name?: string };
+        topCandidate?: { type?: string; probability?: number };
+      };
+    }>;
+  };
+  const segs = root.semanticSegments || [];
+  const drafts: ImportedTripDraft[] = [];
+
+  for (const seg of segs) {
+    const act = seg.activity;
+    if (!act || !seg.startTime) continue;
+    const type = String(act.topCandidate?.type || '').toUpperCase();
+    const driving = /IN_PASSENGER_VEHICLE|IN_VEHICLE|MOTORCYCLING|DRIVING|IN_TAXI/.test(type);
+    const other = /WALKING|RUNNING|CYCLING|ON_BICYCLE|ON_FOOT|IN_BUS|IN_TRAIN|IN_SUBWAY|FLYING|STILL/.test(
+      type
+    );
+    const activityType: ImportedTripDraft['activityType'] = driving
+      ? 'driving'
+      : other
+        ? 'other'
+        : 'unknown';
+    const meters = act.distanceMeters || 0;
+    const distanceKm = meters > 0 ? meters / 1000 : 0;
+    if (distanceKm < 0.2 && activityType !== 'driving') continue;
+
+    drafts.push({
+      originName: act.start?.name || parseLatLng(act.start?.latLng) || 'Départ',
+      destinationName: act.end?.name || parseLatLng(act.end?.latLng) || 'Arrivée',
+      startTime: seg.startTime,
+      endTime: seg.endTime || null,
+      distanceKm: Math.round(distanceKm * 100) / 100,
+      activityType,
+      source: 'detected',
+      status: 'pending',
+      note: driving
+        ? 'Timeline Maps (appareil) — voiture à valider'
+        : other
+          ? 'Timeline Maps — autre mode'
+          : 'Timeline Maps — mode indéfini',
     });
   }
 

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Platform } from 'react-native';
 import { router } from 'expo-router';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
@@ -19,9 +21,9 @@ export default function ImportTripsScreen() {
   const { activeVehicle, refresh } = useApp();
   const { colors } = useTheme();
   const [mapsUrl, setMapsUrl] = useState('');
-  const [jsonPaste, setJsonPaste] = useState('');
   const [drafts, setDrafts] = useState<ImportedTripDraft[]>([]);
   const [loading, setLoading] = useState(false);
+  const [picking, setPicking] = useState(false);
 
   const estimate = (km: number) => {
     if (!activeVehicle) return { fuel: 0, cost: 0 };
@@ -29,32 +31,69 @@ export default function ImportTripsScreen() {
     return { fuel, cost: fuel * activeVehicle.defaultFuelPrice };
   };
 
+  const mergeDrafts = (list: ImportedTripDraft[]) => {
+    setDrafts((prev) => [...list, ...prev]);
+  };
+
   const parseUrl = () => {
     const d = parseGoogleMapsUrl(mapsUrl);
     if (!d) {
-      notify('Import', 'URL non reconnue. Collez un lien Google Maps Directions ou « Départ → Arrivée ».');
+      notify(
+        'Import',
+        'URL non reconnue. Collez un lien Google Maps Directions ou « Départ → Arrivée ».'
+      );
       return;
     }
-    setDrafts((prev) => [d, ...prev]);
+    mergeDrafts([d]);
     setMapsUrl('');
   };
 
-  const parseJson = () => {
-    try {
-      const list = parseGoogleTimelineJson(jsonPaste);
-      if (!list.length) {
-        notify('Import', 'Aucun trajet trouvé dans ce JSON.');
-        return;
-      }
-      setDrafts((prev) => [...list, ...prev]);
-      setJsonPaste('');
-      notify(
-        'Import',
-        `${list.length} trajet(s) détectés. Validez ceux en voiture, ignorez les autres.`
-      );
-    } catch (e) {
-      notify('Erreur', e instanceof Error ? e.message : 'JSON invalide');
+  const ingestJsonText = (raw: string) => {
+    const list = parseGoogleTimelineJson(raw);
+    if (!list.length) {
+      notify('Import', 'Aucun trajet trouvé dans ce fichier Timeline.');
+      return;
     }
+    mergeDrafts(list);
+    notify(
+      'Import',
+      `${list.length} trajet(s) détectés. Validez ceux en voiture, ignorez les autres.`
+    );
+  };
+
+  /** Google n’offre plus d’API OAuth Timeline — export fichier depuis Maps. */
+  const pickTimelineFile = async () => {
+    setPicking(true);
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: ['application/json', 'text/plain', '*/*'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (res.canceled || !res.assets?.[0]) return;
+      const asset = res.assets[0];
+      let raw = '';
+      if (Platform.OS === 'web') {
+        const file = (asset as { file?: File }).file;
+        if (file) raw = await file.text();
+        else {
+          notify('Import', 'Impossible de lire le fichier sur le web.');
+          return;
+        }
+      } else {
+        raw = await FileSystem.readAsStringAsync(asset.uri);
+      }
+      ingestJsonText(raw);
+    } catch (e) {
+      notify('Erreur', e instanceof Error ? e.message : 'Lecture fichier impossible');
+    } finally {
+      setPicking(false);
+    }
+  };
+
+  const openMapsTimelineHelp = async () => {
+    // Guide utilisateur : export depuis l’app Maps (données sur l’appareil)
+    await Linking.openURL('https://support.google.com/maps/answer/6258979');
   };
 
   const toggleReject = (index: number) => {
@@ -135,9 +174,36 @@ export default function ImportTripsScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <Text style={[styles.title, { color: colors.text }]}>Importer depuis Google Maps</Text>
+
+      <Card style={{ marginBottom: 14 }}>
+        <Text style={{ color: colors.text, fontWeight: '700', marginBottom: 6 }}>
+          Timeline (votre compte Google)
+        </Text>
+        <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 10 }}>
+          Google ne laisse plus les apps se connecter en OAuth pour lire Timeline (données sur
+          l’appareil uniquement). Le flux propre : exportez Timeline depuis Maps, puis choisissez
+          le fichier ici pour sélectionner / valider les trajets.
+        </Text>
+        <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginBottom: 12 }}>
+          Sur Android : Maps → votre photo → Votre Timeline → ⋮ → Paramètres → Exporter les données
+          Timeline → enregistrez le JSON → ouvrez-le ci-dessous.
+        </Text>
+        <Button
+          title={picking ? 'Ouverture…' : 'Choisir mon fichier Timeline (.json)'}
+          onPress={pickTimelineFile}
+          loading={picking}
+        />
+        <Button
+          title="Aide Google Maps (Timeline)"
+          variant="outline"
+          onPress={openMapsTimelineHelp}
+          style={{ marginTop: 10 }}
+        />
+      </Card>
+
+      <Text style={[styles.section, { color: colors.text }]}>Ou coller un lien Maps</Text>
       <Text style={[styles.hint, { color: colors.textSecondary }]}>
-        Collez une URL d’itinéraire Maps, un texte « Départ → Arrivée », ou le JSON Timeline
-        (Google Takeout). Les trajets détectés restent à valider.
+        Lien d’itinéraire Directions, ou texte « Départ → Arrivée ».
       </Text>
 
       <Input
@@ -148,16 +214,6 @@ export default function ImportTripsScreen() {
         placeholder="https://www.google.com/maps/dir/Lille/Paris/"
       />
       <Button title="Ajouter depuis l’URL" variant="secondary" onPress={parseUrl} />
-
-      <Input
-        label="JSON Timeline Takeout (coller)"
-        value={jsonPaste}
-        onChangeText={setJsonPaste}
-        multiline
-        style={{ minHeight: 100, textAlignVertical: 'top' }}
-        placeholder='{"timelineObjects":[...]}'
-      />
-      <Button title="Analyser le JSON" variant="outline" onPress={parseJson} style={{ marginBottom: 16 }} />
 
       {drafts.map((d, i) => {
         const rejected = d.status === 'rejected';
@@ -181,8 +237,8 @@ export default function ImportTripsScreen() {
               {d.originName} → {d.destinationName}
             </Text>
             <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
-              {new Date(d.startTime).toLocaleString('fr-FR')} · {formatDistance(d.distanceKm)} · {tag} ·{' '}
-              {d.source}
+              {new Date(d.startTime).toLocaleString('fr-FR')} · {formatDistance(d.distanceKm)} ·{' '}
+              {tag} · {d.source}
             </Text>
             {!!d.note && (
               <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>{d.note}</Text>
@@ -208,7 +264,11 @@ export default function ImportTripsScreen() {
       })}
 
       {drafts.length > 0 && (
-        <Button title={`Enregistrer (${drafts.filter((d) => d.status !== 'rejected').length})`} onPress={saveAll} loading={loading} />
+        <Button
+          title={`Enregistrer (${drafts.filter((d) => d.status !== 'rejected').length})`}
+          onPress={saveAll}
+          loading={loading}
+        />
       )}
     </ScrollView>
   );
@@ -217,7 +277,8 @@ export default function ImportTripsScreen() {
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
   content: { padding: 16, paddingBottom: 40 },
-  title: { fontSize: 20, fontWeight: '700', marginBottom: 8 },
-  hint: { fontSize: 13, lineHeight: 18, marginBottom: 16 },
+  title: { fontSize: 20, fontWeight: '700', marginBottom: 12 },
+  section: { fontSize: 16, fontWeight: '700', marginTop: 8, marginBottom: 4 },
+  hint: { fontSize: 13, lineHeight: 18, marginBottom: 12 },
   row: { flexDirection: 'row', gap: 20, marginTop: 10 },
 });
