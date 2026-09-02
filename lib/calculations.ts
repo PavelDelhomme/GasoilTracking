@@ -188,8 +188,13 @@ export async function getSinceLastFillStats(vehicleId: number): Promise<SinceLas
   const fuelUsedEst = Math.round(estimateFuelUsed(tripKm, conso) * 100) / 100;
   const startFuel = lastFill.isFull
     ? vehicle.tankCapacity
-    : Math.min(vehicle.tankCapacity, lastFill.liters);
-  const fuelRemainingEst = Math.max(0, Math.round((startFuel - fuelUsedEst) * 100) / 100);
+    : vehicle.estimatedFuelLiters != null
+      ? vehicle.estimatedFuelLiters + fuelUsedEst
+      : Math.min(vehicle.tankCapacity, lastFill.liters);
+  const fuelRemainingEst =
+    vehicle.estimatedFuelLiters != null
+      ? Math.max(0, Math.round(vehicle.estimatedFuelLiters * 100) / 100)
+      : Math.max(0, Math.round((startFuel - fuelUsedEst) * 100) / 100);
   const rangeKm =
     conso > 0 ? Math.round((fuelRemainingEst / conso) * 1000) / 10 : 0;
 

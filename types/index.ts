@@ -16,6 +16,11 @@ export interface Vehicle {
   hasOdometer: boolean;
   /** Km cumulés via trajets GPS (si pas de compteur) */
   trackedKm: number;
+  /**
+   * Niveau carburant estimé (L). null = inconnu (autre voiture / pas de référence).
+   * Mis à jour aux pleins / trajets ; saisissable manuellement.
+   */
+  estimatedFuelLiters: number | null;
   isActive: boolean;
   createdAt: string;
 }

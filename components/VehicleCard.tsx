@@ -4,6 +4,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
 import type { Vehicle } from '@/types';
 import { formatConsumption } from '@/lib/calculations';
+import { fuelLevelLabel } from '@/lib/fuelLevel';
 
 interface VehicleCardProps {
   vehicle: Vehicle;
@@ -72,6 +73,10 @@ export function VehicleCard({
           <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Carburant</Text>
         </View>
       </View>
+      <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 10 }}>
+        {fuelLevelLabel(vehicle)}
+        {isActive ? ' · véhicule par défaut' : ''}
+      </Text>
 
       <View style={styles.actions}>
         {!isActive && onSelect && (

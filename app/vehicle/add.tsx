@@ -51,14 +51,18 @@ export default function AddVehicleScreen() {
     defaultFuelPrice: number;
     currentOdometer: number;
     hasOdometer: boolean;
+    trackedKm?: number;
+    estimatedFuelLiters?: number | null;
+    isActive?: boolean;
   }) => {
     setLoading(true);
     setStatus('Enregistrement…');
     try {
       const id = await createVehicle({
         ...payload,
-        trackedKm: 0,
-        isActive: true,
+        trackedKm: payload.trackedKm ?? 0,
+        estimatedFuelLiters: payload.estimatedFuelLiters ?? null,
+        isActive: payload.isActive ?? true,
       });
       if (!id && id !== 0) {
         // lastInsertRowId peut être 1+ ; 0 serait bizarre mais on vérifie falsy non-number
@@ -99,6 +103,9 @@ export default function AddVehicleScreen() {
       defaultFuelPrice: parseFloat(fuelPrice) || country.defaultFuelPrice,
       currentOdometer: 0,
       hasOdometer: !preset.odometerUnreliable,
+      trackedKm: 0,
+      estimatedFuelLiters: null,
+      isActive: true,
     });
   };
 

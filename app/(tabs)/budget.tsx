@@ -88,6 +88,8 @@ export default function BudgetScreen() {
   useFocusEffect(
     useCallback(() => {
       loadExtra();
+      // Prix stations auto à l’ouverture (France)
+      void loadFuelPrices();
     }, [loadExtra])
   );
 
@@ -266,6 +268,12 @@ export default function BudgetScreen() {
             places.map((p) => (
               <Pressable
                 key={p.id}
+                onPress={() =>
+                  router.push({
+                    pathname: '/place/edit' as never,
+                    params: { id: String(p.id) },
+                  } as never)
+                }
                 onLongPress={() =>
                   confirm('Supprimer', `Supprimer « ${p.name} » ?`, async () => {
                     await deletePlace(p.id);
@@ -278,15 +286,20 @@ export default function BudgetScreen() {
                   <Text style={{ color: colors.text, fontWeight: '600' }}>
                     {KIND_LABEL[p.kind] || p.kind} — {p.name}
                   </Text>
-                  {!!p.address && (
-                    <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{p.address}</Text>
-                  )}
+                  <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                    {p.address?.trim()
+                      ? p.address
+                      : p.latitude != null
+                        ? `${p.latitude.toFixed(5)}, ${p.longitude?.toFixed(5)}`
+                        : 'Aucune adresse — taper pour modifier'}
+                  </Text>
                 </View>
+                <Text style={{ color: colors.accent, fontWeight: '700' }}>Édit.</Text>
               </Pressable>
             ))
           )}
           <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
-            Appui long pour supprimer un lieu.
+            Tap = modifier (adresse exacte). Appui long = supprimer.
           </Text>
         </Card>
 
@@ -305,7 +318,7 @@ export default function BudgetScreen() {
         <Card>
           {routes.length === 0 ? (
             <Text style={{ color: colors.textSecondary }}>
-              Ex. Domicile → Travail, jours / semaine, vacances. Tap = vacances, long = supprimer.
+              Ex. Domicile → Travail. Tap = modifier. Long = supprimer.
             </Text>
           ) : (
             routes.map((r) => {
@@ -318,29 +331,17 @@ export default function BudgetScreen() {
               return (
                 <Pressable
                   key={r.id}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/place/route' as never,
+                      params: { id: String(r.id) },
+                    } as never)
+                  }
                   onLongPress={() =>
                     confirm('Supprimer', `Supprimer « ${r.name} » ?`, async () => {
                       await deleteRecurringRoute(r.id);
                       await loadExtra();
                     }, 'Supprimer')
-                  }
-                  onPress={() =>
-                    confirm(
-                      onVac ? 'Reprendre ?' : 'Mettre en vacances ?',
-                      onVac
-                        ? 'Réactiver l’estimation pour ce trajet ?'
-                        : 'Pause estimation (congés) jusqu’à nouvel ordre ?',
-                      async () => {
-                        await updateRecurringRoute(r.id, {
-                          isOnVacation: !onVac,
-                          vacationUntil: !onVac
-                            ? new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10)
-                            : null,
-                        });
-                        await loadExtra();
-                      },
-                      onVac ? 'Reprendre' : 'Vacances'
-                    )
                   }
                   style={[styles.placeRow, { borderBottomColor: colors.border }]}
                 >
@@ -355,6 +356,7 @@ export default function BudgetScreen() {
                       {onVac && r.vacationUntil ? ` · reprise ${r.vacationUntil}` : ''}
                     </Text>
                   </View>
+                  <Text style={{ color: colors.accent, fontWeight: '700' }}>Édit.</Text>
                 </Pressable>
               );
             })

@@ -56,6 +56,11 @@ async function load(): Promise<Store> {
         isOnVacation: r.isOnVacation ?? false,
         vacationUntil: r.vacationUntil ?? null,
       }));
+      parsed.vehicles = (parsed.vehicles || []).map((v) => ({
+        ...v,
+        estimatedFuelLiters:
+          v.estimatedFuelLiters === undefined ? null : v.estimatedFuelLiters,
+      }));
       cache = parsed;
       return cache;
     }
@@ -87,7 +92,29 @@ export async function getVehicles(): Promise<Vehicle[]> {
 
 export async function getActiveVehicle(): Promise<Vehicle | null> {
   const s = await load();
-  return s.vehicles.find((v) => v.isActive) ?? null;
+  const active = s.vehicles.find((v) => v.isActive);
+  if (active) return active;
+  try {
+    const last = await AsyncStorage.getItem('gasoil_last_vehicle_id');
+    if (last) {
+      const id = Number(last);
+      const v = s.vehicles.find((x) => x.id === id);
+      if (v) {
+        s.vehicles = s.vehicles.map((x) => ({ ...x, isActive: x.id === id }));
+        await save(s);
+        return { ...v, isActive: true };
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  if (s.vehicles[0]) {
+    const id = s.vehicles[0].id;
+    s.vehicles = s.vehicles.map((x) => ({ ...x, isActive: x.id === id }));
+    await save(s);
+    return { ...s.vehicles[0], isActive: true };
+  }
+  return null;
 }
 
 export async function getVehicleById(id: number): Promise<Vehicle | null> {
@@ -105,6 +132,7 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
     ...vehicle,
     id,
     trackedKm: vehicle.trackedKm ?? 0,
+    estimatedFuelLiters: vehicle.estimatedFuelLiters ?? null,
     createdAt: nowIso(),
   });
   await save(s);
@@ -143,6 +171,11 @@ export async function setActiveVehicle(id: number): Promise<void> {
   const s = await load();
   s.vehicles = s.vehicles.map((v) => ({ ...v, isActive: v.id === id }));
   await save(s);
+  try {
+    await AsyncStorage.setItem('gasoil_last_vehicle_id', String(id));
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function createFillUp(fillUp: Omit<FillUp, 'id'>): Promise<number> {

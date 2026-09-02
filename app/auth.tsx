@@ -1,11 +1,20 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Linking,
+} from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
+import { API_URL } from '@/lib/api';
 
 export default function AuthScreen() {
   const { login, register } = useAuth();
@@ -55,7 +64,12 @@ export default function AuthScreen() {
         setPasswordConfirm('');
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Erreur');
+      const msg = e instanceof Error ? e.message : 'Erreur';
+      setError(
+        /network|fetch|failed/i.test(msg)
+          ? `Réseau : impossible de joindre ${API_URL}. Vérifiez Wi‑Fi / données.`
+          : msg
+      );
     } finally {
       setLoading(false);
     }
@@ -72,7 +86,7 @@ export default function AuthScreen() {
         </Text>
         <Text style={[styles.sub, { color: colors.textSecondary }]}>
           {mode === 'login'
-            ? 'Même formulaire pour tous (y compris admin). Données privées par compte.'
+            ? `Connexion cloud (sync). Serveur : ${API_URL}`
             : 'Code d’invitation requis (fourni par l’admin). Confirmez le mot de passe deux fois. Un email activera le compte — pas admin.'}
         </Text>
         {mode === 'register' && (
@@ -126,6 +140,12 @@ export default function AuthScreen() {
             setError('');
             setInfo('');
           }}
+          style={{ marginTop: 12 }}
+        />
+        <Button
+          title="Télécharger la dernière APK"
+          variant="secondary"
+          onPress={() => Linking.openURL(`${API_URL}/download`)}
           style={{ marginTop: 12 }}
         />
       </ScrollView>

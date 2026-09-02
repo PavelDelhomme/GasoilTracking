@@ -18,6 +18,7 @@ import { Card } from '@/components/Card';
 import { DatePickerField } from '@/components/DatePickerField';
 import { createFillUp, updateVehicle, updateTrip } from '@/lib/database';
 import { adaptVehicleConsumption, formatEuro, refreshBudgets } from '@/lib/calculations';
+import { applyFillUpToFuelEstimate } from '@/lib/fuelLevel';
 import { fetchCheapestStations, fuelLabel, isFrenchFuelOpenDataAvailable, type FuelStationPrice } from '@/lib/fuelPrices';
 import { getCurrentLocation } from '@/lib/locationService';
 import { notify } from '@/lib/notify';
@@ -220,6 +221,11 @@ export default function AddFillUpScreen() {
       if (derived.ppl > 0) {
         await updateVehicle(activeVehicle.id, { defaultFuelPrice: derived.ppl });
       }
+
+      await applyFillUpToFuelEstimate(activeVehicle, {
+        liters: Math.round(derived.liters * 100) / 100,
+        isFull,
+      });
 
       await adaptVehicleConsumption(activeVehicle.id);
       await refreshBudgets(activeVehicle.id);

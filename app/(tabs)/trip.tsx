@@ -42,6 +42,7 @@ import {
   formatDistance,
   parseRoutePoints,
 } from '@/lib/calculations';
+import { applyTripFuelBurn } from '@/lib/fuelLevel';
 import { notify, confirm } from '@/lib/notify';
 import { TripHistoryCard } from '@/components/TripHistoryCard';
 import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
@@ -320,6 +321,9 @@ export default function TripScreen() {
         destinationName: destName,
         note: noteParts.join(' · ') || undefined,
       });
+      if (activeVehicle && activeTrip.distanceKm > 0) {
+        await applyTripFuelBurn(activeVehicle, activeTrip.distanceKm);
+      }
       if (activeTrip.distanceKm > 0) {
         await addTrackedKm(activeTrip.vehicleId, activeTrip.distanceKm);
       }

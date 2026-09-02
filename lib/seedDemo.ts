@@ -38,6 +38,7 @@ export async function seedDemoData(): Promise<{ vehicleId: number; trips: number
     currentOdometer: 248500,
     hasOdometer: false,
     trackedKm: 0,
+    estimatedFuelLiters: null,
     isActive: true,
   });
 
