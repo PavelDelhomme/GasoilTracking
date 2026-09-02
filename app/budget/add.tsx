@@ -1,21 +1,44 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert, TouchableOpacity, Text } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Text } from 'react-native';
 import { router } from 'expo-router';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
-import { createBudget } from '@/lib/database';
-import { getBudgetPeriodDates } from '@/lib/calculations';
+import { createBudget, getRecurringRoutes } from '@/lib/database';
+import { formatEuro, getBudgetPeriodDates } from '@/lib/calculations';
+import { notify } from '@/lib/notify';
 import type { Budget } from '@/types';
 
 export default function AddBudgetScreen() {
   const { activeVehicle, refresh } = useApp();
   const { colors } = useTheme();
-  const [name, setName] = useState('');
+  const [name, setName] = useState('Carburant mensuel');
   const [amount, setAmount] = useState('');
   const [period, setPeriod] = useState<Budget['period']>('monthly');
   const [loading, setLoading] = useState(false);
+  const [suggested, setSuggested] = useState<number | null>(null);
+  const [hintRoutes, setHintRoutes] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      if (!activeVehicle) return;
+      const routes = await getRecurringRoutes(activeVehicle.id);
+      if (!routes.length) return;
+      let kmWeek = 0;
+      for (const r of routes) kmWeek += r.distanceKm * r.timesPerWeek;
+      const kmMonth = kmWeek * 4.33;
+      const liters = (kmMonth * activeVehicle.consumptionPer100) / 100;
+      const est = Math.ceil(liters * activeVehicle.defaultFuelPrice);
+      // marge enveloppe +15 %
+      const envelope = Math.ceil(est * 1.15);
+      setSuggested(envelope);
+      setHintRoutes(
+        `${routes.length} trajet(s) régulier(s) → ~${kmMonth.toFixed(0)} km/mois → ~${formatEuro(est)} (+15 % = ${formatEuro(envelope)})`
+      );
+      if (!amount) setAmount(String(envelope));
+    })();
+  }, [activeVehicle?.id]);
 
   const periods: { key: Budget['period']; label: string }[] = [
     { key: 'monthly', label: 'Mensuel' },
@@ -25,7 +48,7 @@ export default function AddBudgetScreen() {
 
   const handleSave = async () => {
     if (!name.trim() || !amount) {
-      Alert.alert('Erreur', 'Nom et montant sont requis.');
+      notify('Erreur', 'Nom et montant sont requis.');
       return;
     }
 
@@ -35,16 +58,17 @@ export default function AddBudgetScreen() {
       await createBudget({
         vehicleId: activeVehicle?.id ?? null,
         name: name.trim(),
-        amount: parseFloat(amount),
+        amount: parseFloat(amount.replace(',', '.')),
         period,
         startDate,
         endDate,
         isActive: true,
       });
       await refresh();
+      notify('Enveloppe créée', `${name.trim()} — ${amount} €`);
       router.back();
     } catch {
-      Alert.alert('Erreur', 'Impossible de créer le budget.');
+      notify('Erreur', 'Impossible de créer le budget.');
     } finally {
       setLoading(false);
     }
@@ -54,15 +78,36 @@ export default function AddBudgetScreen() {
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
     >
+      <Text style={[styles.intro, { color: colors.textSecondary }]}>
+        Système d&apos;enveloppe : chaque plein débite ce budget. Proposez un montant d&apos;après
+        vos trajets réguliers (domicile / travail…).
+      </Text>
+
+      {suggested != null && (
+        <View style={[styles.suggest, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={{ color: colors.text, fontWeight: '700' }}>
+            Suggestion du mois : {formatEuro(suggested)}
+          </Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>{hintRoutes}</Text>
+          <Button
+            title="Utiliser cette suggestion"
+            variant="outline"
+            onPress={() => setAmount(String(suggested))}
+            style={{ marginTop: 10 }}
+          />
+        </View>
+      )}
+
       <Input
-        label="Nom du budget"
+        label="Nom de l’enveloppe"
         placeholder="Carburant mensuel"
         value={name}
         onChangeText={setName}
       />
       <Input
-        label="Montant (€)"
+        label="Montant enveloppe (€)"
         placeholder="200"
         value={amount}
         onChangeText={setAmount}
@@ -97,11 +142,11 @@ export default function AddBudgetScreen() {
 
       <Text style={[styles.hint, { color: colors.textSecondary }]}>
         {activeVehicle
-          ? `Ce budget sera lié à : ${activeVehicle.name}. Il se mettra à jour automatiquement à chaque plein.`
+          ? `Lié à : ${activeVehicle.name}. Mis à jour à chaque plein.`
           : 'Budget global pour tous les véhicules.'}
       </Text>
 
-      <Button title="Créer le budget" onPress={handleSave} loading={loading} />
+      <Button title="Créer l’enveloppe" onPress={handleSave} loading={loading} />
     </ScrollView>
   );
 }
@@ -109,6 +154,13 @@ export default function AddBudgetScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 16, paddingBottom: 32 },
+  intro: { fontSize: 13, lineHeight: 18, marginBottom: 16 },
+  suggest: {
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
   label: { fontSize: 14, fontWeight: '600', marginBottom: 8 },
   periods: { flexDirection: 'row', gap: 8, marginBottom: 16 },
   periodChip: {

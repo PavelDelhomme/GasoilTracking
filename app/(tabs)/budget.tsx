@@ -17,6 +17,7 @@ import {
   deleteBudget,
   deletePlace,
   deleteRecurringRoute,
+  getFillUps,
   getMonthlySpend,
   getPlaces,
   getRecurringRoutes,
@@ -24,7 +25,7 @@ import {
 import { fetchCheapestStations, fuelLabel, type FuelStationPrice } from '@/lib/fuelPrices';
 import { getCurrentLocation } from '@/lib/locationService';
 import { confirm } from '@/lib/notify';
-import type { BudgetStatus, Place, RecurringRoute } from '@/types';
+import type { BudgetStatus, FillUp, Place, RecurringRoute } from '@/types';
 
 const KIND_LABEL: Record<string, string> = {
   home: 'Domicile',
@@ -40,6 +41,8 @@ export default function BudgetScreen() {
   const [places, setPlaces] = useState<Place[]>([]);
   const [routes, setRoutes] = useState<RecurringRoute[]>([]);
   const [monthly, setMonthly] = useState<{ month: string; spent: number }[]>([]);
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  const [monthFillUps, setMonthFillUps] = useState<FillUp[]>([]);
   const [stations, setStations] = useState<FuelStationPrice[]>([]);
   const [fuelLoading, setFuelLoading] = useState(false);
   const [fuelError, setFuelError] = useState('');
@@ -48,12 +51,31 @@ export default function BudgetScreen() {
     const [p, r, m] = await Promise.all([
       getPlaces(),
       getRecurringRoutes(activeVehicle?.id),
-      getMonthlySpend(6),
+      getMonthlySpend(12),
     ]);
     setPlaces(p);
     setRoutes(r);
     setMonthly(m);
-  }, [activeVehicle?.id]);
+    const current = new Date().toISOString().slice(0, 7);
+    setSelectedMonth((prev) => {
+      if (prev && m.some((x) => x.month === prev)) return prev;
+      return m.find((x) => x.month === current)?.month || m[m.length - 1]?.month || null;
+    });
+    const pick =
+      (selectedMonth && m.some((x) => x.month === selectedMonth) && selectedMonth) ||
+      m.find((x) => x.month === current)?.month ||
+      m[m.length - 1]?.month;
+    if (pick) {
+      const fills = await getFillUps(activeVehicle?.id);
+      setMonthFillUps(fills.filter((f) => f.date.slice(0, 7) === pick));
+    }
+  }, [activeVehicle?.id]); // eslint-ok: selectedMonth lu au moment du load
+
+  const selectMonth = async (month: string) => {
+    setSelectedMonth(month);
+    const fills = await getFillUps(activeVehicle?.id);
+    setMonthFillUps(fills.filter((f) => f.date.slice(0, 7) === month));
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -141,8 +163,15 @@ export default function BudgetScreen() {
             </Text>
           ) : (
             monthly.map((m) => (
-              <View key={m.month} style={styles.barRow}>
-                <Text style={{ color: colors.textSecondary, width: 64, fontSize: 12 }}>
+              <Pressable key={m.month} onPress={() => selectMonth(m.month)} style={styles.barRow}>
+                <Text
+                  style={{
+                    color: selectedMonth === m.month ? colors.accent : colors.textSecondary,
+                    width: 64,
+                    fontSize: 12,
+                    fontWeight: selectedMonth === m.month ? '700' : '400',
+                  }}
+                >
                   {m.month.slice(5)}/{m.month.slice(2, 4)}
                 </Text>
                 <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
@@ -150,7 +179,8 @@ export default function BudgetScreen() {
                     style={[
                       styles.barFill,
                       {
-                        backgroundColor: colors.accent,
+                        backgroundColor:
+                          selectedMonth === m.month ? colors.accent : colors.primary,
                         width: `${Math.max(4, (m.spent / maxMonth) * 100)}%`,
                       },
                     ]}
@@ -159,8 +189,40 @@ export default function BudgetScreen() {
                 <Text style={{ color: colors.text, width: 64, textAlign: 'right', fontSize: 12 }}>
                   {formatEuro(m.spent)}
                 </Text>
-              </View>
+              </Pressable>
             ))
+          )}
+          {selectedMonth && (
+            <View style={{ marginTop: 12 }}>
+              <Text style={{ color: colors.text, fontWeight: '700', marginBottom: 6 }}>
+                Détail {selectedMonth} — {formatEuro(
+                  monthly.find((x) => x.month === selectedMonth)?.spent || 0
+                )}
+              </Text>
+              {monthFillUps.length === 0 ? (
+                <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Aucun plein ce mois.</Text>
+              ) : (
+                monthFillUps.map((f) => (
+                  <View
+                    key={f.id}
+                    style={{
+                      paddingVertical: 8,
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                      borderBottomColor: colors.border,
+                    }}
+                  >
+                    <Text style={{ color: colors.text, fontWeight: '600' }}>
+                      {new Date(f.date).toLocaleDateString('fr-FR')} · {f.liters.toFixed(1)} L ·{' '}
+                      {formatEuro(f.totalCost)}
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                      {f.pricePerLiter.toFixed(3)} €/L
+                      {f.note ? ` · ${f.note}` : ''}
+                    </Text>
+                  </View>
+                ))
+              )}
+            </View>
           )}
         </Card>
 

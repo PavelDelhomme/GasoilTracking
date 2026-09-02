@@ -1,20 +1,40 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert, Switch, Text } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import {
+  View,
+  StyleSheet,
+  ScrollView,
+  Switch,
+  Text,
+  Pressable,
+  ActivityIndicator,
+} from 'react-native';
 import { router } from 'expo-router';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
-import { createFillUp } from '@/lib/database';
-import { adaptVehicleConsumption, refreshBudgets } from '@/lib/calculations';
+import { Card } from '@/components/Card';
+import { createFillUp, updateVehicle } from '@/lib/database';
+import { adaptVehicleConsumption, formatEuro, refreshBudgets } from '@/lib/calculations';
+import { fetchCheapestStations, fuelLabel, type FuelStationPrice } from '@/lib/fuelPrices';
+import { getCurrentLocation } from '@/lib/locationService';
+import { notify } from '@/lib/notify';
+
+function parseNum(v: string): number {
+  const n = parseFloat(String(v).replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+}
 
 export default function AddFillUpScreen() {
-  const { activeVehicle, refresh } = useApp();
+  const { activeVehicle, budgetStatuses, refresh } = useApp();
   const { colors } = useTheme();
   const [liters, setLiters] = useState('');
+  const [totalPaid, setTotalPaid] = useState('');
   const [pricePerLiter, setPricePerLiter] = useState(
     activeVehicle?.defaultFuelPrice.toString() ?? '1.75'
   );
+  /** Qui a été modifié en dernier pour recalculer le 3e champ */
+  const [lastEdited, setLastEdited] = useState<'liters' | 'total' | 'ppl'>('liters');
   const [odometer, setOdometer] = useState(
     activeVehicle?.hasOdometer ? String(activeVehicle.currentOdometer || '') : ''
   );
@@ -26,29 +46,137 @@ export default function AddFillUpScreen() {
   });
   const [isFull, setIsFull] = useState(true);
   const [note, setNote] = useState('');
+  const [station, setStation] = useState<FuelStationPrice | null>(null);
+  const [nearby, setNearby] = useState<FuelStationPrice[]>([]);
+  const [locating, setLocating] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const totalCost = (parseFloat(liters) || 0) * (parseFloat(pricePerLiter) || 0);
   const hasOdo = activeVehicle?.hasOdometer !== false;
+  const fuelKey =
+    activeVehicle?.fuelType === 'diesel'
+      ? 'gazole'
+      : activeVehicle?.fuelType === 'gpl'
+        ? 'gplc'
+        : 'e10';
+
+  const derived = useMemo(() => {
+    const L = parseNum(liters);
+    const T = parseNum(totalPaid);
+    const P = parseNum(pricePerLiter);
+    if (lastEdited === 'liters' || lastEdited === 'total') {
+      if (L > 0 && T > 0) return { liters: L, total: T, ppl: T / L };
+      if (L > 0 && P > 0) return { liters: L, total: L * P, ppl: P };
+      if (T > 0 && P > 0) return { liters: T / P, total: T, ppl: P };
+    }
+    if (lastEdited === 'ppl') {
+      if (L > 0 && P > 0) return { liters: L, total: L * P, ppl: P };
+      if (T > 0 && P > 0) return { liters: T / P, total: T, ppl: P };
+    }
+    return { liters: L, total: T || L * P, ppl: P || (L > 0 && T > 0 ? T / L : 0) };
+  }, [liters, totalPaid, pricePerLiter, lastEdited]);
+
+  const onLiters = (v: string) => {
+    setLiters(v);
+    setLastEdited('liters');
+    const L = parseNum(v);
+    const T = parseNum(totalPaid);
+    if (L > 0 && T > 0) setPricePerLiter((T / L).toFixed(3));
+    else if (L > 0 && parseNum(pricePerLiter) > 0) {
+      setTotalPaid((L * parseNum(pricePerLiter)).toFixed(2));
+    }
+  };
+
+  const onTotal = (v: string) => {
+    setTotalPaid(v);
+    setLastEdited('total');
+    const T = parseNum(v);
+    const L = parseNum(liters);
+    if (L > 0 && T > 0) setPricePerLiter((T / L).toFixed(3));
+    else if (T > 0 && parseNum(pricePerLiter) > 0) {
+      setLiters((T / parseNum(pricePerLiter)).toFixed(2));
+    }
+  };
+
+  const onPpl = (v: string) => {
+    setPricePerLiter(v);
+    setLastEdited('ppl');
+    const P = parseNum(v);
+    const L = parseNum(liters);
+    if (L > 0 && P > 0) setTotalPaid((L * P).toFixed(2));
+  };
+
+  const findStations = async () => {
+    setLocating(true);
+    try {
+      const loc = await getCurrentLocation();
+      if (!loc) {
+        notify('GPS', 'Activez la localisation pour trouver la station.');
+        return;
+      }
+      const list = await fetchCheapestStations({
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        radiusKm: 3,
+        fuel: activeVehicle?.fuelType || 'diesel',
+        limit: 10,
+      });
+      // Tri par distance pour « où je suis »
+      list.sort((a, b) => (a.distanceKm || 99) - (b.distanceKm || 99));
+      setNearby(list);
+      if (!list.length) notify('Stations', 'Aucune station dans un rayon de 3 km.');
+    } catch (e) {
+      notify('Erreur', e instanceof Error ? e.message : 'API stations');
+    } finally {
+      setLocating(false);
+    }
+  };
+
+  const pickStation = (s: FuelStationPrice) => {
+    setStation(s);
+    const apiPrice = s.prices[fuelKey];
+    if (apiPrice != null) {
+      setPricePerLiter(apiPrice.toFixed(3));
+      setLastEdited('ppl');
+      const L = parseNum(liters);
+      if (L > 0) setTotalPaid((L * apiPrice).toFixed(2));
+    }
+    const label = `${s.name} — ${s.address} ${s.city}`.trim();
+    setNote((prev) => (prev.includes(s.name) ? prev : label));
+  };
+
+  const envelopePreview = useMemo(() => {
+    const main = budgetStatuses[0];
+    if (!main) return null;
+    const nextSpent = main.spent + (derived.total || 0);
+    return {
+      name: main.budget.name,
+      amount: main.budget.amount,
+      spent: main.spent,
+      nextSpent,
+      remaining: Math.max(0, main.budget.amount - nextSpent),
+      percent: main.budget.amount > 0 ? (nextSpent / main.budget.amount) * 100 : 0,
+    };
+  }, [budgetStatuses, derived.total]);
 
   const handleSave = async () => {
     if (!activeVehicle) {
-      Alert.alert('Erreur', 'Aucun véhicule actif.');
+      notify('Erreur', 'Aucun véhicule actif.');
       return;
     }
-    if (!liters) {
-      Alert.alert('Erreur', 'Indiquez les litres.');
+    if (derived.liters <= 0) {
+      notify('Erreur', 'Indiquez les litres (ou montant + prix/L).');
+      return;
+    }
+    if (derived.ppl <= 0 || derived.total <= 0) {
+      notify('Erreur', 'Indiquez le montant payé (ou litres + prix/L).');
       return;
     }
     if (hasOdo && !odometer) {
-      Alert.alert('Erreur', 'Kilométrage compteur requis (ou désactivez le compteur sur le véhicule).');
+      notify('Erreur', 'Kilométrage compteur requis.');
       return;
     }
     if (!hasOdo && !distanceKm) {
-      Alert.alert(
-        'Distance',
-        'Sans compteur, indiquez les km parcourus depuis le dernier plein (trajets GPS ou estimation).'
-      );
+      notify('Distance', 'Sans compteur, indiquez les km depuis le dernier plein.');
       return;
     }
 
@@ -58,21 +186,32 @@ export default function AddFillUpScreen() {
       await createFillUp({
         vehicleId: activeVehicle.id,
         date: dateIso,
-        liters: parseFloat(liters),
-        pricePerLiter: parseFloat(pricePerLiter),
-        totalCost,
-        odometer: hasOdo ? parseFloat(odometer) : null,
-        distanceSinceLastKm: distanceKm ? parseFloat(distanceKm) : null,
+        liters: Math.round(derived.liters * 100) / 100,
+        pricePerLiter: Math.round(derived.ppl * 1000) / 1000,
+        totalCost: Math.round(derived.total * 100) / 100,
+        odometer: hasOdo ? parseNum(odometer) : null,
+        distanceSinceLastKm: distanceKm ? parseNum(distanceKm) : null,
         isFull,
         note: note.trim() || undefined,
+        tripId: null,
       });
+
+      // Mémorise le prix station comme défaut véhicule
+      if (derived.ppl > 0) {
+        await updateVehicle(activeVehicle.id, { defaultFuelPrice: derived.ppl });
+      }
 
       await adaptVehicleConsumption(activeVehicle.id);
       await refreshBudgets(activeVehicle.id);
       await refresh();
+      notify(
+        'Plein enregistré',
+        `${derived.liters.toFixed(2)} L · ${formatEuro(derived.total)}` +
+          (station ? ` · ${station.name}` : '')
+      );
       router.back();
-    } catch {
-      Alert.alert('Erreur', "Impossible d'enregistrer le plein.");
+    } catch (e) {
+      notify('Erreur', e instanceof Error ? e.message : 'Impossible d’enregistrer le plein.');
     } finally {
       setLoading(false);
     }
@@ -92,6 +231,7 @@ export default function AddFillUpScreen() {
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
     >
       <Text style={[styles.vehicle, { color: colors.textSecondary }]}>
         Véhicule : {activeVehicle.name}
@@ -104,19 +244,80 @@ export default function AddFillUpScreen() {
         onChangeText={setDateLocal}
         placeholder="2024-06-15"
       />
+
+      <Text style={[styles.section, { color: colors.text }]}>Station</Text>
+      <Button
+        title={locating ? 'Recherche…' : 'Trouver la station (GPS)'}
+        variant="secondary"
+        onPress={findStations}
+        loading={locating}
+      />
+      {station && (
+        <Card style={{ marginTop: 10, marginBottom: 8 }}>
+          <Text style={{ color: colors.text, fontWeight: '700' }}>{station.name}</Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+            {station.address} {station.city}
+            {station.prices[fuelKey] != null
+              ? ` · ${fuelLabel(fuelKey)} ${station.prices[fuelKey]!.toFixed(3)} €/L`
+              : ''}
+          </Text>
+        </Card>
+      )}
+      {nearby.map((s) => (
+        <Pressable
+          key={s.id}
+          onPress={() => pickStation(s)}
+          style={[
+            styles.stationRow,
+            {
+              borderColor: station?.id === s.id ? colors.accent : colors.border,
+              backgroundColor: colors.card,
+            },
+          ]}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.text, fontWeight: '600' }}>{s.name}</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+              {s.distanceKm} km · {s.address} {s.city}
+            </Text>
+          </View>
+          <Text style={{ color: colors.accent, fontWeight: '700' }}>
+            {s.prices[fuelKey] != null ? `${s.prices[fuelKey]!.toFixed(3)}€` : '—'}
+          </Text>
+        </Pressable>
+      ))}
+
+      <Text style={[styles.section, { color: colors.text }]}>Quantité & montant</Text>
+      <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
+        Entrez litres + montant payé → le prix/L se calcule tout seul (ou l’inverse).
+      </Text>
       <Input
         label="Litres"
         placeholder="45.00"
         value={liters}
-        onChangeText={setLiters}
+        onChangeText={onLiters}
         keyboardType="decimal-pad"
       />
       <Input
-        label="Prix au litre (€)"
-        value={pricePerLiter}
-        onChangeText={setPricePerLiter}
+        label="Montant payé (€)"
+        placeholder="78.50"
+        value={totalPaid}
+        onChangeText={onTotal}
         keyboardType="decimal-pad"
       />
+      <Input
+        label="Prix au litre (€) — auto"
+        value={pricePerLiter}
+        onChangeText={onPpl}
+        keyboardType="decimal-pad"
+      />
+
+      {derived.total > 0 && derived.liters > 0 && (
+        <Text style={[styles.total, { color: colors.accent }]}>
+          {derived.liters.toFixed(2)} L × {derived.ppl.toFixed(3)} €/L ={' '}
+          {formatEuro(derived.total)}
+        </Text>
+      )}
 
       {hasOdo ? (
         <Input
@@ -127,7 +328,7 @@ export default function AddFillUpScreen() {
         />
       ) : (
         <Input
-          label="Km depuis le dernier plein (GPS / estimation)"
+          label="Km depuis le dernier plein"
           value={distanceKm}
           onChangeText={setDistanceKm}
           keyboardType="decimal-pad"
@@ -137,11 +338,10 @@ export default function AddFillUpScreen() {
 
       {hasOdo && (
         <Input
-          label="Km depuis dernier plein (optionnel, si date différée)"
+          label="Km depuis dernier plein (optionnel)"
           value={distanceKm}
           onChangeText={setDistanceKm}
           keyboardType="decimal-pad"
-          placeholder="Laisse vide si le compteur suffit"
         />
       )}
 
@@ -155,27 +355,47 @@ export default function AddFillUpScreen() {
       </View>
 
       <Input
-        label="Note (optionnel)"
-        placeholder="Station, autoroute, plein en retard..."
+        label="Note / station"
+        placeholder="Rempli auto si station détectée"
         value={note}
         onChangeText={setNote}
       />
 
-      {totalCost > 0 && (
-        <Text style={[styles.total, { color: colors.accent }]}>
-          Total : {totalCost.toFixed(2)} €
-        </Text>
+      {envelopePreview && (
+        <Card style={{ marginBottom: 16 }}>
+          <Text style={{ color: colors.text, fontWeight: '700', marginBottom: 6 }}>
+            Enveloppe : {envelopePreview.name}
+          </Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
+            Déjà dépensé {formatEuro(envelopePreview.spent)} / {formatEuro(envelopePreview.amount)}
+          </Text>
+          <Text style={{ color: colors.accent, fontWeight: '600', marginTop: 4 }}>
+            Après ce plein : {formatEuro(envelopePreview.nextSpent)} (
+            {envelopePreview.percent.toFixed(0)}%) — reste {formatEuro(envelopePreview.remaining)}
+          </Text>
+        </Card>
       )}
 
       <Button title="Enregistrer le plein" onPress={handleSave} loading={loading} />
+      {locating && <ActivityIndicator style={{ marginTop: 12 }} color={colors.accent} />}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  content: { padding: 16, paddingBottom: 32 },
+  content: { padding: 16, paddingBottom: 40 },
   vehicle: { fontSize: 14, marginBottom: 16 },
+  section: { fontSize: 16, fontWeight: '700', marginTop: 8, marginBottom: 8 },
+  stationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 8,
+    gap: 8,
+  },
   switchRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -183,6 +403,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   switchLabel: { fontSize: 14, fontWeight: '600' },
-  total: { fontSize: 24, fontWeight: '700', textAlign: 'center', marginBottom: 16 },
+  total: { fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 16 },
   error: { fontSize: 16, textAlign: 'center', padding: 32 },
 });
