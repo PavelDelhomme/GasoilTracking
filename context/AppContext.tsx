@@ -7,7 +7,7 @@ import {
   setActiveVehicle as dbSetActiveVehicle,
 } from '@/lib/database';
 import { refreshBudgets } from '@/lib/calculations';
-import { recoverDataAfterUpdateIfNeeded } from '@/lib/backup';
+import { recoverDataAfterUpdateIfNeeded, getUpdatePending } from '@/lib/backup';
 import { notify } from '@/lib/notify';
 
 interface AppContextType {
@@ -66,6 +66,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
+        const pendingBefore = await getUpdatePending().catch(() => null);
         const recovery = await recoverDataAfterUpdateIfNeeded();
         if (!cancelled && (recovery === 'restored-local' || recovery === 'restored-cloud')) {
           notify(
@@ -74,6 +75,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               ? 'Vos données cloud ont été récupérées.'
               : 'Votre sauvegarde locale a été récupérée.'
           );
+        } else if (!cancelled && pendingBefore && recovery === 'ok') {
+          notify('Mise à jour OK', 'Application à jour — votre session est toujours active.');
         }
       } catch {
         /* ignore */

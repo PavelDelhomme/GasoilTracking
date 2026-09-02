@@ -1,19 +1,78 @@
 import { Linking, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
+import Constants from 'expo-constants';
 import type { AppVersionInfo } from '@/lib/api';
 import { markUpdatePending, prepareDataForUpdate } from '@/lib/backup';
 
 export type UpdateProgress = {
-  phase: 'backup' | 'download' | 'install' | 'done' | 'error';
+  phase: 'backup' | 'permission' | 'download' | 'install' | 'done' | 'error';
   progress: number;
   message: string;
 };
 
+const PKG = Constants.expoConfig?.android?.package || 'com.gasoiltracking.app';
+/** FLAG_GRANT_READ_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK */
+const INSTALL_FLAGS = 1 | 268435456;
+
+function resolveApkUrl(info: AppVersionInfo): string {
+  const url = info.apkUrl || '';
+  if (!url) throw new Error('URL APK manquante sur le serveur');
+  // Forcer HTTPS domaine prod
+  if (url.startsWith('/')) {
+    return `https://gasoil-tracking.delhomme.ovh${url}`;
+  }
+  return url;
+}
+
+async function openInstallPermissionSettings() {
+  try {
+    await IntentLauncher.startActivityAsync('android.settings.MANAGE_UNKNOWN_APP_SOURCES', {
+      data: `package:${PKG}`,
+    });
+  } catch {
+    try {
+      await IntentLauncher.startActivityAsync(
+        IntentLauncher.ActivityAction.APPLICATION_DETAILS_SETTINGS,
+        { data: `package:${PKG}` }
+      );
+    } catch {
+      await Linking.openSettings();
+    }
+  }
+}
+
+async function launchApkInstaller(fileUri: string) {
+  const contentUri = await FileSystem.getContentUriAsync(fileUri);
+  try {
+    await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+      data: contentUri,
+      flags: INSTALL_FLAGS,
+      type: 'application/vnd.android.package-archive',
+    });
+    return;
+  } catch {
+    /* fallback */
+  }
+  try {
+    await IntentLauncher.startActivityAsync('android.intent.action.INSTALL_PACKAGE', {
+      data: contentUri,
+      flags: INSTALL_FLAGS,
+      type: 'application/vnd.android.package-archive',
+    });
+    return;
+  } catch (e) {
+    await openInstallPermissionSettings();
+    throw new Error(
+      'Autorisez « Installer des apps inconnues » pour Gasoil Tracking, puis relancez la mise à jour.'
+    );
+  }
+}
+
 /**
- * MAJ Android in-app : sauvegarde → télécharge l’APK → ouvre l’installateur système.
- * Android conserve SQLite/AsyncStorage tant que c’est une mise à jour du même package
- * (pas une désinstallation).
+ * OTA Android in-app depuis gasoil-tracking.delhomme.ovh :
+ * backup (local + cloud) → télécharge l’APK → installateur système.
+ * Même package → AsyncStorage / session JWT conservés (pas de désinstall).
  */
 export async function performSafeApkUpdate(
   info: AppVersionInfo,
@@ -22,15 +81,12 @@ export async function performSafeApkUpdate(
   if (Platform.OS !== 'android') {
     throw new Error('Mise à jour APK disponible uniquement sur Android');
   }
-  const apkUrl = info.apkUrl;
-  if (!apkUrl) {
-    throw new Error('URL APK manquante');
-  }
+  const apkUrl = resolveApkUrl(info);
 
   onProgress?.({
     phase: 'backup',
-    progress: 0,
-    message: 'Sauvegarde de vos données…',
+    progress: 0.02,
+    message: 'Sauvegarde compte & données…',
   });
   const { cloudSynced } = await prepareDataForUpdate();
   await markUpdatePending(info.version, cloudSynced);
@@ -38,15 +94,15 @@ export async function performSafeApkUpdate(
     phase: 'backup',
     progress: 0.08,
     message: cloudSynced
-      ? 'Sauvegarde locale + cloud OK'
-      : 'Sauvegarde locale OK (cloud hors ligne)',
+      ? 'Session + cloud sauvegardés'
+      : 'Session locale sauvegardée (cloud hors ligne)',
   });
 
   const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
   if (!baseDir) {
     throw new Error('Stockage local indisponible');
   }
-  const dest = `${baseDir}gasoil-tracking-update.apk`;
+  const dest = `${baseDir}gasoil-tracking-ota.apk`;
   try {
     const existing = await FileSystem.getInfoAsync(dest);
     if (existing.exists) await FileSystem.deleteAsync(dest, { idempotent: true });
@@ -54,54 +110,57 @@ export async function performSafeApkUpdate(
     /* ignore */
   }
 
-  onProgress?.({ phase: 'download', progress: 0.1, message: 'Téléchargement de la mise à jour…' });
+  onProgress?.({
+    phase: 'download',
+    progress: 0.1,
+    message: 'Téléchargement depuis le serveur…',
+  });
 
   const download = FileSystem.createDownloadResumable(
     apkUrl,
     dest,
-    {},
+    {
+      headers: {
+        Accept: 'application/vnd.android.package-archive,*/*',
+      },
+    },
     (evt) => {
       const total = evt.totalBytesExpectedToWrite || 0;
       const written = evt.totalBytesWritten || 0;
       const pct = total > 0 ? written / total : 0;
       onProgress?.({
         phase: 'download',
-        progress: 0.1 + pct * 0.8,
-        message: total > 0 ? `Téléchargement… ${Math.round(pct * 100)} %` : 'Téléchargement…',
+        progress: 0.1 + pct * 0.75,
+        message:
+          total > 0
+            ? `Téléchargement… ${Math.round(pct * 100)} %`
+            : 'Téléchargement en cours…',
       });
     }
   );
 
   const result = await download.downloadAsync();
   if (!result?.uri) {
-    throw new Error('Échec du téléchargement');
+    throw new Error('Échec du téléchargement OTA');
+  }
+
+  const infoFile = await FileSystem.getInfoAsync(result.uri);
+  if (!infoFile.exists || (infoFile.size != null && infoFile.size < 1_000_000)) {
+    throw new Error('APK téléchargée invalide ou trop petite');
   }
 
   onProgress?.({
     phase: 'install',
-    progress: 0.95,
-    message: 'Ouverture de l’installateur Android…',
+    progress: 0.92,
+    message: 'Ouverture de l’installateur…',
   });
 
-  const contentUri = await FileSystem.getContentUriAsync(result.uri);
-  try {
-    await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-      data: contentUri,
-      flags: 1,
-      type: 'application/vnd.android.package-archive',
-    });
-  } catch {
-    // Fallback INSTALL_PACKAGE
-    await IntentLauncher.startActivityAsync('android.intent.action.INSTALL_PACKAGE', {
-      data: contentUri,
-      flags: 1,
-    });
-  }
+  await launchApkInstaller(result.uri);
 
   onProgress?.({
     phase: 'done',
     progress: 1,
-    message: 'Confirmez l’installation — vos données sont conservées.',
+    message: 'Validez l’installation Android — votre connexion sera conservée.',
   });
 }
 
@@ -112,4 +171,9 @@ export async function openExternalDownload(info: AppVersionInfo) {
       ? info.iosInstallUrl || info.downloadPage || info.webUrl || info.apkUrl
       : info.apkUrl || info.downloadPage || info.webUrl;
   if (url) await Linking.openURL(url);
+}
+
+/** Ouvre les réglages d’autorisation d’installation (Android). */
+export async function openAndroidInstallSettings() {
+  if (Platform.OS === 'android') await openInstallPermissionSettings();
 }

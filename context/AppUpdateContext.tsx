@@ -121,6 +121,7 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
       await writeSnooze(null);
       if (Platform.OS === 'android') {
         await performSafeApkUpdate(info, setProgress);
+        // L’installateur système prend le relais — on laisse la modal ouverte avec le message « done »
       } else if (Platform.OS === 'web' && typeof window !== 'undefined') {
         setProgress({ phase: 'download', progress: 0.5, message: 'Rechargement…' });
         window.location.reload();
@@ -129,11 +130,16 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
         setVisible(false);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      try {
-        await openExternalDownload(info);
-      } catch {
-        /* ignore */
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      setProgress({ phase: 'error', progress: 0, message: msg });
+      // Android : ne pas ouvrir le navigateur — rester sur OTA in-app
+      if (Platform.OS !== 'android') {
+        try {
+          await openExternalDownload(info);
+        } catch {
+          /* ignore */
+        }
       }
     } finally {
       setBusy(false);

@@ -60,9 +60,11 @@ export function AppUpdateModal({
             <Text style={[styles.notes, { color: colors.text }]}>{info.releaseNotes}</Text>
           )}
           <Text style={[styles.safe, { color: colors.textSecondary }]}>
-            {Platform.OS === 'web'
-              ? 'Version web / iPhone : rechargement live. Données locales et cloud conservées.'
-              : 'Données conservées. Vous pourrez aussi installer plus tard depuis Mon compte.'}
+            {Platform.OS === 'android'
+              ? 'Téléchargement automatique depuis gasoil-tracking.delhomme.ovh. Votre session reste connectée (même application, pas de désinstallation).'
+              : Platform.OS === 'web'
+                ? 'Version web / iPhone : rechargement live. Données locales et cloud conservées.'
+                : 'Données conservées. Vous pourrez aussi installer plus tard depuis Mon compte.'}
             {!force ? ' « Plus tard » : rappel dans 2 heures.' : ''}
           </Text>
 
@@ -95,7 +97,9 @@ export function AppUpdateModal({
                 onPress={onUpdate}
                 style={[styles.primaryBtn, { backgroundColor: colors.accent }]}
               >
-                <Text style={styles.primaryText}>{primaryLabel}</Text>
+                <Text style={styles.primaryText}>
+                  {error && Platform.OS === 'android' ? 'Réessayer l’installation' : primaryLabel}
+                </Text>
               </Pressable>
             </View>
           )}

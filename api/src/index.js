@@ -1293,6 +1293,9 @@ app.get('/api/download/:file', (req, res) => {
   if (!/^[\w.\-]+$/.test(file)) return res.status(400).json({ error: 'Nom invalide' });
   const full = path.join(DATA_DIR, 'apks', file);
   if (!fs.existsSync(full)) return res.status(404).json({ error: 'APK introuvable' });
+  // OTA mobile : pas de CORP same-origin (clients natifs / FileSystem)
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Cache-Control', 'public, max-age=300');
   res.download(full, file);
 });
 
