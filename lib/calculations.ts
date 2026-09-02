@@ -1,6 +1,7 @@
 import type { Budget, BudgetStatus, ConsumptionStats, FillUp, Vehicle } from '@/types';
 import {
   getFillUps,
+  getTrips,
   getBudgets,
   updateBudgetSpent,
   updateVehicle,
@@ -67,7 +68,7 @@ function fillUpDistance(prev: FillUp, curr: FillUp): number | null {
 
 /** Statistiques de consommation pour un véhicule (compteur OU km GPS/manuel) */
 export async function getConsumptionStats(vehicleId: number): Promise<ConsumptionStats> {
-  const fillUps = await getFillUps(vehicleId);
+  const [fillUps, trips] = await Promise.all([getFillUps(vehicleId), getTrips(vehicleId)]);
   const ordered = [...fillUps].sort((a, b) => a.date.localeCompare(b.date));
   const fullFillUps = ordered.filter((f) => f.isFull);
 
@@ -93,6 +94,14 @@ export async function getConsumptionStats(vehicleId: number): Promise<Consumptio
       totalDistance += f.distanceSinceLastKm;
       totalFuel += f.liters;
     }
+  }
+
+  // Km GPS des trajets terminés (complète le total si peu de pleins)
+  const tripKm = trips
+    .filter((t) => !t.isActive && t.status !== 'rejected' && t.distanceKm > 0)
+    .reduce((s, t) => s + t.distanceKm, 0);
+  if (tripKm > totalDistance) {
+    totalDistance = Math.round(tripKm * 10) / 10;
   }
 
   const totalCost = fillUps.reduce((sum, f) => sum + f.totalCost, 0);
@@ -177,22 +186,34 @@ export async function refreshBudgets(vehicleId?: number): Promise<BudgetStatus[]
 export function calculateTripStats(
   vehicle: Vehicle,
   distanceKm: number,
-  startTime: string
+  startTime: string,
+  endTime?: string | null
 ): { fuelUsed: number; cost: number; durationMinutes: number } {
   const fuelUsed = estimateFuelUsed(distanceKm, vehicle.consumptionPer100);
   const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
-  const durationMinutes = (Date.now() - new Date(startTime).getTime()) / (1000 * 60);
+  const endMs = endTime ? new Date(endTime).getTime() : Date.now();
+  const durationMinutes = Math.max(0, (endMs - new Date(startTime).getTime()) / (1000 * 60));
   return { fuelUsed, cost, durationMinutes };
 }
 
-/** Autonomie restante estimée en km */
+/** Autonomie restante estimée en km (conso adaptée si fournie) */
 export function estimateRange(
   vehicle: Vehicle,
-  currentFuelLevel?: number
+  currentFuelLevel?: number,
+  consumptionPer100?: number
 ): number {
   const fuelInTank = currentFuelLevel ?? vehicle.tankCapacity * 0.5;
-  if (vehicle.consumptionPer100 <= 0) return 0;
-  return (fuelInTank / vehicle.consumptionPer100) * 100;
+  const conso = consumptionPer100 && consumptionPer100 > 0
+    ? consumptionPer100
+    : vehicle.consumptionPer100;
+  if (conso <= 0) return 0;
+  return (fuelInTank / conso) * 100;
+}
+
+/** Vitesse moyenne km/h depuis distance et durée */
+export function averageSpeedKmh(distanceKm: number, durationMinutes: number): number {
+  if (durationMinutes <= 0 || distanceKm <= 0) return 0;
+  return (distanceKm / durationMinutes) * 60;
 }
 
 /** Formate un montant en euros */

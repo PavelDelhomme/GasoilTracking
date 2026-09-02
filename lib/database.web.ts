@@ -218,6 +218,11 @@ export async function getActiveTrip(): Promise<Trip | null> {
   return s.trips.find((t) => t.isActive) ?? null;
 }
 
+export async function getTripById(id: number): Promise<Trip | null> {
+  const s = await load();
+  return s.trips.find((t) => t.id === id) ?? null;
+}
+
 export async function createTrip(trip: Omit<Trip, 'id'>): Promise<number> {
   const s = await load();
   const id = s.seq.trips++;

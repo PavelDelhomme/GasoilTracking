@@ -6,6 +6,7 @@ import {
   Linking,
   ScrollView,
   TouchableOpacity,
+  Pressable,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,6 +36,7 @@ import {
   openGoogleMapsSearch,
 } from '@/lib/locationService';
 import {
+  averageSpeedKmh,
   calculateTripStats,
   formatEuro,
   formatDistance,
@@ -42,11 +44,18 @@ import {
 } from '@/lib/calculations';
 import { notify, confirm } from '@/lib/notify';
 import { TripHistoryCard } from '@/components/TripHistoryCard';
+import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
+
+type TripTab = 'live' | 'history';
+/** free = suivi GPS arrière-plan sans destination ; nav = avec destination */
+type StartMode = 'free' | 'nav';
 
 export default function TripScreen() {
   const { activeVehicle, activeTrip, refresh } = useApp();
   const { colors } = useTheme();
   const mapRef = useRef<TripMapRef>(null);
+  const [tab, setTab] = useState<TripTab>('live');
+  const [startMode, setStartMode] = useState<StartMode>('free');
   const [destination, setDestination] = useState('');
   const [isStarting, setIsStarting] = useState(false);
   const [history, setHistory] = useState<Trip[]>([]);
@@ -61,6 +70,8 @@ export default function TripScreen() {
     latitudeDelta: 0.05,
     longitudeDelta: 0.05,
   });
+  const [liveOriginLabel, setLiveOriginLabel] = useState('');
+  const [liveDestLabel, setLiveDestLabel] = useState('');
 
   const loadLists = useCallback(async () => {
     if (!activeVehicle) {
@@ -79,16 +90,12 @@ export default function TripScreen() {
   useFocusEffect(
     useCallback(() => {
       loadLists();
-      // Si on revient d’un plein pendant pause → reprendre le GPS
-      if (activeTrip?.isPaused) {
-        /* reste en pause jusqu’à « Reprendre » */
-      } else if (activeTrip && !activeTrip.isPaused) {
+      if (activeTrip && !activeTrip.isPaused) {
         void startBackgroundTracking();
       }
     }, [loadLists, activeTrip?.id, activeTrip?.isPaused])
   );
 
-  // GPS live dès l’ouverture de l’onglet
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
     let cancelled = false;
@@ -104,29 +111,18 @@ export default function TripScreen() {
           longitude: loc.coords.longitude,
         };
         setUserLocation(coords);
-        setCurrentRegion({
-          ...coords,
-          latitudeDelta: 0.04,
-          longitudeDelta: 0.04,
-        });
+        setCurrentRegion({ ...coords, latitudeDelta: 0.04, longitudeDelta: 0.04 });
       }
 
       sub = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.High,
-          timeInterval: 3000,
-          distanceInterval: 8,
-        },
+        { accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 8 },
         (pos) => {
           const coords = {
             latitude: pos.coords.latitude,
             longitude: pos.coords.longitude,
           };
           setUserLocation(coords);
-          setCurrentRegion((r) => ({
-            ...r,
-            ...coords,
-          }));
+          setCurrentRegion((r) => ({ ...r, ...coords }));
         }
       );
     })();
@@ -140,8 +136,8 @@ export default function TripScreen() {
   useEffect(() => {
     if (activeTrip) {
       const points = parseRoutePoints(activeTrip.routePoints);
-      if (points.length > 0 && mapRef.current) {
-        mapRef.current.fitToCoordinates(
+      if (points.length > 0) {
+        mapRef.current?.fitToCoordinates(
           points.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
           { edgePadding: { top: 50, right: 50, bottom: 50, left: 50 }, animated: true }
         );
@@ -149,9 +145,30 @@ export default function TripScreen() {
     }
   }, [activeTrip?.routePoints]);
 
+  useEffect(() => {
+    if (!activeTrip) {
+      setLiveOriginLabel('');
+      setLiveDestLabel('');
+      return;
+    }
+    const pts = parseRoutePoints(activeTrip.routePoints);
+    setLiveOriginLabel(tripPlaceLabel(activeTrip.originName, pts[0] || null, 'origin'));
+    setLiveDestLabel(
+      tripPlaceLabel(
+        activeTrip.destinationName || destination,
+        pts.length > 1 ? pts[pts.length - 1] : userLocation,
+        'destination'
+      )
+    );
+  }, [activeTrip, destination, userLocation]);
+
   const handleStartTrip = async () => {
     if (!activeVehicle) {
       notify('Erreur', 'Sélectionnez un véhicule avant de démarrer un trajet.');
+      return;
+    }
+    if (startMode === 'nav' && !destination.trim()) {
+      notify('Destination', 'Indiquez une destination, ou choisissez « Suivi libre ».');
       return;
     }
 
@@ -176,6 +193,14 @@ export default function TripScreen() {
         });
       }
 
+      const originName = loc
+        ? (await reverseGeocode(loc.coords.latitude, loc.coords.longitude).catch(() => null)) ||
+          'Position de départ'
+        : undefined;
+
+      const destName =
+        startMode === 'nav' ? destination.trim() : undefined;
+
       await createTrip({
         vehicleId: activeVehicle.id,
         startTime: new Date().toISOString(),
@@ -184,20 +209,40 @@ export default function TripScreen() {
         estimatedFuelUsed: 0,
         estimatedCost: 0,
         routePoints: JSON.stringify(startPoint),
-        destinationName: destination || undefined,
+        originName,
+        destinationName: destName,
         isActive: true,
         isPaused: false,
         status: 'confirmed',
         source: 'gps',
         fillUpId: null,
+        note: startMode === 'free' ? 'Suivi GPS libre (arrière-plan)' : undefined,
       });
+
+      if (originName) setLiveOriginLabel(originName);
+      if (destName) setLiveDestLabel(destName);
 
       const trackingStarted = await startBackgroundTracking();
       if (!trackingStarted) {
         notify(
           'Permission requise',
-          'Autorisez la localisation en arrière-plan pour suivre votre trajet.'
+          'Autorisez la localisation « toujours » / arrière-plan pour tracer même hors premier plan.'
         );
+      } else {
+        notify(
+          'Suivi démarré',
+          startMode === 'free'
+            ? 'GPS actif en arrière-plan — km & vitesse enregistrés sans destination.'
+            : `Direction : ${destName}`
+        );
+      }
+
+      if (startMode === 'nav' && destName) {
+        try {
+          await Linking.openURL(openGoogleMapsSearch(destName));
+        } catch {
+          /* ignore */
+        }
       }
 
       await refresh();
@@ -229,46 +274,78 @@ export default function TripScreen() {
     await updateTrip(activeTrip.id, { isPaused: false });
     const ok = await startBackgroundTracking();
     await refresh();
-    if (!ok) {
-      notify('GPS', 'Impossible de relancer le suivi — vérifiez les permissions.');
-    } else {
-      notify('Reprise', 'Suivi GPS relancé.');
-    }
+    notify(
+      ok ? 'Reprise' : 'GPS',
+      ok ? 'Suivi GPS relancé (y compris en arrière-plan).' : 'Vérifiez les permissions localisation.'
+    );
   };
 
   const handleStopTrip = async () => {
     if (!activeTrip) return;
 
-    confirm('Terminer le trajet', 'Arrêter définitivement le suivi GPS ?', async () => {
+    confirm('Terminer le trajet', 'Arrêter le suivi GPS ?', async () => {
       await stopBackgroundTracking();
+      const pts = parseRoutePoints(activeTrip.routePoints);
+      const last = pts.length > 0 ? pts[pts.length - 1] : userLocation;
+
+      let destName = activeTrip.destinationName?.trim();
+      if (!destName && last) {
+        destName =
+          (await reverseGeocode(last.latitude, last.longitude).catch(() => null)) ||
+          'Lieu d’arrivée';
+      }
+      if (!destName) destName = 'Lieu d’arrivée';
+
+      let originName = activeTrip.originName?.trim();
+      if (!originName && pts[0]) {
+        originName =
+          (await reverseGeocode(pts[0].latitude, pts[0].longitude).catch(() => null)) ||
+          'Lieu de départ';
+      }
+
+      const durationMin =
+        (Date.now() - new Date(activeTrip.startTime).getTime()) / 60000;
+      const speed = averageSpeedKmh(activeTrip.distanceKm, durationMin);
+      const noteParts = [
+        activeTrip.note,
+        speed > 0 ? `Vitesse moy. ${speed.toFixed(0)} km/h` : null,
+      ].filter(Boolean);
+
       await updateTrip(activeTrip.id, {
         isActive: false,
         isPaused: false,
         endTime: new Date().toISOString(),
         status: 'confirmed',
+        originName: originName || activeTrip.originName,
+        destinationName: destName,
+        note: noteParts.join(' · ') || undefined,
       });
       if (activeTrip.distanceKm > 0) {
         await addTrackedKm(activeTrip.vehicleId, activeTrip.distanceKm);
       }
+      setLiveOriginLabel('');
+      setLiveDestLabel('');
+      setDestination('');
       await refresh();
       await loadLists();
+      setTab('history');
+      notify(
+        'Trajet terminé',
+        `${originName || 'Départ'} → ${destName} · ${formatDistance(activeTrip.distanceKm)}`
+      );
     }, 'Terminer');
   };
 
   const handleOpenGoogleMaps = async () => {
     if (destination.trim()) {
-      const url = openGoogleMapsSearch(destination);
-      await Linking.openURL(url);
-    } else {
-      const loc = userLocation || (await getCurrentLocation())?.coords;
-      if (loc) {
-        const url = openGoogleMapsNavigation(
-          loc.latitude + 0.01,
-          loc.longitude + 0.01,
-          destination || 'Destination'
-        );
-        await Linking.openURL(url);
-      }
+      await Linking.openURL(openGoogleMapsSearch(destination));
+      return;
+    }
+    const loc = userLocation || (await getCurrentLocation())?.coords;
+    if (loc) {
+      await Linking.openURL(
+        openGoogleMapsNavigation(loc.latitude + 0.01, loc.longitude + 0.01, 'Destination')
+      );
     }
   };
 
@@ -282,238 +359,355 @@ export default function TripScreen() {
   };
 
   const handleDeleteTrip = (trip: Trip) => {
+    const pts = parseRoutePoints(trip.routePoints);
+    const o = tripPlaceLabel(trip.originName, pts[0], 'origin');
+    const d = tripPlaceLabel(
+      trip.destinationName,
+      pts.length > 1 ? pts[pts.length - 1] : null,
+      'destination'
+    );
     confirm(
       'Supprimer le trajet',
-      `${trip.originName || 'Départ'} → ${trip.destinationName || 'Arrivée'}\nCette action est définitive.`,
+      `${o} → ${d}`,
       async () => {
-        try {
-          await deleteTrip(trip.id);
-          await refresh();
-          await loadLists();
-          notify('Supprimé', 'Trajet retiré de l’historique.');
-        } catch (e) {
-          notify('Erreur', e instanceof Error ? e.message : 'Impossible de supprimer');
-        }
+        await deleteTrip(trip.id);
+        await refresh();
+        await loadLists();
+        notify('Supprimé', 'Trajet retiré.');
       },
       'Supprimer'
     );
   };
 
+  const openDetail = (trip: Trip) => router.push(`/trip/${trip.id}` as never);
+
   const tripStats =
     activeTrip && activeVehicle
       ? calculateTripStats(activeVehicle, activeTrip.distanceKm, activeTrip.startTime)
       : null;
+  const avgSpeed =
+    activeTrip && tripStats
+      ? averageSpeedKmh(activeTrip.distanceKm, tripStats.durationMinutes)
+      : 0;
 
   const routePoints = activeTrip ? parseRoutePoints(activeTrip.routePoints) : [];
   const paused = Boolean(activeTrip?.isPaused);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={styles.map}>
-        <TripMap
-          ref={mapRef}
-          region={currentRegion}
-          routePoints={routePoints}
-          accentColor={colors.accent}
-          userLocation={userLocation}
-          paused={paused}
-        />
-        {!userLocation && (
-          <View style={styles.mapHint} pointerEvents="none">
-            <Text style={styles.mapHintText}>Localisation…</Text>
-          </View>
-        )}
+      <View style={[styles.segments, { borderBottomColor: colors.border }]}>
+        <TouchableOpacity
+          onPress={() => setTab('live')}
+          style={[
+            styles.segment,
+            tab === 'live' && { borderBottomColor: colors.accent, borderBottomWidth: 3 },
+          ]}
+        >
+          <Text style={{ color: tab === 'live' ? colors.accent : colors.textSecondary, fontWeight: '700' }}>
+            Trajet
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setTab('history')}
+          style={[
+            styles.segment,
+            tab === 'history' && { borderBottomColor: colors.accent, borderBottomWidth: 3 },
+          ]}
+        >
+          <Text
+            style={{
+              color: tab === 'history' ? colors.accent : colors.textSecondary,
+              fontWeight: '700',
+            }}
+          >
+            Historique{history.length ? ` (${history.length})` : ''}
+          </Text>
+        </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
-        <View style={styles.toolbar}>
-          <Button
-            title="Saisie manuelle"
-            variant="outline"
-            onPress={() => router.push('/trip/add' as never)}
-            style={{ flex: 1 }}
-          />
-          <Button
-            title="Import Maps"
-            variant="secondary"
-            onPress={() => router.push('/trip/import' as never)}
-            style={{ flex: 1 }}
-          />
-        </View>
-
-        {!activeVehicle ? (
-          <Card>
-            <Text style={[styles.warning, { color: colors.warning }]}>
-              Sélectionnez un véhicule dans l&apos;onglet Véhicules pour démarrer un trajet.
-            </Text>
-          </Card>
-        ) : activeTrip ? (
-          <>
-            <Card style={{ ...styles.activeTrip, borderColor: paused ? colors.warning : colors.accent }}>
-              <View style={styles.tripActiveHeader}>
-                <Ionicons
-                  name={paused ? 'pause-circle' : 'radio-button-on'}
-                  size={16}
-                  color={paused ? colors.warning : colors.accent}
-                />
-                <Text
-                  style={[
-                    styles.tripActiveTitle,
-                    { color: paused ? colors.warning : colors.accent },
-                  ]}
-                >
-                  {paused ? 'Trajet en pause' : 'Trajet en cours · GPS actif'}
-                </Text>
+      {tab === 'live' ? (
+        <>
+          <View style={styles.map}>
+            <TripMap
+              ref={mapRef}
+              region={currentRegion}
+              routePoints={routePoints}
+              accentColor={colors.accent}
+              userLocation={userLocation}
+              paused={paused}
+            />
+            {!userLocation && (
+              <View style={styles.mapHint} pointerEvents="none">
+                <Text style={styles.mapHintText}>Localisation…</Text>
               </View>
-              {(activeTrip.originName || activeTrip.destinationName) && (
-                <Text style={[styles.destination, { color: colors.text }]}>
-                  {activeTrip.originName ? `${activeTrip.originName} → ` : '→ '}
-                  {activeTrip.destinationName || '…'}
+            )}
+          </View>
+
+          <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
+            <View style={styles.toolbar}>
+              <Button
+                title="Manuel"
+                variant="outline"
+                onPress={() => router.push('/trip/add' as never)}
+                style={{ flex: 1 }}
+              />
+              <Button
+                title="Import"
+                variant="secondary"
+                onPress={() => router.push('/trip/import' as never)}
+                style={{ flex: 1 }}
+              />
+            </View>
+
+            {!activeVehicle ? (
+              <Card>
+                <Text style={[styles.warning, { color: colors.warning }]}>
+                  Sélectionnez un véhicule pour démarrer un trajet.
                 </Text>
-              )}
-            </Card>
-
-            <View style={styles.statsRow}>
-              <StatCard label="Distance" value={formatDistance(activeTrip.distanceKm)} />
-              <StatCard
-                label="Carburant est."
-                value={`${activeTrip.estimatedFuelUsed.toFixed(2)} L`}
-              />
-            </View>
-            <View style={styles.statsRow}>
-              <StatCard label="Coût est." value={formatEuro(activeTrip.estimatedCost)} />
-              <StatCard
-                label="Durée"
-                value={`${Math.floor(tripStats?.durationMinutes ?? 0)} min`}
-              />
-            </View>
-
-            {paused ? (
+              </Card>
+            ) : activeTrip ? (
               <>
-                <Button title="Reprendre le trajet" onPress={handleResume} style={{ marginBottom: 8 }} />
-                <Button
-                  title="Faire un plein maintenant"
-                  variant="secondary"
-                  onPress={() =>
-                    router.push({
-                      pathname: '/fillup/add' as never,
-                      params: { tripId: String(activeTrip.id), fromTrip: '1' },
-                    })
-                  }
-                  style={{ marginBottom: 8 }}
-                />
+                <Card
+                  style={{
+                    ...styles.activeTrip,
+                    borderColor: paused ? colors.warning : colors.accent,
+                  }}
+                >
+                  <View style={styles.tripActiveHeader}>
+                    <Ionicons
+                      name={paused ? 'pause-circle' : 'radio-button-on'}
+                      size={16}
+                      color={paused ? colors.warning : colors.accent}
+                    />
+                    <Text
+                      style={[
+                        styles.tripActiveTitle,
+                        { color: paused ? colors.warning : colors.accent },
+                      ]}
+                    >
+                      {paused ? 'Pause' : 'GPS actif (arrière-plan OK)'}
+                    </Text>
+                  </View>
+                  <Text style={[styles.placeLine, { color: colors.success }]}>
+                    Départ : {liveOriginLabel || '…'}
+                  </Text>
+                  <Text style={[styles.placeLine, { color: colors.accent }]}>
+                    Arrivée :{' '}
+                    {activeTrip.destinationName
+                      ? liveDestLabel
+                      : 'Suivi libre (sans destination fixe)'}
+                  </Text>
+                </Card>
+
+                <View style={styles.statsRow}>
+                  <StatCard label="Distance" value={formatDistance(activeTrip.distanceKm)} />
+                  <StatCard
+                    label="Vitesse moy."
+                    value={avgSpeed > 0 ? `${avgSpeed.toFixed(0)} km/h` : '—'}
+                  />
+                </View>
+                <View style={styles.statsRow}>
+                  <StatCard
+                    label="Carburant est."
+                    value={`${activeTrip.estimatedFuelUsed.toFixed(2)} L`}
+                  />
+                  <StatCard
+                    label="Durée"
+                    value={`${Math.floor(tripStats?.durationMinutes ?? 0)} min`}
+                  />
+                </View>
+
+                {paused ? (
+                  <>
+                    <Button title="Reprendre" onPress={handleResume} style={{ marginBottom: 8 }} />
+                    <Button
+                      title="Faire un plein"
+                      variant="secondary"
+                      onPress={() =>
+                        router.push({
+                          pathname: '/fillup/add' as never,
+                          params: { tripId: String(activeTrip.id), fromTrip: '1' },
+                        })
+                      }
+                      style={{ marginBottom: 8 }}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      title="Pause + plein"
+                      variant="secondary"
+                      onPress={() => handlePause(true)}
+                      style={{ marginBottom: 8 }}
+                    />
+                    <Button
+                      title="Pause (sans plein)"
+                      variant="outline"
+                      onPress={() => handlePause(false)}
+                      style={{ marginBottom: 8 }}
+                    />
+                  </>
+                )}
+                <Button title="Terminer le trajet" variant="danger" onPress={handleStopTrip} />
               </>
             ) : (
               <>
+                <Card>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                    Mode de démarrage
+                  </Text>
+                  <Text style={[styles.description, { color: colors.textSecondary }]}>
+                    Véhicule : {activeVehicle.name}. Le suivi GPS continue en arrière-plan (notification).
+                  </Text>
+
+                  <Pressable
+                    onPress={() => setStartMode('free')}
+                    style={[
+                      styles.modeCard,
+                      {
+                        borderColor: startMode === 'free' ? colors.accent : colors.border,
+                        backgroundColor: colors.card,
+                      },
+                    ]}
+                  >
+                    <Text style={{ color: colors.text, fontWeight: '800' }}>
+                      Suivi libre (recommandé)
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 4 }}>
+                      Pas de destination obligatoire — trace km, vitesse moyenne et conso estimée
+                      même hors premier plan.
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => setStartMode('nav')}
+                    style={[
+                      styles.modeCard,
+                      {
+                        borderColor: startMode === 'nav' ? colors.accent : colors.border,
+                        backgroundColor: colors.card,
+                        marginTop: 10,
+                      },
+                    ]}
+                  >
+                    <Text style={{ color: colors.text, fontWeight: '800' }}>
+                      Avec destination / navigation
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 4 }}>
+                      Indiquez une arrivée ; ouvre Maps pour naviguer + suit le GPS dans l’app.
+                    </Text>
+                  </Pressable>
+
+                  {startMode === 'nav' && (
+                    <View style={{ marginTop: 12 }}>
+                      <Input
+                        label="Destination"
+                        placeholder="Bureau, adresse…"
+                        value={destination}
+                        onChangeText={setDestination}
+                      />
+                    </View>
+                  )}
+                </Card>
+
                 <Button
-                  title="Pause + plein (station)"
-                  variant="secondary"
-                  onPress={() => handlePause(true)}
+                  title={
+                    startMode === 'free'
+                      ? 'Démarrer le suivi GPS libre'
+                      : 'Démarrer + ouvrir navigation'
+                  }
+                  onPress={handleStartTrip}
+                  loading={isStarting}
                   style={{ marginBottom: 8 }}
                 />
-                <Button
-                  title="Pause (sans plein)"
-                  variant="outline"
-                  onPress={() => handlePause(false)}
-                  style={{ marginBottom: 8 }}
-                />
+                {startMode === 'nav' && (
+                  <Button
+                    title="Ouvrir Google Maps seulement"
+                    variant="outline"
+                    onPress={handleOpenGoogleMaps}
+                  />
+                )}
               </>
             )}
-
-            <Button
-              title="Ouvrir navigation Google Maps"
-              variant="outline"
-              onPress={handleOpenGoogleMaps}
-              style={{ marginBottom: 8 }}
-            />
-            <Button title="Terminer le trajet" variant="danger" onPress={handleStopTrip} />
-          </>
-        ) : (
-          <>
+          </ScrollView>
+        </>
+      ) : (
+        <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
+          {!activeVehicle ? (
             <Card>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                Démarrer un trajet GPS
+              <Text style={[styles.warning, { color: colors.warning }]}>
+                Sélectionnez un véhicule pour l’historique.
               </Text>
-              <Text style={[styles.description, { color: colors.textSecondary }]}>
-                Véhicule : {activeVehicle.name} — carte OpenStreetMap + suivi dès le démarrage.
-                Vous pourrez faire une pause station / plein en cours de route.
-              </Text>
-              <Input
-                label="Destination (optionnel)"
-                placeholder="Ex: Paris, Lyon, 12 rue…"
-                value={destination}
-                onChangeText={setDestination}
-              />
             </Card>
-
-            <Button
-              title="Démarrer le suivi GPS"
-              onPress={handleStartTrip}
-              loading={isStarting}
-              style={{ marginBottom: 8 }}
-            />
-            <Button
-              title="Naviguer avec Google Maps"
-              variant="outline"
-              onPress={handleOpenGoogleMaps}
-            />
-          </>
-        )}
-
-        {pending.length > 0 && (
-          <View style={{ marginTop: 24 }}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              À valider ({pending.length})
-            </Text>
-            <Text style={[styles.hint, { color: colors.textSecondary, marginTop: 0 }]}>
-              Trajets importés / détectés — validez les trajets voiture, ignorez les autres.
-            </Text>
-            {pending.map((t) => (
-              <Card key={t.id} style={{ marginTop: 10 }}>
-                <Text style={{ color: colors.text, fontWeight: '700' }}>
-                  {t.originName || '?'} → {t.destinationName || '?'}
-                </Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
-                  {new Date(t.startTime).toLocaleString('fr-FR')} · {formatDistance(t.distanceKm)} ·{' '}
-                  {t.source}
-                </Text>
-                {!!t.note && (
-                  <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{t.note}</Text>
-                )}
-                <View style={styles.pendingActions}>
-                  <TouchableOpacity onPress={() => validateTrip(t, 'confirmed')}>
-                    <Text style={{ color: colors.success, fontWeight: '700' }}>Valider</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => validateTrip(t, 'rejected')}>
-                    <Text style={{ color: colors.danger, fontWeight: '700' }}>Ignorer</Text>
-                  </TouchableOpacity>
+          ) : (
+            <>
+              {pending.length > 0 && (
+                <View style={{ marginBottom: 16 }}>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                    À valider ({pending.length})
+                  </Text>
+                  {pending.map((t) => {
+                    const pts = parseRoutePoints(t.routePoints);
+                    const o = tripPlaceLabel(t.originName, pts[0], 'origin');
+                    const d = tripPlaceLabel(
+                      t.destinationName,
+                      pts.length > 1 ? pts[pts.length - 1] : null,
+                      'destination'
+                    );
+                    return (
+                      <Card key={t.id} style={{ marginTop: 10 }}>
+                        <TouchableOpacity onPress={() => openDetail(t)}>
+                          <Text style={{ color: colors.text, fontWeight: '700' }}>
+                            {o} → {d}
+                          </Text>
+                        </TouchableOpacity>
+                        <View style={styles.pendingActions}>
+                          <TouchableOpacity onPress={() => validateTrip(t, 'confirmed')}>
+                            <Text style={{ color: colors.success, fontWeight: '700' }}>Valider</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => validateTrip(t, 'rejected')}>
+                            <Text style={{ color: colors.danger, fontWeight: '700' }}>Ignorer</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </Card>
+                    );
+                  })}
                 </View>
-              </Card>
-            ))}
-          </View>
-        )}
+              )}
 
-        {history.length > 0 && (
-          <View style={{ marginTop: 24 }}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              Historique ({history.length})
-            </Text>
-            <Text style={[styles.hint, { color: colors.textSecondary }]}>
-              Mini-carte avec départ (vert) et arrivée (rouge) · corbeille pour supprimer.
-            </Text>
-            {history.map((t) => (
-              <TripHistoryCard key={t.id} trip={t} onDelete={handleDeleteTrip} />
-            ))}
-          </View>
-        )}
-      </ScrollView>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Trajets réalisés</Text>
+              <Text style={[styles.hint, { color: colors.textSecondary }]}>
+                Adresses départ / arrivée · touchez pour le détail carte.
+              </Text>
+              {history.length === 0 ? (
+                <Card style={{ marginTop: 12 }}>
+                  <Text style={{ color: colors.textSecondary, textAlign: 'center' }}>
+                    Aucun trajet terminé.
+                  </Text>
+                </Card>
+              ) : (
+                history.map((t) => (
+                  <TripHistoryCard
+                    key={t.id}
+                    trip={t}
+                    onPress={openDetail}
+                    onDelete={handleDeleteTrip}
+                  />
+                ))
+              )}
+            </>
+          )}
+        </ScrollView>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  map: { height: '40%', position: 'relative' },
+  segments: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth },
+  segment: { flex: 1, alignItems: 'center', paddingVertical: 12 },
+  map: { height: '36%', position: 'relative' },
   mapHint: {
     position: 'absolute',
     bottom: 8,
@@ -528,13 +722,14 @@ const styles = StyleSheet.create({
   panelContent: { padding: 16, paddingBottom: 40 },
   toolbar: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   sectionTitle: { fontSize: 18, fontWeight: '700', marginBottom: 8 },
-  description: { fontSize: 14, marginBottom: 16, lineHeight: 20 },
+  description: { fontSize: 14, marginBottom: 12, lineHeight: 20 },
+  modeCard: { borderWidth: 2, borderRadius: 14, padding: 14 },
   statsRow: { flexDirection: 'row', gap: 12, marginBottom: 12 },
   activeTrip: { marginBottom: 12, borderWidth: 2 },
-  tripActiveHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  tripActiveHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   tripActiveTitle: { fontSize: 16, fontWeight: '700' },
-  destination: { fontSize: 15, marginTop: 4 },
-  hint: { fontSize: 13, textAlign: 'left', marginTop: 8, lineHeight: 18, marginBottom: 4 },
+  placeLine: { fontSize: 14, fontWeight: '600', marginTop: 4, lineHeight: 20 },
+  hint: { fontSize: 13, lineHeight: 18, marginBottom: 4 },
   warning: { fontSize: 15, textAlign: 'center' },
   pendingActions: { flexDirection: 'row', gap: 24, marginTop: 10 },
 });

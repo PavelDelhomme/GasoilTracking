@@ -72,14 +72,15 @@ export async function startBackgroundTracking(): Promise<boolean> {
 
   await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
     accuracy: Location.Accuracy.BestForNavigation,
-    timeInterval: 5000,
-    distanceInterval: 10,
+    timeInterval: 4000,
+    distanceInterval: 8,
     showsBackgroundLocationIndicator: true,
     foregroundService: {
-      notificationTitle: 'Gasoil Tracking',
-      notificationBody: 'Suivi de trajet en cours — consommation calculée en temps réel',
+      notificationTitle: 'Gasoil Tracking — trajet en cours',
+      notificationBody: 'Suivi GPS actif même en arrière-plan (km & conso estimée)',
       notificationColor: '#e94560',
     },
+    pausesUpdatesAutomatically: false,
   });
 
   return true;

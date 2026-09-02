@@ -193,8 +193,16 @@ export default function HomeScreen() {
             />
             <StatCard
               label="Autonomie est."
-              value={formatDistance(estimateRange(activeVehicle))}
-              subtitle={`Réservoir ${activeVehicle.tankCapacity} L`}
+              value={formatDistance(
+                estimateRange(
+                  activeVehicle,
+                  undefined,
+                  stats && stats.averageConsumption > 0
+                    ? stats.averageConsumption
+                    : undefined
+                )
+              )}
+              subtitle={`Réservoir ${activeVehicle.tankCapacity} L · conso adaptée`}
             />
           </View>
 
@@ -202,12 +210,12 @@ export default function HomeScreen() {
             <StatCard
               label="Total dépensé"
               value={formatEuro(stats?.totalCost ?? 0)}
-              subtitle={`${stats?.fillUpCount ?? 0} plein(s)`}
+              subtitle={`${stats?.fillUpCount ?? 0} plein(s) enregistré(s)`}
             />
             <StatCard
               label="Distance"
               value={formatDistance(stats?.totalDistance ?? 0)}
-              subtitle="Entre pleins complets"
+              subtitle="Pleins + trajets GPS"
             />
           </View>
 

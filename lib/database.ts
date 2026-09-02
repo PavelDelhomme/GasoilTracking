@@ -445,6 +445,12 @@ export async function getActiveTrip(): Promise<Trip | null> {
   return row ? mapTrip(row) : null;
 }
 
+export async function getTripById(id: number): Promise<Trip | null> {
+  const database = await getDatabase();
+  const row = await database.getFirstAsync('SELECT * FROM trips WHERE id = ?', [id]);
+  return row ? mapTrip(row) : null;
+}
+
 export async function createTrip(trip: Omit<Trip, 'id'>): Promise<number> {
   const database = await getDatabase();
   const result = await database.runAsync(
