@@ -1,12 +1,28 @@
 import { Tabs } from 'expo-router';
-import { Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { ThemeToggleButton } from '@/components/ThemeToggleButton';
 
+/** Styles tab bar uniques (pas de branche Platform au render) → pas de mismatch */
+const TAB_BAR_STYLE = {
+  height: 64,
+  paddingBottom: 10,
+  paddingTop: 6,
+} as const;
+
+const TAB_LABEL_STYLE = {
+  fontSize: 11,
+  fontWeight: '600' as const,
+  marginBottom: 2,
+};
+
+const TAB_ITEM_STYLE = {
+  paddingHorizontal: 2,
+  minWidth: 64,
+};
+
 export default function TabLayout() {
   const { colors } = useTheme();
-  const isWeb = Platform.OS === 'web';
 
   return (
     <Tabs
@@ -16,21 +32,10 @@ export default function TabLayout() {
         tabBarStyle: {
           backgroundColor: colors.card,
           borderTopColor: colors.border,
-          height: isWeb ? 64 : undefined,
-          paddingBottom: isWeb ? 10 : undefined,
-          paddingTop: isWeb ? 6 : undefined,
+          ...TAB_BAR_STYLE,
         },
-        tabBarLabelStyle: {
-          fontSize: isWeb ? 11 : 10,
-          fontWeight: '600',
-          marginBottom: isWeb ? 2 : 0,
-        },
-        tabBarItemStyle: isWeb
-          ? {
-              paddingHorizontal: 2,
-              minWidth: 64,
-            }
-          : undefined,
+        tabBarLabelStyle: TAB_LABEL_STYLE,
+        tabBarItemStyle: TAB_ITEM_STYLE,
         tabBarAllowFontScaling: false,
         headerStyle: { backgroundColor: colors.background },
         headerTintColor: colors.text,
@@ -43,19 +48,15 @@ export default function TabLayout() {
         options={{
           title: 'Accueil',
           tabBarLabel: 'Accueil',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={isWeb ? 20 : size} color={color} />
-          ),
+          tabBarIcon: ({ color }) => <Ionicons name="home" size={20} color={color} />,
         }}
       />
       <Tabs.Screen
         name="vehicles"
         options={{
           title: 'Véhicules',
-          tabBarLabel: isWeb ? 'Véhicules' : 'Véhicules',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="car" size={isWeb ? 20 : size} color={color} />
-          ),
+          tabBarLabel: 'Véhicules',
+          tabBarIcon: ({ color }) => <Ionicons name="car" size={20} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -63,9 +64,7 @@ export default function TabLayout() {
         options={{
           title: 'Pleins',
           tabBarLabel: 'Pleins',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="water" size={isWeb ? 20 : size} color={color} />
-          ),
+          tabBarIcon: ({ color }) => <Ionicons name="water" size={20} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -73,9 +72,7 @@ export default function TabLayout() {
         options={{
           title: 'Trajet',
           tabBarLabel: 'Trajet',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="navigate" size={isWeb ? 20 : size} color={color} />
-          ),
+          tabBarIcon: ({ color }) => <Ionicons name="navigate" size={20} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -83,9 +80,7 @@ export default function TabLayout() {
         options={{
           title: 'Budget',
           tabBarLabel: 'Budget',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="wallet" size={isWeb ? 20 : size} color={color} />
-          ),
+          tabBarIcon: ({ color }) => <Ionicons name="wallet" size={20} color={color} />,
         }}
       />
     </Tabs>

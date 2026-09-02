@@ -4,6 +4,7 @@ import { AppProvider } from '@/context/AppContext';
 import { AuthProvider } from '@/context/AuthContext';
 import { ThemeProvider, useTheme } from '@/context/ThemeContext';
 import { ThemeToggleButton } from '@/components/ThemeToggleButton';
+import { ClientOnly } from '@/components/ClientOnly';
 import { useAppUpdateCheck } from '@/hooks/useAppUpdateCheck';
 
 function RootNavigation() {
@@ -44,12 +45,14 @@ function RootNavigation() {
 
 export default function RootLayout() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <AppProvider>
-          <RootNavigation />
-        </AppProvider>
-      </AuthProvider>
-    </ThemeProvider>
+    <ClientOnly>
+      <ThemeProvider>
+        <AuthProvider>
+          <AppProvider>
+            <RootNavigation />
+          </AppProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </ClientOnly>
   );
 }
