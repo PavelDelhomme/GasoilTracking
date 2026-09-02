@@ -41,6 +41,9 @@ function RootNavigation() {
         <Stack.Screen name="admin" options={{ title: 'Administration' }} />
         <Stack.Screen name="trip/add" options={{ title: 'Trajet manuel', presentation: 'modal' }} />
         <Stack.Screen name="trip/import" options={{ title: 'Import Google Maps', presentation: 'modal' }} />
+        <Stack.Screen name="place/add" options={{ title: 'Nouveau lieu', presentation: 'modal' }} />
+        <Stack.Screen name="place/route" options={{ title: 'Trajet régulier', presentation: 'modal' }} />
+        <Stack.Screen name="fillup/station" options={{ title: 'Station essence', presentation: 'modal' }} />
       </Stack>
     </>
   );

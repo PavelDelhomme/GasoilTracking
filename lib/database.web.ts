@@ -1,26 +1,36 @@
 /**
- * Stockage web : AsyncStorage (localStorage) — pas d'ExpoSQLite.
- * Même API publique que database.ts (natif).
+ * Stockage web : AsyncStorage — même API que database.ts
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Budget, FillUp, Trip, Vehicle } from '@/types';
+import type { Budget, FillUp, Place, RecurringRoute, Trip, Vehicle } from '@/types';
 
 const STORAGE_KEY = 'gasoil_tracking_v1';
 
 interface Store {
-  seq: { vehicles: number; fillUps: number; budgets: number; trips: number };
+  seq: {
+    vehicles: number;
+    fillUps: number;
+    budgets: number;
+    trips: number;
+    places: number;
+    routes: number;
+  };
   vehicles: Vehicle[];
   fillUps: FillUp[];
   budgets: Budget[];
   trips: Trip[];
+  places: Place[];
+  routes: RecurringRoute[];
 }
 
 const emptyStore = (): Store => ({
-  seq: { vehicles: 1, fillUps: 1, budgets: 1, trips: 1 },
+  seq: { vehicles: 1, fillUps: 1, budgets: 1, trips: 1, places: 1, routes: 1 },
   vehicles: [],
   fillUps: [],
   budgets: [],
   trips: [],
+  places: [],
+  routes: [],
 });
 
 let cache: Store | null = null;
@@ -32,7 +42,9 @@ async function load(): Promise<Store> {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = { ...emptyStore(), ...JSON.parse(raw) } as Store;
-      // migrations soft
+      parsed.seq = { ...emptyStore().seq, ...parsed.seq };
+      parsed.places = parsed.places || [];
+      parsed.routes = parsed.routes || [];
       parsed.trips = (parsed.trips || []).map((t) => ({
         ...t,
         status: t.status || 'confirmed',
@@ -60,11 +72,11 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-// --- Vehicles ---
-
 export async function getVehicles(): Promise<Vehicle[]> {
   const s = await load();
-  return [...s.vehicles].sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.name.localeCompare(b.name));
+  return [...s.vehicles].sort(
+    (a, b) => Number(b.isActive) - Number(a.isActive) || a.name.localeCompare(b.name)
+  );
 }
 
 export async function getActiveVehicle(): Promise<Vehicle | null> {
@@ -117,6 +129,7 @@ export async function deleteVehicle(id: number): Promise<void> {
   s.fillUps = s.fillUps.filter((f) => f.vehicleId !== id);
   s.trips = s.trips.filter((t) => t.vehicleId !== id);
   s.budgets = s.budgets.map((b) => (b.vehicleId === id ? { ...b, vehicleId: null } : b));
+  s.routes = s.routes.map((r) => (r.vehicleId === id ? { ...r, vehicleId: null } : r));
   await save(s);
 }
 
@@ -125,8 +138,6 @@ export async function setActiveVehicle(id: number): Promise<void> {
   s.vehicles = s.vehicles.map((v) => ({ ...v, isActive: v.id === id }));
   await save(s);
 }
-
-// --- Fill-ups ---
 
 export async function createFillUp(fillUp: Omit<FillUp, 'id'>): Promise<number> {
   const s = await load();
@@ -155,8 +166,6 @@ export async function deleteFillUp(id: number): Promise<void> {
   s.fillUps = s.fillUps.filter((f) => f.id !== id);
   await save(s);
 }
-
-// --- Budgets ---
 
 export async function getBudgets(vehicleId?: number): Promise<Budget[]> {
   const s = await load();
@@ -187,14 +196,13 @@ export async function deleteBudget(id: number): Promise<void> {
   await save(s);
 }
 
-// --- Trips ---
-
-export async function getTrips(vehicleId?: number, opts?: { includeRejected?: boolean }): Promise<Trip[]> {
+export async function getTrips(
+  vehicleId?: number,
+  opts?: { includeRejected?: boolean }
+): Promise<Trip[]> {
   const s = await load();
   let list = vehicleId ? s.trips.filter((t) => t.vehicleId === vehicleId) : s.trips;
-  if (!opts?.includeRejected) {
-    list = list.filter((t) => t.status !== 'rejected');
-  }
+  if (!opts?.includeRejected) list = list.filter((t) => t.status !== 'rejected');
   return [...list].sort((a, b) => b.startTime.localeCompare(a.startTime));
 }
 
@@ -240,4 +248,64 @@ export async function stopActiveTrips(): Promise<void> {
   const end = nowIso();
   s.trips = s.trips.map((t) => (t.isActive ? { ...t, isActive: false, endTime: end } : t));
   await save(s);
+}
+
+export async function getPlaces(): Promise<Place[]> {
+  const s = await load();
+  return [...s.places].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
+}
+
+export async function createPlace(place: Omit<Place, 'id' | 'createdAt'>): Promise<number> {
+  const s = await load();
+  const id = s.seq.places++;
+  s.places.push({ ...place, id, createdAt: nowIso() });
+  await save(s);
+  return id;
+}
+
+export async function updatePlace(id: number, place: Partial<Place>): Promise<void> {
+  const s = await load();
+  s.places = s.places.map((p) => (p.id === id ? { ...p, ...place, id } : p));
+  await save(s);
+}
+
+export async function deletePlace(id: number): Promise<void> {
+  const s = await load();
+  s.routes = s.routes.filter((r) => r.fromPlaceId !== id && r.toPlaceId !== id);
+  s.places = s.places.filter((p) => p.id !== id);
+  await save(s);
+}
+
+export async function getRecurringRoutes(vehicleId?: number): Promise<RecurringRoute[]> {
+  const s = await load();
+  let list = s.routes.filter((r) => r.isActive);
+  if (vehicleId) list = list.filter((r) => r.vehicleId === vehicleId || r.vehicleId == null);
+  return [...list].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function createRecurringRoute(route: Omit<RecurringRoute, 'id'>): Promise<number> {
+  const s = await load();
+  const id = s.seq.routes++;
+  s.routes.push({ ...route, id });
+  await save(s);
+  return id;
+}
+
+export async function deleteRecurringRoute(id: number): Promise<void> {
+  const s = await load();
+  s.routes = s.routes.filter((r) => r.id !== id);
+  await save(s);
+}
+
+export async function getMonthlySpend(months = 6): Promise<{ month: string; spent: number }[]> {
+  const s = await load();
+  const map = new Map<string, number>();
+  for (const f of s.fillUps) {
+    const m = f.date.slice(0, 7);
+    map.set(m, (map.get(m) || 0) + f.totalCost);
+  }
+  return [...map.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .slice(-months)
+    .map(([month, spent]) => ({ month, spent }));
 }

@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import type { Budget, FillUp, Trip, Vehicle } from '@/types';
+import type { Budget, FillUp, Place, PlaceKind, RecurringRoute, Trip, Vehicle } from '@/types';
 
 let db: SQLite.SQLiteDatabase | null = null;
 
@@ -77,6 +77,29 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
       fill_up_id INTEGER,
       note TEXT,
       FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS places (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      address TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT 'other',
+      latitude REAL,
+      longitude REAL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS recurring_routes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vehicle_id INTEGER,
+      name TEXT NOT NULL,
+      from_place_id INTEGER NOT NULL,
+      to_place_id INTEGER NOT NULL,
+      distance_km REAL NOT NULL DEFAULT 0,
+      times_per_week REAL NOT NULL DEFAULT 5,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      FOREIGN KEY (from_place_id) REFERENCES places(id) ON DELETE CASCADE,
+      FOREIGN KEY (to_place_id) REFERENCES places(id) ON DELETE CASCADE
     );
   `);
 
@@ -197,28 +220,42 @@ export async function getVehicleById(id: number): Promise<Vehicle | null> {
 
 export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>): Promise<number> {
   const database = await getDatabase();
-  if (vehicle.isActive) {
-    await database.runAsync('UPDATE vehicles SET is_active = 0');
+  try {
+    if (vehicle.isActive) {
+      await database.runAsync('UPDATE vehicles SET is_active = 0');
+    }
+    const result = await database.runAsync(
+      `INSERT INTO vehicles (name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        vehicle.name,
+        vehicle.brand,
+        vehicle.model,
+        vehicle.year,
+        vehicle.fuelType,
+        vehicle.consumptionPer100,
+        vehicle.tankCapacity,
+        vehicle.defaultFuelPrice,
+        vehicle.currentOdometer,
+        vehicle.hasOdometer ? 1 : 0,
+        vehicle.trackedKm ?? 0,
+        vehicle.isActive ? 1 : 0,
+      ]
+    );
+    const id = Number(result.lastInsertRowId);
+    if (!id) {
+      // Fallback : relire le dernier véhicule
+      const row = await database.getFirstAsync<{ id: number }>(
+        'SELECT id FROM vehicles ORDER BY id DESC LIMIT 1'
+      );
+      if (!row?.id) throw new Error('INSERT OK mais id introuvable');
+      return row.id;
+    }
+    return id;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`SQLite createVehicle: ${msg}`);
   }
-  const result = await database.runAsync(
-    `INSERT INTO vehicles (name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      vehicle.name,
-      vehicle.brand,
-      vehicle.model,
-      vehicle.year,
-      vehicle.fuelType,
-      vehicle.consumptionPer100,
-      vehicle.tankCapacity,
-      vehicle.defaultFuelPrice,
-      vehicle.currentOdometer,
-      vehicle.hasOdometer ? 1 : 0,
-      vehicle.trackedKm ?? 0,
-      vehicle.isActive ? 1 : 0,
-    ]
-  );
-  return result.lastInsertRowId;
 }
 
 export async function updateVehicle(id: number, vehicle: Partial<Vehicle>): Promise<void> {
@@ -464,4 +501,121 @@ export async function stopActiveTrips(): Promise<void> {
   await database.runAsync(
     "UPDATE trips SET is_active = 0, end_time = datetime('now') WHERE is_active = 1"
   );
+}
+
+// --- Places & trajets réguliers ---
+
+function mapPlace(row: unknown): Place {
+  const r = row as Record<string, unknown>;
+  return {
+    id: r.id as number,
+    name: r.name as string,
+    address: (r.address as string) || '',
+    kind: (r.kind as PlaceKind) || 'other',
+    latitude: r.latitude == null ? null : (r.latitude as number),
+    longitude: r.longitude == null ? null : (r.longitude as number),
+    createdAt: r.created_at as string,
+  };
+}
+
+function mapRoute(row: unknown): RecurringRoute {
+  const r = row as Record<string, unknown>;
+  return {
+    id: r.id as number,
+    vehicleId: r.vehicle_id == null ? null : (r.vehicle_id as number),
+    name: r.name as string,
+    fromPlaceId: r.from_place_id as number,
+    toPlaceId: r.to_place_id as number,
+    distanceKm: r.distance_km as number,
+    timesPerWeek: r.times_per_week as number,
+    isActive: Boolean(r.is_active),
+  };
+}
+
+export async function getPlaces(): Promise<Place[]> {
+  const database = await getDatabase();
+  const rows = await database.getAllAsync('SELECT * FROM places ORDER BY kind ASC, name ASC');
+  return rows.map(mapPlace);
+}
+
+export async function createPlace(place: Omit<Place, 'id' | 'createdAt'>): Promise<number> {
+  const database = await getDatabase();
+  const result = await database.runAsync(
+    `INSERT INTO places (name, address, kind, latitude, longitude) VALUES (?, ?, ?, ?, ?)`,
+    [place.name, place.address || '', place.kind, place.latitude, place.longitude]
+  );
+  return Number(result.lastInsertRowId);
+}
+
+export async function updatePlace(id: number, place: Partial<Place>): Promise<void> {
+  const database = await getDatabase();
+  const fields: string[] = [];
+  const values: (string | number | null)[] = [];
+  if (place.name !== undefined) { fields.push('name = ?'); values.push(place.name); }
+  if (place.address !== undefined) { fields.push('address = ?'); values.push(place.address); }
+  if (place.kind !== undefined) { fields.push('kind = ?'); values.push(place.kind); }
+  if (place.latitude !== undefined) { fields.push('latitude = ?'); values.push(place.latitude); }
+  if (place.longitude !== undefined) { fields.push('longitude = ?'); values.push(place.longitude); }
+  if (!fields.length) return;
+  values.push(id);
+  await database.runAsync(`UPDATE places SET ${fields.join(', ')} WHERE id = ?`, values);
+}
+
+export async function deletePlace(id: number): Promise<void> {
+  const database = await getDatabase();
+  await database.runAsync('DELETE FROM recurring_routes WHERE from_place_id = ? OR to_place_id = ?', [id, id]);
+  await database.runAsync('DELETE FROM places WHERE id = ?', [id]);
+}
+
+export async function getRecurringRoutes(vehicleId?: number): Promise<RecurringRoute[]> {
+  const database = await getDatabase();
+  if (vehicleId) {
+    const rows = await database.getAllAsync(
+      'SELECT * FROM recurring_routes WHERE is_active = 1 AND (vehicle_id = ? OR vehicle_id IS NULL) ORDER BY name',
+      [vehicleId]
+    );
+    return rows.map(mapRoute);
+  }
+  const rows = await database.getAllAsync(
+    'SELECT * FROM recurring_routes WHERE is_active = 1 ORDER BY name'
+  );
+  return rows.map(mapRoute);
+}
+
+export async function createRecurringRoute(
+  route: Omit<RecurringRoute, 'id'>
+): Promise<number> {
+  const database = await getDatabase();
+  const result = await database.runAsync(
+    `INSERT INTO recurring_routes (vehicle_id, name, from_place_id, to_place_id, distance_km, times_per_week, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      route.vehicleId,
+      route.name,
+      route.fromPlaceId,
+      route.toPlaceId,
+      route.distanceKm,
+      route.timesPerWeek,
+      route.isActive ? 1 : 0,
+    ]
+  );
+  return Number(result.lastInsertRowId);
+}
+
+export async function deleteRecurringRoute(id: number): Promise<void> {
+  const database = await getDatabase();
+  await database.runAsync('DELETE FROM recurring_routes WHERE id = ?', [id]);
+}
+
+export async function getMonthlySpend(months = 6): Promise<{ month: string; spent: number }[]> {
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<{ month: string; spent: number }>(
+    `SELECT substr(date, 1, 7) AS month, SUM(total_cost) AS spent
+     FROM fill_ups
+     GROUP BY substr(date, 1, 7)
+     ORDER BY month DESC
+     LIMIT ?`,
+    [months]
+  );
+  return rows.map((r) => ({ month: r.month, spent: Number(r.spent) || 0 })).reverse();
 }

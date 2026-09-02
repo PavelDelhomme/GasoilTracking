@@ -37,8 +37,28 @@ export interface FillUp {
   tripId?: number | null;
 }
 
-export type TripStatus = 'pending' | 'confirmed' | 'rejected';
-export type TripSource = 'gps' | 'manual' | 'maps_import' | 'detected';
+export type PlaceKind = 'home' | 'work' | 'other' | 'station';
+
+export interface Place {
+  id: number;
+  name: string;
+  address: string;
+  kind: PlaceKind;
+  latitude: number | null;
+  longitude: number | null;
+  createdAt: string;
+}
+
+export interface RecurringRoute {
+  id: number;
+  vehicleId: number | null;
+  name: string;
+  fromPlaceId: number;
+  toPlaceId: number;
+  distanceKm: number;
+  timesPerWeek: number;
+  isActive: boolean;
+}
 
 export interface Budget {
   id: number;
@@ -53,6 +73,9 @@ export interface Budget {
   endDate: string;
   isActive: boolean;
 }
+
+export type TripStatus = 'pending' | 'confirmed' | 'rejected';
+export type TripSource = 'gps' | 'manual' | 'maps_import' | 'detected';
 
 export interface Trip {
   id: number;
