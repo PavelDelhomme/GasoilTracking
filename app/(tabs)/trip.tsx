@@ -283,20 +283,6 @@ export default function TripScreen() {
 
   const handleDeleteTrip = (trip: Trip) => {
     confirm(
-      'Supprimer ce trajet',
-      `${trip.originName || 'Départ'} → ${trip.destinationName || 'Arrivée'} sera retiré de l’historique.`,
-      async () => {
-        await deleteTrip(trip.id);
-        await refresh();
-        await loadLists();
-        notify('Supprimé', 'Trajet retiré de l’historique.');
-      },
-      'Supprimer'
-    );
-  };
-
-  const handleDeleteTrip = (trip: Trip) => {
-    confirm(
       'Supprimer le trajet',
       `${trip.originName || 'Départ'} → ${trip.destinationName || 'Arrivée'}\nCette action est définitive.`,
       async () => {
@@ -513,7 +499,7 @@ export default function TripScreen() {
               Historique ({history.length})
             </Text>
             <Text style={[styles.hint, { color: colors.textSecondary }]}>
-              Mini-carte départ / arrivée · touchez la corbeille pour supprimer.
+              Mini-carte avec départ (vert) et arrivée (rouge) · corbeille pour supprimer.
             </Text>
             {history.map((t) => (
               <TripHistoryCard key={t.id} trip={t} onDelete={handleDeleteTrip} />
