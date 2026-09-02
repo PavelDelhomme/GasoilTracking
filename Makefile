@@ -116,14 +116,12 @@ mobile-devices:
 	@adb devices -l
 
 mobile-install-expo:
-	@echo "${GREEN}📥 Installation Expo Go sur $(SAMSUNG_SERIAL)...${NC}"
+	@echo "${GREEN}📥 Installation Expo Go (SDK 52) sur $(SAMSUNG_SERIAL)...${NC}"
 	@mkdir -p .tmp
 	@if [ ! -f .tmp/expo-go.apk ]; then \
-		echo "${YELLOW}Téléchargement Expo Go APK...${NC}"; \
-		curl -fsSL -o .tmp/expo-go.apk \
-		  "https://d1ahtucjixef4r.cloudfront.net/Exponent-2.32.18.apk" \
-		|| curl -fsSL -L -o .tmp/expo-go.apk \
-		  "https://github.com/expo/expo-go-releases/releases/download/Expo-Go-2.32.18/Exponent-2.32.18.apk"; \
+		echo "${YELLOW}Téléchargement Expo Go 2.32.20...${NC}"; \
+		curl -fsSL -L -o .tmp/expo-go.apk \
+		  "https://github.com/expo/expo-go-releases/releases/download/Expo-Go-2.32.20/Expo-Go-2.32.20.apk"; \
 	fi
 	adb -s $(SAMSUNG_SERIAL) install -r .tmp/expo-go.apk
 	@echo "${GREEN}✅ Expo Go installé${NC}"
