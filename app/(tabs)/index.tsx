@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Card, StatCard, ProgressBar } from '@/components/Card';
 import { Button } from '@/components/Button';
@@ -17,6 +18,7 @@ import type { ConsumptionStats } from '@/types';
 
 export default function HomeScreen() {
   const { activeVehicle, activeTrip, budgetStatuses, refresh } = useApp();
+  const { user, logout, syncNow } = useAuth();
   const { colors } = useTheme();
   const [stats, setStats] = useState<ConsumptionStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -30,6 +32,11 @@ export default function HomeScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     await refresh();
+    try {
+      await syncNow();
+    } catch {
+      /* offline */
+    }
     if (activeVehicle) {
       const s = await getConsumptionStats(activeVehicle.id);
       setStats(s);
@@ -44,6 +51,25 @@ export default function HomeScreen() {
       style={[styles.container, { backgroundColor: colors.background }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
+      <Card style={{ marginBottom: 12 }}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          {user ? `Bonjour, ${user.name}` : 'Compte cloud'}
+        </Text>
+        <Text style={{ color: colors.textSecondary, marginBottom: 10, fontSize: 13 }}>
+          {user
+            ? 'Vos données peuvent être synchronisées sur le serveur.'
+            : 'Connectez-vous pour sauvegarder et retrouver vos données.'}
+        </Text>
+        {user ? (
+          <View style={styles.actions}>
+            <Button title="Synchroniser" variant="secondary" onPress={() => syncNow()} style={{ flex: 1 }} />
+            <Button title="Déconnexion" variant="outline" onPress={() => logout()} style={{ flex: 1 }} />
+          </View>
+        ) : (
+          <Button title="Connexion / Inscription" onPress={() => router.push('/auth')} />
+        )}
+      </Card>
+
       {!activeVehicle ? (
         <Card style={styles.emptyCard}>
           <Ionicons name="car-outline" size={48} color={colors.textSecondary} />

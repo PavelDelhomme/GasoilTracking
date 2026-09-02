@@ -9,13 +9,13 @@ RUN npm ci
 COPY . .
 
 ENV EXPO_NO_TELEMETRY=1
-RUN npx expo export --platform web --output-dir dist
+RUN npx expo export --platform web --output-dir dist \
+  && mkdir -p dist \
+  && cp public/download.html dist/download.html
 
-# --- Production ---
 FROM nginx:1.27-alpine
 
 LABEL org.opencontainers.image.title="Gasoil Tracking"
-LABEL org.opencontainers.image.description="Suivi carburant — interface web"
 
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html

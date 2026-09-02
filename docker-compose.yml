@@ -1,16 +1,6 @@
-# =============================================================================
-# Gasoil Tracking — COMPOSE UNIQUE pour Portainer (déploiement Git)
-# =============================================================================
-# Portainer → Stacks → Add stack → Repository
-#   Name:            gasoil-tracking
-#   Repository URL:  https://github.com/PavelDelhomme/GasoilTracking.git
-#   Reference:       refs/heads/main
-#   Compose path:    docker-compose.yml
-#   Auto-update:     optionnel (webhook / Pull and redeploy)
-#
-# Prérequis VPS : réseau Docker externe « web » (Nginx Proxy Manager y est déjà)
-# Domaine NPM   : gasoil-tracking.delhomme.ovh → gasoil-tracking-web:80
-# =============================================================================
+# Gasoil Tracking — production Portainer (branche prod)
+# Domaine: https://gasoil-tracking.delhomme.ovh
+# Stack Git: Repository → docker-compose.yml → refs/heads/prod
 
 services:
   web:
@@ -20,22 +10,49 @@ services:
     image: gasoil-tracking-web:latest
     container_name: gasoil-tracking-web
     restart: unless-stopped
-    # Pas de ports hôte : NPM joint le conteneur via le réseau « web »
     expose:
       - "80"
+    depends_on:
+      api:
+        condition: service_healthy
     networks:
       - gasoil-network
       - web
     labels:
       - "com.gasoiltracking.project=gasoil-tracking"
       - "com.gasoiltracking.service=web"
-      - "com.gasoiltracking.deploy=portainer-git"
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: gasoil-tracking-api:latest
+    container_name: gasoil-tracking-api
+    restart: unless-stopped
+    expose:
+      - "4000"
+    environment:
+      PORT: "4000"
+      DATA_DIR: /data
+      JWT_SECRET: ${JWT_SECRET:-change-me-gasoil-tracking-prod}
+      PUBLIC_URL: https://gasoil-tracking.delhomme.ovh
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+      MIN_APP_VERSION: ${MIN_APP_VERSION:-1.0.0}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@delhomme.ovh}
+    volumes:
+      - gasoil_api_data:/data
+    networks:
+      - gasoil-network
+      - web
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/health"]
       interval: 30s
       timeout: 5s
-      retries: 3
+      retries: 5
       start_period: 20s
+    labels:
+      - "com.gasoiltracking.project=gasoil-tracking"
+      - "com.gasoiltracking.service=api"
 
 networks:
   gasoil-network:
@@ -44,3 +61,7 @@ networks:
   web:
     external: true
     name: web
+
+volumes:
+  gasoil_api_data:
+    name: gasoil_api_data

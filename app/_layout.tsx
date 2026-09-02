@@ -1,13 +1,16 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AppProvider } from '@/context/AppContext';
+import { AuthProvider } from '@/context/AuthContext';
 import { useTheme } from '@/hooks/useTheme';
+import { useAppUpdateCheck } from '@/hooks/useAppUpdateCheck';
 
-export default function RootLayout() {
+function RootNavigation() {
   const { colors, scheme } = useTheme();
+  useAppUpdateCheck();
 
   return (
-    <AppProvider>
+    <>
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
@@ -30,7 +33,18 @@ export default function RootLayout() {
           name="budget/add"
           options={{ title: 'Nouveau budget', presentation: 'modal' }}
         />
+        <Stack.Screen name="auth" options={{ title: 'Compte', presentation: 'modal' }} />
       </Stack>
-    </AppProvider>
+    </>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <AuthProvider>
+      <AppProvider>
+        <RootNavigation />
+      </AppProvider>
+    </AuthProvider>
   );
 }

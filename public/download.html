@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gasoil Tracking — Télécharger</title>
+  <style>
+    :root { --bg:#0f0f1a; --card:#1a1a2e; --accent:#e94560; --text:#f1f5f9; --muted:#94a3b8; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:linear-gradient(160deg,#0f0f1a,#16213e 50%,#0f0f1a); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+    .box { max-width:420px; width:100%; background:var(--card); border:1px solid #2d2d44; border-radius:20px; padding:32px; }
+    h1 { margin:0 0 8px; font-size:1.6rem; }
+    p { color:var(--muted); line-height:1.5; }
+    .btn { display:block; text-align:center; background:var(--accent); color:#fff; text-decoration:none; padding:14px 18px; border-radius:12px; font-weight:700; margin-top:20px; }
+    .meta { margin-top:16px; font-size:.9rem; color:var(--muted); }
+    code { color:#fff; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>Gasoil Tracking</h1>
+    <p>Application Android pour suivre consommation, budgets et trajets. Créez un compte dans l’app pour synchroniser vos données.</p>
+    <a class="btn" id="dl" href="/api/version">Vérifier la dernière version</a>
+    <p class="meta" id="info">Chargement…</p>
+  </div>
+  <script>
+    fetch('/api/version').then(r => r.json()).then(v => {
+      document.getElementById('info').textContent = 'Version ' + v.version + (v.releaseNotes ? ' — ' + v.releaseNotes : '');
+      const a = document.getElementById('dl');
+      a.href = v.apkUrl;
+      a.textContent = 'Télécharger l’APK ' + v.version;
+    }).catch(() => {
+      document.getElementById('info').textContent = 'API version indisponible pour le moment.';
+    });
+  </script>
+</body>
+</html>

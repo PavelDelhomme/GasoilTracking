@@ -49,7 +49,7 @@ help:
 	@echo ""
 	@echo "${YELLOW}🚀 PRODUCTION (Git → VPS → https://$(DOMAIN)):${NC}"
 	@echo "  ${GREEN}release${NC} / ${GREEN}push${NC}       Push ${CYAN}$(BRANCH)${NC} → GitHub"
-	@echo "  ${GREEN}deploy${NC}               Pull Git sur VPS + rebuild conteneur"
+	@echo "  ${GREEN}deploy${NC}               Redeploy stack Portainer Git (prod)"
 	@echo "  ${GREEN}update${NC}               ${CYAN}release + deploy${NC} (mise à jour live)"
 	@echo "  ${GREEN}status-prod${NC}          Health https://$(DOMAIN)"
 	@echo "  ${GREEN}portainer-info${NC}       Aide stack Repository Portainer UI"
@@ -82,7 +82,7 @@ release push:
 deploy:
 	@echo "${GREEN}🚀 Déploiement production (Git pull VPS + compose)...${NC}"
 	@chmod +x scripts/deploy-vps.sh
-	@DEPLOY_SSH=$(DEPLOY_SSH) GASOIL_DOMAIN=$(DOMAIN) ./scripts/deploy-vps.sh
+	@DEPLOY_SSH=$(DEPLOY_SSH) GASOIL_DOMAIN=$(DOMAIN) ./scripts/deploy-portainer-git.sh
 
 update: release deploy
 	@echo "${GREEN}✅ Live → https://$(DOMAIN)${NC}"
