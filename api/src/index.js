@@ -25,8 +25,21 @@ const TRUST_PROXY = process.env.TRUST_PROXY !== '0';
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || 'admin@delhomme.ovh')
   .toLowerCase()
   .trim();
+const PERSONAL_MAIL = String(process.env.PERSONAL_MAIL || '')
+  .toLowerCase()
+  .trim();
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const ADMIN_NAME = process.env.ADMIN_NAME || 'Admin';
+
+function isManagerEmail(email) {
+  const e = String(email || '')
+    .toLowerCase()
+    .trim();
+  if (!e) return false;
+  if (e === ADMIN_EMAIL) return true;
+  if (PERSONAL_MAIL && e === PERSONAL_MAIL) return true;
+  return false;
+}
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(path.join(DATA_DIR, 'apks'), { recursive: true });
@@ -81,6 +94,18 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
   CREATE INDEX IF NOT EXISTS idx_refresh_user ON refresh_tokens(user_id);
+  CREATE TABLE IF NOT EXISTS download_links (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_by TEXT NOT NULL,
+    label TEXT,
+    max_uses INTEGER NOT NULL DEFAULT 50,
+    use_count INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    revoked_at TEXT,
+    last_used_at TEXT
+  );
 `);
 
 try {
@@ -557,14 +582,6 @@ app.get('/api/version', (_req, res) => {
   });
 });
 
-app.get('/api/download/:file', (req, res) => {
-  const file = path.basename(req.params.file);
-  if (!/^[\w.\-]+$/.test(file)) return res.status(400).json({ error: 'Nom invalide' });
-  const full = path.join(DATA_DIR, 'apks', file);
-  if (!fs.existsSync(full)) return res.status(404).json({ error: 'APK introuvable' });
-  res.download(full, file);
-});
-
 /** Inscription : envoie un email de vérification (pas de compte actif tant que non cliqué) */
 app.post('/api/auth/register', authLimiter, registerLimiter, async (req, res) => {
   try {
@@ -887,34 +904,229 @@ app.post('/api/ci/releases', upload.single('apk'), (req, res) => {
   res.status(201).json(saveRelease({ version, notes, force, file: req.file }));
 });
 
-function requireAdmin(req, res, next) {
+function requireManager(req, res, next) {
   const user = db.prepare('SELECT id, email, name FROM users WHERE id = ?').get(req.user.sub);
-  if (!user || user.email !== ADMIN_EMAIL) {
-    return res.status(403).json({ error: 'Admin uniquement' });
+  if (!user || !isManagerEmail(user.email)) {
+    return res.status(403).json({ error: 'Réservé admin / compte gestionnaire' });
   }
   req.adminUser = user;
   next();
 }
 
-app.get('/api/admin/overview', auth, requireAdmin, (_req, res) => {
+/** @deprecated alias */
+function requireAdmin(req, res, next) {
+  return requireManager(req, res, next);
+}
+
+function latestApkFile() {
+  const latest = db.prepare('SELECT * FROM app_releases ORDER BY id DESC LIMIT 1').get();
+  if (!latest?.apk_filename) return null;
+  const full = path.join(DATA_DIR, 'apks', latest.apk_filename);
+  if (!fs.existsSync(full)) return null;
+  return { ...latest, full };
+}
+
+function createDownloadLink({ createdBy, label, days = 14, maxUses = 50 }) {
+  const raw = crypto.randomBytes(24).toString('base64url');
+  const id = uuid();
+  const expires = new Date(Date.now() + Math.max(1, days) * 24 * 60 * 60 * 1000).toISOString();
+  db.prepare(
+    `INSERT INTO download_links (id, token_hash, created_by, label, max_uses, use_count, expires_at, created_at)
+     VALUES (?, ?, ?, ?, ?, 0, ?, ?)`
+  ).run(id, hashToken(raw), createdBy, label || null, maxUses, expires, new Date().toISOString());
+  const url = `${PUBLIC_URL}/get-app?t=${encodeURIComponent(raw)}`;
+  return { id, url, token: raw, expiresAt: expires, maxUses };
+}
+
+async function sendDownloadInviteEmail({ to, url, fromName }) {
+  const transport = mailer();
+  const from = process.env.SMTP_FROM || 'Gasoil Tracking <noreply@maily.ovh>';
+  const html = `
+    <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto">
+      <h2>Télécharger Gasoil Tracking</h2>
+      <p>${String(fromName || 'Un administrateur').replace(/[<>&]/g, '')} vous invite à installer l’application Android.</p>
+      <p style="margin:28px 0">
+        <a href="${url}" style="background:#e94560;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">
+          Télécharger l’APK
+        </a>
+      </p>
+      <p style="color:#666;font-size:13px">Lien sécurisé à usage limité. Sur Android : ouvrez le fichier APK téléchargé et autorisez l’installation.</p>
+      <p style="color:#666;font-size:12px"><a href="${url}">${url}</a></p>
+    </div>`;
+  if (!transport) {
+    console.warn('[mail] download link', url);
+    return { ok: false, url };
+  }
+  await transport.sendMail({
+    from,
+    to,
+    subject: 'Gasoil Tracking — lien de téléchargement',
+    html,
+    text: `Téléchargez Gasoil Tracking : ${url}\n`,
+  });
+  return { ok: true, url };
+}
+
+app.get('/api/download/:file', (req, res) => {
+  // Conservé pour CI / rétrocompat — préférer /api/get-app/:token
+  const file = path.basename(req.params.file);
+  if (!/^[\w.\-]+$/.test(file)) return res.status(400).json({ error: 'Nom invalide' });
+  const full = path.join(DATA_DIR, 'apks', file);
+  if (!fs.existsSync(full)) return res.status(404).json({ error: 'APK introuvable' });
+  res.download(full, file);
+});
+
+/** Téléchargement APK via jeton sécurisé */
+app.get('/api/get-app/:token', authLimiter, (req, res) => {
+  const raw = String(req.params.token || '');
+  if (!raw || raw.length < 16) return res.status(400).json({ error: 'Lien invalide' });
+  const row = db.prepare('SELECT * FROM download_links WHERE token_hash = ?').get(hashToken(raw));
+  if (!row || row.revoked_at) return res.status(404).json({ error: 'Lien invalide ou révoqué' });
+  if (new Date(row.expires_at).getTime() < Date.now()) {
+    return res.status(410).json({ error: 'Lien expiré — demandez un nouveau lien' });
+  }
+  if (row.use_count >= row.max_uses) {
+    return res.status(410).json({ error: 'Lien épuisé (trop de téléchargements)' });
+  }
+  const apk = latestApkFile();
+  if (!apk) return res.status(404).json({ error: 'Aucune APK publiée pour le moment' });
+
+  db.prepare(
+    'UPDATE download_links SET use_count = use_count + 1, last_used_at = ? WHERE id = ?'
+  ).run(new Date().toISOString(), row.id);
+
+  res.setHeader('Cache-Control', 'no-store');
+  res.download(apk.full, apk.apk_filename);
+});
+
+/** Page HTML d’atterrissage pour le lien partagé */
+app.get('/get-app', (req, res) => {
+  const t = String(req.query.t || '');
+  const apk = latestApkFile();
+  const version = apk?.version || APP_VERSION;
+  if (!t || t.length < 16) {
+    return res.status(400).type('html').send(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"/><title>Lien invalide</title></head>
+<body style="font-family:system-ui;background:#0f0f1a;color:#f1f5f9;display:flex;min-height:100vh;align-items:center;justify-content:center">
+<div style="background:#1a1a2e;padding:28px;border-radius:16px;max-width:420px;text-align:center"><h1>Lien invalide</h1>
+<p>Demandez un nouveau lien de téléchargement à l’administrateur.</p></div></body></html>`);
+  }
+  const dl = `${PUBLIC_URL}/api/get-app/${encodeURIComponent(t)}`;
+  res.type('html').send(`<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Télécharger Gasoil Tracking</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#0f0f1a;color:#f1f5f9;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:16px}
+.card{background:#1a1a2e;padding:28px;border-radius:16px;max-width:420px;width:100%;text-align:center}
+a.btn{display:inline-block;margin-top:16px;background:#e94560;color:#fff;padding:14px 20px;border-radius:10px;text-decoration:none;font-weight:700}
+.muted{color:#94a3b8;font-size:13px;line-height:1.5}
+</style></head><body>
+<div class="card">
+  <h1>Gasoil Tracking</h1>
+  <p class="muted">Version ${String(version).replace(/[<>&]/g, '')} — lien sécurisé</p>
+  <a class="btn" href="${dl}">Télécharger l’APK</a>
+  <p class="muted" style="margin-top:18px">Android : ouvrez le fichier téléchargé → Autoriser l’installation depuis cette source.</p>
+</div>
+</body></html>`);
+});
+
+app.get('/api/admin/overview', auth, requireManager, (_req, res) => {
   const users = db
     .prepare('SELECT id, email, name, email_verified, created_at FROM users ORDER BY created_at DESC')
     .all();
   const pending = db
     .prepare('SELECT email, platform, expires_at, created_at FROM pending_registrations ORDER BY created_at DESC')
     .all();
+  const links = db
+    .prepare(
+      `SELECT id, label, max_uses, use_count, expires_at, created_at, revoked_at, last_used_at, created_by
+       FROM download_links ORDER BY created_at DESC LIMIT 20`
+    )
+    .all();
+  const apk = latestApkFile();
   res.json({
     adminEmail: ADMIN_EMAIL,
+    personalMail: PERSONAL_MAIL || null,
     inviteCode: INVITE_CODE || null,
     users,
     pending,
     userCount: users.length,
     pendingCount: pending.length,
+    apkVersion: apk?.version || APP_VERSION,
+    apkAvailable: Boolean(apk),
+    downloadLinks: links,
   });
 });
 
-/** Admin : renvoie un nouveau lien de vérif pour un pending (ops / support) */
-app.post('/api/admin/resend-verification', auth, requireAdmin, async (req, res) => {
+/** Créer un lien de téléchargement sécurisé */
+app.post('/api/admin/download-links', auth, requireManager, (req, res) => {
+  const days = Math.min(90, Math.max(1, Number(req.body?.days) || 14));
+  const maxUses = Math.min(500, Math.max(1, Number(req.body?.maxUses) || 50));
+  const label = String(req.body?.label || 'Partage APK').slice(0, 80);
+  if (!latestApkFile()) {
+    return res.status(404).json({ error: 'Aucune APK publiée — uploadez d’abord une release' });
+  }
+  const link = createDownloadLink({
+    createdBy: req.adminUser.email,
+    label,
+    days,
+    maxUses,
+  });
+  res.status(201).json(link);
+});
+
+/** Envoyer le lien par email */
+app.post('/api/admin/send-download-link', auth, requireManager, async (req, res) => {
+  try {
+    const email = String(req.body?.email || '')
+      .toLowerCase()
+      .trim();
+    if (!email || !isValidEmail(email)) {
+      return res.status(400).json({ error: 'Email destinataire invalide' });
+    }
+    if (!latestApkFile()) {
+      return res.status(404).json({ error: 'Aucune APK publiée' });
+    }
+    const days = Math.min(90, Math.max(1, Number(req.body?.days) || 14));
+    const maxUses = Math.min(100, Math.max(1, Number(req.body?.maxUses) || 10));
+    const link = createDownloadLink({
+      createdBy: req.adminUser.email,
+      label: `Envoyé à ${email}`,
+      days,
+      maxUses,
+    });
+    const mail = await sendDownloadInviteEmail({
+      to: email,
+      url: link.url,
+      fromName: req.adminUser.name || req.adminUser.email,
+    });
+    res.json({
+      ok: true,
+      mailed: mail.ok,
+      url: link.url,
+      expiresAt: link.expiresAt,
+      message: mail.ok
+        ? `Email envoyé à ${email}`
+        : 'SMTP indisponible — copiez le lien manuellement',
+    });
+  } catch (e) {
+    console.error('send-download-link', e);
+    res.status(500).json({ error: 'Échec envoi' });
+  }
+});
+
+app.post('/api/admin/download-links/:id/revoke', auth, requireManager, (req, res) => {
+  const id = String(req.params.id || '');
+  const row = db.prepare('SELECT id FROM download_links WHERE id = ?').get(id);
+  if (!row) return res.status(404).json({ error: 'Lien introuvable' });
+  db.prepare('UPDATE download_links SET revoked_at = ? WHERE id = ?').run(
+    new Date().toISOString(),
+    id
+  );
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/resend-verification', auth, requireManager, async (req, res) => {
   try {
     const email = String(req.body?.email || '')
       .toLowerCase()

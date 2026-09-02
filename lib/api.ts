@@ -174,15 +174,57 @@ export function pushSync(data: unknown) {
 
 export type AdminOverview = {
   adminEmail: string;
+  personalMail: string | null;
   inviteCode: string | null;
   users: { id: string; email: string; name: string; email_verified: number; created_at: string }[];
   pending: { email: string; platform: string; expires_at: string; created_at: string }[];
   userCount: number;
   pendingCount: number;
+  apkVersion?: string;
+  apkAvailable?: boolean;
+  downloadLinks?: {
+    id: string;
+    label: string | null;
+    max_uses: number;
+    use_count: number;
+    expires_at: string;
+    created_at: string;
+    revoked_at: string | null;
+    last_used_at: string | null;
+    created_by: string;
+  }[];
 };
 
 export function fetchAdminOverview(): Promise<AdminOverview> {
   return request('/api/admin/overview') as Promise<AdminOverview>;
+}
+
+export function createDownloadLink(opts?: { days?: number; maxUses?: number; label?: string }) {
+  return request('/api/admin/download-links', {
+    method: 'POST',
+    body: JSON.stringify(opts || {}),
+  }) as Promise<{ id: string; url: string; expiresAt: string; maxUses: number }>;
+}
+
+export function sendDownloadLinkEmail(email: string, opts?: { days?: number; maxUses?: number }) {
+  return request('/api/admin/send-download-link', {
+    method: 'POST',
+    body: JSON.stringify({ email, ...opts }),
+  }) as Promise<{ ok: boolean; mailed: boolean; url: string; message: string }>;
+}
+
+export function revokeDownloadLink(id: string) {
+  return request(`/api/admin/download-links/${id}/revoke`, { method: 'POST', body: '{}' });
+}
+
+export function isManagerEmail(email?: string | null): boolean {
+  const e = String(email || '')
+    .toLowerCase()
+    .trim();
+  if (!e) return false;
+  if (e === 'admin@delhomme.ovh') return true;
+  const personal = (process.env.EXPO_PUBLIC_PERSONAL_MAIL || '').toLowerCase().trim();
+  return Boolean(personal && e === personal);
 }
 
 export type AppVersionInfo = {

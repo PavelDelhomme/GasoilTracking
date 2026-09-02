@@ -59,6 +59,7 @@ payload = {
         {"name": "JWT_SECRET", "value": env.get("JWT_SECRET", "change-me")},
         {"name": "APP_VERSION", "value": env.get("APP_VERSION", "1.0.2")},
         {"name": "ADMIN_EMAIL", "value": env.get("ADMIN_EMAIL", "admin@delhomme.ovh")},
+        {"name": "PERSONAL_MAIL", "value": env.get("PERSONAL_MAIL", "")},
         {"name": "INVITE_CODE", "value": env.get("INVITE_CODE", "")},
         {"name": "RELEASE_UPLOAD_TOKEN", "value": env.get("RELEASE_UPLOAD_TOKEN", "")},
         {"name": "ADMIN_PASSWORD", "value": env.get("ADMIN_PASSWORD", "")},

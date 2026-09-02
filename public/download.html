@@ -13,22 +13,19 @@
     p { color:var(--muted); line-height:1.5; }
     .btn { display:block; text-align:center; background:var(--accent); color:#fff; text-decoration:none; padding:14px 18px; border-radius:12px; font-weight:700; margin-top:20px; }
     .meta { margin-top:16px; font-size:.9rem; color:var(--muted); }
-    code { color:#fff; }
+    code { color:#fff; word-break:break-all; }
   </style>
 </head>
 <body>
   <div class="box">
     <h1>Gasoil Tracking</h1>
-    <p>Application Android pour suivre consommation, budgets et trajets. Créez un compte dans l’app pour synchroniser vos données.</p>
-    <a class="btn" id="dl" href="/api/version">Vérifier la dernière version</a>
+    <p>Application Android. Pour installer, utilisez le <strong>lien sécurisé</strong> reçu par email (ou fourni par l’admin). Les liens publics directs sont limités.</p>
+    <a class="btn" id="dl" href="/">Version en ligne (web)</a>
     <p class="meta" id="info">Chargement…</p>
   </div>
   <script>
     fetch('/api/version').then(r => r.json()).then(v => {
-      document.getElementById('info').textContent = 'Version ' + v.version + (v.releaseNotes ? ' — ' + v.releaseNotes : '');
-      const a = document.getElementById('dl');
-      a.href = v.apkUrl;
-      a.textContent = 'Télécharger l’APK ' + v.version;
+      document.getElementById('info').textContent = 'Dernière version publiée : ' + v.version + (v.releaseNotes ? ' — ' + v.releaseNotes : '') + '. Demandez un lien /get-app?t=… à l’administrateur.';
     }).catch(() => {
       document.getElementById('info').textContent = 'API version indisponible pour le moment.';
     });

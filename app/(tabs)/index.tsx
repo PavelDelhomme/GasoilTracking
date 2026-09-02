@@ -16,6 +16,7 @@ import {
 } from '@/lib/calculations';
 import { seedDemoData } from '@/lib/seedDemo';
 import { notify } from '@/lib/notify';
+import { isManagerEmail } from '@/lib/api';
 import type { ConsumptionStats } from '@/types';
 
 export default function HomeScreen() {
@@ -87,7 +88,7 @@ export default function HomeScreen() {
         ) : (
           <Button title="Connexion / Inscription" onPress={() => router.push('/auth' as never)} />
         )}
-        {user?.email?.toLowerCase() === 'admin@delhomme.ovh' && (
+        {user && isManagerEmail(user.email) && (
           <Button
             title="Administration"
             variant="outline"

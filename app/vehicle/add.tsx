@@ -211,10 +211,9 @@ export default function AddVehicleScreen() {
               <Text style={{ color: colors.text, fontWeight: '600' }}>
                 {preset.brand} {preset.model} ({preset.year})
               </Text>
-              <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                {preset.consumption} L/100 · réservoir {preset.tank} L
-                {preset.odometerUnreliable ? ' · compteur souvent HS' : ''}
-              </Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+              {preset.consumption} L/100 · réservoir {preset.tank} L
+            </Text>
             </View>
             <Text style={{ color: colors.accent, fontWeight: '700' }}>+ Ajouter</Text>
           </Pressable>
