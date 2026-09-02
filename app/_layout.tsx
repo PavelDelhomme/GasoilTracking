@@ -38,6 +38,7 @@ function RootNavigation() {
         />
         <Stack.Screen name="auth" options={{ title: 'Compte', presentation: 'modal' }} />
         <Stack.Screen name="verify" options={{ title: 'Vérification email', headerShown: true }} />
+        <Stack.Screen name="admin" options={{ title: 'Administration' }} />
       </Stack>
     </>
   );

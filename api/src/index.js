@@ -22,6 +22,11 @@ const RELEASE_UPLOAD_TOKEN = process.env.RELEASE_UPLOAD_TOKEN || '';
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://gasoil-tracking.delhomme.ovh').replace(/\/$/, '');
 const APP_SCHEME = process.env.APP_SCHEME || 'gasoiltracking';
 const TRUST_PROXY = process.env.TRUST_PROXY !== '0';
+const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || 'admin@delhomme.ovh')
+  .toLowerCase()
+  .trim();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const ADMIN_NAME = process.env.ADMIN_NAME || 'Admin';
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(path.join(DATA_DIR, 'apks'), { recursive: true });
@@ -70,6 +75,46 @@ try {
 } catch {
   /* déjà présent */
 }
+
+/** Crée / met à jour le compte admin (email vérifié, sans passer par l’invite) */
+function bootstrapAdmin() {
+  if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+    console.warn('[admin] ADMIN_PASSWORD non défini — pas de bootstrap admin');
+    return;
+  }
+  if (ADMIN_PASSWORD.length < 10) {
+    console.warn('[admin] ADMIN_PASSWORD trop court (min 10) — bootstrap ignoré');
+    return;
+  }
+  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(ADMIN_EMAIL);
+  const hash = bcrypt.hashSync(ADMIN_PASSWORD, 12);
+  if (existing) {
+    if (process.env.ADMIN_RESET_PASSWORD === '1') {
+      db.prepare('UPDATE users SET password_hash = ?, email_verified = 1, name = ? WHERE email = ?').run(
+        hash,
+        ADMIN_NAME,
+        ADMIN_EMAIL
+      );
+      console.log(`[admin] Mot de passe réinitialisé pour ${ADMIN_EMAIL}`);
+    } else {
+      console.log(`[admin] Compte déjà présent: ${ADMIN_EMAIL}`);
+    }
+    return;
+  }
+  const id = uuid();
+  const now = new Date().toISOString();
+  db.prepare(
+    'INSERT INTO users (id, email, password_hash, name, email_verified, created_at) VALUES (?, ?, ?, ?, 1, ?)'
+  ).run(id, ADMIN_EMAIL, hash, ADMIN_NAME, now);
+  db.prepare('INSERT INTO sync_data (user_id, payload, updated_at) VALUES (?, ?, ?)').run(
+    id,
+    JSON.stringify({ vehicles: [], fillUps: [], budgets: [], trips: [] }),
+    now
+  );
+  console.log(`[admin] Compte admin créé: ${ADMIN_EMAIL}`);
+}
+
+bootstrapAdmin();
 
 const app = express();
 if (TRUST_PROXY) app.set('trust proxy', 1);
@@ -491,12 +536,33 @@ app.post('/api/ci/releases', upload.single('apk'), (req, res) => {
   res.status(201).json(saveRelease({ version, notes, force, file: req.file }));
 });
 
-app.post('/api/admin/releases', auth, upload.single('apk'), (req, res) => {
-  const adminEmail = process.env.ADMIN_EMAIL || '';
-  const user = db.prepare('SELECT email FROM users WHERE id = ?').get(req.user.sub);
-  if (adminEmail && user?.email !== adminEmail) {
+function requireAdmin(req, res, next) {
+  const user = db.prepare('SELECT id, email, name FROM users WHERE id = ?').get(req.user.sub);
+  if (!user || user.email !== ADMIN_EMAIL) {
     return res.status(403).json({ error: 'Admin uniquement' });
   }
+  req.adminUser = user;
+  next();
+}
+
+app.get('/api/admin/overview', auth, requireAdmin, (_req, res) => {
+  const users = db
+    .prepare('SELECT id, email, name, email_verified, created_at FROM users ORDER BY created_at DESC')
+    .all();
+  const pending = db
+    .prepare('SELECT email, platform, expires_at, created_at FROM pending_registrations ORDER BY created_at DESC')
+    .all();
+  res.json({
+    adminEmail: ADMIN_EMAIL,
+    inviteCode: INVITE_CODE || null,
+    users,
+    pending,
+    userCount: users.length,
+    pendingCount: pending.length,
+  });
+});
+
+app.post('/api/admin/releases', auth, requireAdmin, upload.single('apk'), (req, res) => {
   const version = req.body?.version || APP_VERSION;
   const notes = req.body?.releaseNotes || '';
   const force = req.body?.forceUpdate === '1' || req.body?.forceUpdate === true;

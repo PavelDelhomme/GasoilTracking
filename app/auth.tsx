@@ -59,7 +59,7 @@ export default function AuthScreen() {
         </Text>
         <Text style={[styles.sub, { color: colors.textSecondary }]}>
           {mode === 'login'
-            ? 'Accédez à vos données synchronisées (privées, isolées par compte).'
+            ? 'Même formulaire pour tous (y compris admin). Données privées par compte.'
             : 'Code d’invitation requis. Un email de confirmation sera envoyé avant activation.'}
         </Text>
         {mode === 'register' && (

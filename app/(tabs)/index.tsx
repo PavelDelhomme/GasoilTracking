@@ -68,6 +68,14 @@ export default function HomeScreen() {
         ) : (
           <Button title="Connexion / Inscription" onPress={() => router.push('/auth' as never)} />
         )}
+        {user?.email?.toLowerCase() === 'admin@delhomme.ovh' && (
+          <Button
+            title="Administration"
+            variant="outline"
+            onPress={() => router.push('/admin' as never)}
+            style={{ marginTop: 10 }}
+          />
+        )}
       </Card>
 
       {!activeVehicle ? (

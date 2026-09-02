@@ -72,6 +72,19 @@ export function pushSync(data: unknown) {
   });
 }
 
+export type AdminOverview = {
+  adminEmail: string;
+  inviteCode: string | null;
+  users: { id: string; email: string; name: string; email_verified: number; created_at: string }[];
+  pending: { email: string; platform: string; expires_at: string; created_at: string }[];
+  userCount: number;
+  pendingCount: number;
+};
+
+export function fetchAdminOverview(): Promise<AdminOverview> {
+  return request('/api/admin/overview') as Promise<AdminOverview>;
+}
+
 export type AppVersionInfo = {
   version: string;
   minVersion: string;
