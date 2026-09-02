@@ -5,11 +5,11 @@
 	clean clean-all
 
 PROJECT_NAME := gasoil-tracking
-COMPOSE := docker compose -p $(PROJECT_NAME) -f docker-compose.yml
+COMPOSE := docker compose -p $(PROJECT_NAME) -f docker-compose.local.yml
 DOMAIN ?= gasoil-tracking.delhomme.ovh
 REPO_URL := https://github.com/PavelDelhomme/GasoilTracking.git
-COMPOSE_PORTAINER_PATH := docker-compose.portainer.yml
-BRANCH := main
+COMPOSE_PORTAINER_PATH := docker-compose.yml
+BRANCH := prod
 SAMSUNG_SERIAL ?= EEA9700PRO0014587
 IMAGE := gasoil-tracking-web:latest
 PORTAINER_UI := https://portainer.delhomme.ovh
