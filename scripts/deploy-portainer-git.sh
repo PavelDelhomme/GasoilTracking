@@ -57,7 +57,7 @@ payload = {
     "RepositoryPassword": gh,
     "Env": [
         {"name": "JWT_SECRET", "value": env.get("JWT_SECRET", "change-me")},
-        {"name": "APP_VERSION", "value": env.get("APP_VERSION", "1.0.1")},
+        {"name": "APP_VERSION", "value": env.get("APP_VERSION", "1.0.2")},
         {"name": "ADMIN_EMAIL", "value": env.get("ADMIN_EMAIL", "admin@delhomme.ovh")},
         {"name": "INVITE_CODE", "value": env.get("INVITE_CODE", "")},
         {"name": "RELEASE_UPLOAD_TOKEN", "value": env.get("RELEASE_UPLOAD_TOKEN", "")},
