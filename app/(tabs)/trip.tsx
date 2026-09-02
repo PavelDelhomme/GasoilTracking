@@ -25,6 +25,7 @@ import {
   addTrackedKm,
   getTrips,
   getPendingTrips,
+  deleteTrip,
 } from '@/lib/database';
 import {
   startBackgroundTracking,
@@ -40,6 +41,7 @@ import {
   parseRoutePoints,
 } from '@/lib/calculations';
 import { notify, confirm } from '@/lib/notify';
+import { TripHistoryCard } from '@/components/TripHistoryCard';
 
 export default function TripScreen() {
   const { activeVehicle, activeTrip, refresh } = useApp();
@@ -70,7 +72,7 @@ export default function TripScreen() {
       getTrips(activeVehicle.id),
       getPendingTrips(activeVehicle.id),
     ]);
-    setHistory(trips.filter((t) => !t.isActive).slice(0, 30));
+    setHistory(trips.filter((t) => !t.isActive).slice(0, 50));
     setPending(pend);
   }, [activeVehicle]);
 
@@ -279,6 +281,38 @@ export default function TripScreen() {
     await loadLists();
   };
 
+  const handleDeleteTrip = (trip: Trip) => {
+    confirm(
+      'Supprimer ce trajet',
+      `${trip.originName || 'Départ'} → ${trip.destinationName || 'Arrivée'} sera retiré de l’historique.`,
+      async () => {
+        await deleteTrip(trip.id);
+        await refresh();
+        await loadLists();
+        notify('Supprimé', 'Trajet retiré de l’historique.');
+      },
+      'Supprimer'
+    );
+  };
+
+  const handleDeleteTrip = (trip: Trip) => {
+    confirm(
+      'Supprimer le trajet',
+      `${trip.originName || 'Départ'} → ${trip.destinationName || 'Arrivée'}\nCette action est définitive.`,
+      async () => {
+        try {
+          await deleteTrip(trip.id);
+          await refresh();
+          await loadLists();
+          notify('Supprimé', 'Trajet retiré de l’historique.');
+        } catch (e) {
+          notify('Erreur', e instanceof Error ? e.message : 'Impossible de supprimer');
+        }
+      },
+      'Supprimer'
+    );
+  };
+
   const tripStats =
     activeTrip && activeVehicle
       ? calculateTripStats(activeVehicle, activeTrip.distanceKm, activeTrip.startTime)
@@ -475,20 +509,14 @@ export default function TripScreen() {
 
         {history.length > 0 && (
           <View style={{ marginTop: 24 }}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Historique</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+              Historique ({history.length})
+            </Text>
+            <Text style={[styles.hint, { color: colors.textSecondary }]}>
+              Mini-carte départ / arrivée · touchez la corbeille pour supprimer.
+            </Text>
             {history.map((t) => (
-              <View key={t.id} style={[styles.histRow, { borderBottomColor: colors.border }]}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1}>
-                    {t.originName || 'Départ'} → {t.destinationName || 'Arrivée'}
-                  </Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                    {new Date(t.startTime).toLocaleDateString('fr-FR')} ·{' '}
-                    {formatDistance(t.distanceKm)} · {formatEuro(t.estimatedCost)}
-                    {t.status === 'pending' ? ' · en attente' : ''}
-                  </Text>
-                </View>
-              </View>
+              <TripHistoryCard key={t.id} trip={t} onDelete={handleDeleteTrip} />
             ))}
           </View>
         )}
@@ -523,8 +551,4 @@ const styles = StyleSheet.create({
   hint: { fontSize: 13, textAlign: 'left', marginTop: 8, lineHeight: 18, marginBottom: 4 },
   warning: { fontSize: 15, textAlign: 'center' },
   pendingActions: { flexDirection: 'row', gap: 24, marginTop: 10 },
-  histRow: {
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
 });
