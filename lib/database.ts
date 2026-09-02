@@ -120,6 +120,7 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
   await alterSafe("ALTER TABLE trips ADD COLUMN source TEXT NOT NULL DEFAULT 'gps'");
   await alterSafe('ALTER TABLE trips ADD COLUMN fill_up_id INTEGER');
   await alterSafe('ALTER TABLE trips ADD COLUMN note TEXT');
+  await alterSafe('ALTER TABLE trips ADD COLUMN is_paused INTEGER NOT NULL DEFAULT 0');
 }
 
 function mapVehicle(row: unknown): Vehicle {
@@ -191,6 +192,7 @@ function mapTrip(row: unknown): Trip {
     originName: (r.origin_name as string) || undefined,
     destinationName: r.destination_name as string | undefined,
     isActive: Boolean(r.is_active),
+    isPaused: Boolean(r.is_paused),
     status: ((r.status as string) || 'confirmed') as Trip['status'],
     source: ((r.source as string) || 'gps') as Trip['source'],
     fillUpId: r.fill_up_id === null || r.fill_up_id === undefined ? null : (r.fill_up_id as number),
@@ -446,8 +448,8 @@ export async function getActiveTrip(): Promise<Trip | null> {
 export async function createTrip(trip: Omit<Trip, 'id'>): Promise<number> {
   const database = await getDatabase();
   const result = await database.runAsync(
-    `INSERT INTO trips (vehicle_id, start_time, end_time, distance_km, estimated_fuel_used, estimated_cost, route_points, origin_name, destination_name, is_active, status, source, fill_up_id, note)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO trips (vehicle_id, start_time, end_time, distance_km, estimated_fuel_used, estimated_cost, route_points, origin_name, destination_name, is_active, status, source, fill_up_id, note, is_paused)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       trip.vehicleId,
       trip.startTime,
@@ -463,6 +465,7 @@ export async function createTrip(trip: Omit<Trip, 'id'>): Promise<number> {
       trip.source || 'gps',
       trip.fillUpId ?? null,
       trip.note ?? null,
+      trip.isPaused ? 1 : 0,
     ]
   );
   return result.lastInsertRowId;
@@ -481,6 +484,7 @@ export async function updateTrip(id: number, trip: Partial<Trip>): Promise<void>
   if (trip.originName !== undefined) { fields.push('origin_name = ?'); values.push(trip.originName); }
   if (trip.destinationName !== undefined) { fields.push('destination_name = ?'); values.push(trip.destinationName); }
   if (trip.isActive !== undefined) { fields.push('is_active = ?'); values.push(trip.isActive ? 1 : 0); }
+  if (trip.isPaused !== undefined) { fields.push('is_paused = ?'); values.push(trip.isPaused ? 1 : 0); }
   if (trip.status !== undefined) { fields.push('status = ?'); values.push(trip.status); }
   if (trip.source !== undefined) { fields.push('source = ?'); values.push(trip.source); }
   if (trip.fillUpId !== undefined) { fields.push('fill_up_id = ?'); values.push(trip.fillUpId); }
@@ -667,8 +671,8 @@ export async function replaceAllData(data: {
 
       for (const t of data.trips || []) {
         await database.runAsync(
-          `INSERT INTO trips (id, vehicle_id, start_time, end_time, distance_km, estimated_fuel_used, estimated_cost, route_points, origin_name, destination_name, is_active, status, source, fill_up_id, note)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO trips (id, vehicle_id, start_time, end_time, distance_km, estimated_fuel_used, estimated_cost, route_points, origin_name, destination_name, is_active, status, source, fill_up_id, note, is_paused)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             t.id,
             t.vehicleId,
@@ -685,6 +689,7 @@ export async function replaceAllData(data: {
             t.source || 'gps',
             t.fillUpId ?? null,
             t.note || null,
+            t.isPaused ? 1 : 0,
           ]
         );
       }

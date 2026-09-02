@@ -8,14 +8,14 @@ import {
   Pressable,
   ActivityIndicator,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { DatePickerField } from '@/components/DatePickerField';
-import { createFillUp, updateVehicle } from '@/lib/database';
+import { createFillUp, updateVehicle, updateTrip } from '@/lib/database';
 import { adaptVehicleConsumption, formatEuro, refreshBudgets } from '@/lib/calculations';
 import { fetchCheapestStations, fuelLabel, type FuelStationPrice } from '@/lib/fuelPrices';
 import { getCurrentLocation } from '@/lib/locationService';
@@ -28,6 +28,8 @@ function parseNum(v: string): number {
 }
 
 export default function AddFillUpScreen() {
+  const params = useLocalSearchParams<{ tripId?: string; fromTrip?: string }>();
+  const linkedTripId = params.tripId ? Number(params.tripId) : null;
   const { activeVehicle, budgetStatuses, refresh } = useApp();
   const { colors } = useTheme();
   const [liters, setLiters] = useState('');
@@ -187,7 +189,7 @@ export default function AddFillUpScreen() {
     setLoading(true);
     try {
       const dateIso = new Date(`${dateLocal}T12:00:00`).toISOString();
-      await createFillUp({
+      const fillId = await createFillUp({
         vehicleId: activeVehicle.id,
         date: dateIso,
         liters: Math.round(derived.liters * 100) / 100,
@@ -197,8 +199,12 @@ export default function AddFillUpScreen() {
         distanceSinceLastKm: distanceKm ? parseNum(distanceKm) : null,
         isFull,
         note: note.trim() || undefined,
-        tripId: null,
+        tripId: linkedTripId && Number.isFinite(linkedTripId) ? linkedTripId : null,
       });
+
+      if (linkedTripId && Number.isFinite(linkedTripId)) {
+        await updateTrip(linkedTripId, { fillUpId: fillId });
+      }
 
       // Mémorise le prix station comme défaut véhicule
       if (derived.ppl > 0) {
@@ -211,7 +217,8 @@ export default function AddFillUpScreen() {
       notify(
         'Plein enregistré',
         `${derived.liters.toFixed(2)} L · ${formatEuro(derived.total)}` +
-          (station ? ` · ${station.name}` : '')
+          (station ? ` · ${station.name}` : '') +
+          (params.fromTrip === '1' ? ' — reprenez le trajet quand vous voulez.' : '')
       );
       router.back();
     } catch (e) {
@@ -240,6 +247,7 @@ export default function AddFillUpScreen() {
       <Text style={[styles.vehicle, { color: colors.textSecondary }]}>
         Véhicule : {activeVehicle.name}
         {!hasOdo ? ' · suivi sans compteur' : ''}
+        {linkedTripId ? ' · lié au trajet en pause' : ''}
       </Text>
 
       <DatePickerField

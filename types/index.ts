@@ -90,6 +90,8 @@ export interface Trip {
   originName?: string;
   destinationName?: string;
   isActive: boolean;
+  /** true = suivi GPS en pause (arrêt station, etc.) */
+  isPaused?: boolean;
   /** pending = à valider (import / détection) */
   status: TripStatus;
   source: TripSource;

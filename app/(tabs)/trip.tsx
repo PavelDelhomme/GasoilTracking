@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Card, StatCard } from '@/components/Card';
@@ -48,6 +49,10 @@ export default function TripScreen() {
   const [isStarting, setIsStarting] = useState(false);
   const [history, setHistory] = useState<Trip[]>([]);
   const [pending, setPending] = useState<Trip[]>([]);
+  const [userLocation, setUserLocation] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
   const [currentRegion, setCurrentRegion] = useState({
     latitude: 48.8566,
     longitude: 2.3522,
@@ -72,20 +77,62 @@ export default function TripScreen() {
   useFocusEffect(
     useCallback(() => {
       loadLists();
-    }, [loadLists])
+      // Si on revient d’un plein pendant pause → reprendre le GPS
+      if (activeTrip?.isPaused) {
+        /* reste en pause jusqu’à « Reprendre » */
+      } else if (activeTrip && !activeTrip.isPaused) {
+        void startBackgroundTracking();
+      }
+    }, [loadLists, activeTrip?.id, activeTrip?.isPaused])
   );
 
+  // GPS live dès l’ouverture de l’onglet
   useEffect(() => {
-    getCurrentLocation().then((loc) => {
-      if (loc) {
-        setCurrentRegion({
+    let sub: Location.LocationSubscription | null = null;
+    let cancelled = false;
+
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted' || cancelled) return;
+
+      const loc = await getCurrentLocation();
+      if (loc && !cancelled) {
+        const coords = {
           latitude: loc.coords.latitude,
           longitude: loc.coords.longitude,
-          latitudeDelta: 0.05,
-          longitudeDelta: 0.05,
+        };
+        setUserLocation(coords);
+        setCurrentRegion({
+          ...coords,
+          latitudeDelta: 0.04,
+          longitudeDelta: 0.04,
         });
       }
-    });
+
+      sub = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: 3000,
+          distanceInterval: 8,
+        },
+        (pos) => {
+          const coords = {
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+          };
+          setUserLocation(coords);
+          setCurrentRegion((r) => ({
+            ...r,
+            ...coords,
+          }));
+        }
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+      sub?.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -111,8 +158,21 @@ export default function TripScreen() {
       await stopActiveTrips();
       const loc = await getCurrentLocation();
       const startPoint = loc
-        ? [{ latitude: loc.coords.latitude, longitude: loc.coords.longitude, timestamp: Date.now() }]
+        ? [
+            {
+              latitude: loc.coords.latitude,
+              longitude: loc.coords.longitude,
+              timestamp: Date.now(),
+            },
+          ]
         : [];
+
+      if (loc) {
+        setUserLocation({
+          latitude: loc.coords.latitude,
+          longitude: loc.coords.longitude,
+        });
+      }
 
       await createTrip({
         vehicleId: activeVehicle.id,
@@ -124,6 +184,7 @@ export default function TripScreen() {
         routePoints: JSON.stringify(startPoint),
         destinationName: destination || undefined,
         isActive: true,
+        isPaused: false,
         status: 'confirmed',
         source: 'gps',
         fillUpId: null,
@@ -133,7 +194,7 @@ export default function TripScreen() {
       if (!trackingStarted) {
         notify(
           'Permission requise',
-          'Autorisez la localisation en arrière-plan pour suivre votre trajet pendant la navigation.'
+          'Autorisez la localisation en arrière-plan pour suivre votre trajet.'
         );
       }
 
@@ -146,13 +207,41 @@ export default function TripScreen() {
     }
   };
 
+  const handlePause = async (withFillUp: boolean) => {
+    if (!activeTrip) return;
+    await stopBackgroundTracking();
+    await updateTrip(activeTrip.id, { isPaused: true });
+    await refresh();
+    if (withFillUp) {
+      router.push({
+        pathname: '/fillup/add' as never,
+        params: { tripId: String(activeTrip.id), fromTrip: '1' },
+      });
+    } else {
+      notify('Pause', 'Suivi GPS en pause. Reprenez quand vous repartez.');
+    }
+  };
+
+  const handleResume = async () => {
+    if (!activeTrip) return;
+    await updateTrip(activeTrip.id, { isPaused: false });
+    const ok = await startBackgroundTracking();
+    await refresh();
+    if (!ok) {
+      notify('GPS', 'Impossible de relancer le suivi — vérifiez les permissions.');
+    } else {
+      notify('Reprise', 'Suivi GPS relancé.');
+    }
+  };
+
   const handleStopTrip = async () => {
     if (!activeTrip) return;
 
-    confirm('Terminer le trajet', 'Arrêter le suivi GPS ?', async () => {
+    confirm('Terminer le trajet', 'Arrêter définitivement le suivi GPS ?', async () => {
       await stopBackgroundTracking();
       await updateTrip(activeTrip.id, {
         isActive: false,
+        isPaused: false,
         endTime: new Date().toISOString(),
         status: 'confirmed',
       });
@@ -169,11 +258,11 @@ export default function TripScreen() {
       const url = openGoogleMapsSearch(destination);
       await Linking.openURL(url);
     } else {
-      const loc = await getCurrentLocation();
+      const loc = userLocation || (await getCurrentLocation())?.coords;
       if (loc) {
         const url = openGoogleMapsNavigation(
-          loc.coords.latitude + 0.01,
-          loc.coords.longitude + 0.01,
+          loc.latitude + 0.01,
+          loc.longitude + 0.01,
           destination || 'Destination'
         );
         await Linking.openURL(url);
@@ -196,6 +285,7 @@ export default function TripScreen() {
       : null;
 
   const routePoints = activeTrip ? parseRoutePoints(activeTrip.routePoints) : [];
+  const paused = Boolean(activeTrip?.isPaused);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -205,7 +295,14 @@ export default function TripScreen() {
           region={currentRegion}
           routePoints={routePoints}
           accentColor={colors.accent}
+          userLocation={userLocation}
+          paused={paused}
         />
+        {!userLocation && (
+          <View style={styles.mapHint} pointerEvents="none">
+            <Text style={styles.mapHintText}>Localisation…</Text>
+          </View>
+        )}
       </View>
 
       <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
@@ -232,11 +329,20 @@ export default function TripScreen() {
           </Card>
         ) : activeTrip ? (
           <>
-            <Card style={{ ...styles.activeTrip, borderColor: colors.accent }}>
+            <Card style={{ ...styles.activeTrip, borderColor: paused ? colors.warning : colors.accent }}>
               <View style={styles.tripActiveHeader}>
-                <Ionicons name="radio-button-on" size={16} color={colors.accent} />
-                <Text style={[styles.tripActiveTitle, { color: colors.accent }]}>
-                  Trajet en cours
+                <Ionicons
+                  name={paused ? 'pause-circle' : 'radio-button-on'}
+                  size={16}
+                  color={paused ? colors.warning : colors.accent}
+                />
+                <Text
+                  style={[
+                    styles.tripActiveTitle,
+                    { color: paused ? colors.warning : colors.accent },
+                  ]}
+                >
+                  {paused ? 'Trajet en pause' : 'Trajet en cours · GPS actif'}
                 </Text>
               </View>
               {(activeTrip.originName || activeTrip.destinationName) && (
@@ -262,9 +368,41 @@ export default function TripScreen() {
               />
             </View>
 
+            {paused ? (
+              <>
+                <Button title="Reprendre le trajet" onPress={handleResume} style={{ marginBottom: 8 }} />
+                <Button
+                  title="Faire un plein maintenant"
+                  variant="secondary"
+                  onPress={() =>
+                    router.push({
+                      pathname: '/fillup/add' as never,
+                      params: { tripId: String(activeTrip.id), fromTrip: '1' },
+                    })
+                  }
+                  style={{ marginBottom: 8 }}
+                />
+              </>
+            ) : (
+              <>
+                <Button
+                  title="Pause + plein (station)"
+                  variant="secondary"
+                  onPress={() => handlePause(true)}
+                  style={{ marginBottom: 8 }}
+                />
+                <Button
+                  title="Pause (sans plein)"
+                  variant="outline"
+                  onPress={() => handlePause(false)}
+                  style={{ marginBottom: 8 }}
+                />
+              </>
+            )}
+
             <Button
-              title="Ouvrir Google Maps"
-              variant="secondary"
+              title="Ouvrir navigation Google Maps"
+              variant="outline"
               onPress={handleOpenGoogleMaps}
               style={{ marginBottom: 8 }}
             />
@@ -277,11 +415,12 @@ export default function TripScreen() {
                 Démarrer un trajet GPS
               </Text>
               <Text style={[styles.description, { color: colors.textSecondary }]}>
-                Véhicule : {activeVehicle.name} ({activeVehicle.consumptionPer100} L/100km)
+                Véhicule : {activeVehicle.name} — carte OpenStreetMap + suivi dès le démarrage.
+                Vous pourrez faire une pause station / plein en cours de route.
               </Text>
               <Input
                 label="Destination (optionnel)"
-                placeholder="Ex: Paris, Lyon, 12 rue de la Paix..."
+                placeholder="Ex: Paris, Lyon, 12 rue…"
                 value={destination}
                 onChangeText={setDestination}
               />
@@ -338,10 +477,7 @@ export default function TripScreen() {
           <View style={{ marginTop: 24 }}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Historique</Text>
             {history.map((t) => (
-              <View
-                key={t.id}
-                style={[styles.histRow, { borderBottomColor: colors.border }]}
-              >
+              <View key={t.id} style={[styles.histRow, { borderBottomColor: colors.border }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1}>
                     {t.originName || 'Départ'} → {t.destinationName || 'Arrivée'}
@@ -363,12 +499,22 @@ export default function TripScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  map: { height: '38%' },
+  map: { height: '40%', position: 'relative' },
+  mapHint: {
+    position: 'absolute',
+    bottom: 8,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(15,23,42,0.75)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  mapHintText: { color: '#fff', fontSize: 12 },
   panel: { flex: 1 },
   panelContent: { padding: 16, paddingBottom: 40 },
   toolbar: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   sectionTitle: { fontSize: 18, fontWeight: '700', marginBottom: 8 },
-  description: { fontSize: 14, marginBottom: 16 },
+  description: { fontSize: 14, marginBottom: 16, lineHeight: 20 },
   statsRow: { flexDirection: 'row', gap: 12, marginBottom: 12 },
   activeTrip: { marginBottom: 12, borderWidth: 2 },
   tripActiveHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },

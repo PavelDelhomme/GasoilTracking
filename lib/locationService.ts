@@ -27,7 +27,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   if (!locations || locations.length === 0) return;
 
   const trip = await getActiveTrip();
-  if (!trip) return;
+  if (!trip || trip.isPaused) return;
 
   const vehicle = await getVehicleById(trip.vehicleId);
   if (!vehicle) return;

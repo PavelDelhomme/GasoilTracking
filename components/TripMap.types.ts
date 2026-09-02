@@ -8,6 +8,7 @@ export type TripMapRef = {
       animated?: boolean;
     }
   ) => void;
+  setCenter?: (latitude: number, longitude: number, zoom?: number) => void;
 };
 
 export type TripMapProps = {
@@ -19,4 +20,8 @@ export type TripMapProps = {
   };
   routePoints: RouteCoord[];
   accentColor: string;
+  /** Position GPS actuelle (point bleu) */
+  userLocation?: RouteCoord | null;
+  /** Trajet en pause */
+  paused?: boolean;
 };
