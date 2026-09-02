@@ -3,52 +3,182 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Gasoil Tracking — Télécharger</title>
+  <meta name="theme-color" content="#1a1a2e" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Gasoil" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icon.png" />
+  <title>Gasoil Tracking — Installer</title>
   <style>
-    :root { --bg:#0f0f1a; --card:#1a1a2e; --accent:#e94560; --text:#f1f5f9; --muted:#94a3b8; }
+    :root { --bg:#0f0f1a; --card:#1a1a2e; --accent:#e94560; --text:#f1f5f9; --muted:#94a3b8; --ok:#34d399; }
     * { box-sizing: border-box; }
-    body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:linear-gradient(160deg,#0f0f1a,#16213e 50%,#0f0f1a); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
-    .box { max-width:420px; width:100%; background:var(--card); border:1px solid #2d2d44; border-radius:20px; padding:32px; }
-    h1 { margin:0 0 8px; font-size:1.6rem; }
-    p { color:var(--muted); line-height:1.5; }
-    .btn { display:block; text-align:center; background:var(--accent); color:#fff; text-decoration:none; padding:14px 18px; border-radius:12px; font-weight:700; margin-top:16px; }
-    .btn.secondary { background:transparent; border:1px solid #2d2d44; color:var(--text); font-weight:600; }
+    body {
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background:linear-gradient(160deg,#0f0f1a,#16213e 50%,#0f0f1a);
+      color:var(--text);
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+    }
+    .box {
+      max-width:460px;
+      width:100%;
+      background:var(--card);
+      border:1px solid #2d2d44;
+      border-radius:20px;
+      padding:28px;
+    }
+    h1 { margin:0 0 6px; font-size:1.55rem; }
+    .lead { color:var(--muted); line-height:1.5; margin:0 0 18px; }
+    .ver { font-size:1rem; font-weight:700; margin-bottom:18px; }
+    .channel {
+      border:1px solid #2d2d44;
+      border-radius:14px;
+      padding:14px 16px;
+      margin-bottom:12px;
+    }
+    .channel h2 {
+      margin:0 0 6px;
+      font-size:1rem;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .channel p { margin:0; color:var(--muted); font-size:.9rem; line-height:1.45; }
+    .btn {
+      display:block;
+      text-align:center;
+      background:var(--accent);
+      color:#fff;
+      text-decoration:none;
+      padding:12px 16px;
+      border-radius:12px;
+      font-weight:700;
+      margin-top:12px;
+    }
+    .btn.secondary {
+      background:transparent;
+      border:1px solid #3d3d5c;
+      color:var(--text);
+      font-weight:600;
+    }
     .btn[aria-disabled="true"] { opacity:.45; pointer-events:none; }
-    .meta { margin-top:16px; font-size:.9rem; color:var(--muted); }
-    .ver { margin-top:12px; font-size:1.05rem; font-weight:700; color:#fff; }
+    .code-box {
+      margin-top:16px;
+      padding:12px 14px;
+      border-radius:12px;
+      background:#0f0f1a;
+      border:1px dashed #3d3d5c;
+      display:none;
+    }
+    .code-box strong { display:block; margin-bottom:4px; }
+    .code {
+      font-size:1.25rem;
+      letter-spacing:1px;
+      font-weight:800;
+      color:var(--accent);
+      word-break:break-all;
+    }
+    .hint { margin-top:14px; font-size:.82rem; color:var(--muted); line-height:1.4; }
+    .badge {
+      display:inline-block;
+      font-size:.7rem;
+      font-weight:800;
+      letter-spacing:.04em;
+      text-transform:uppercase;
+      padding:2px 7px;
+      border-radius:999px;
+      background:#243044;
+      color:#cbd5e1;
+    }
+    .badge.ios { background:#1e3a5f; color:#93c5fd; }
+    .badge.android { background:#14532d; color:#86efac; }
+    .badge.web { background:#3b0764; color:#e9d5ff; }
+    ol { margin:8px 0 0; padding-left:18px; color:var(--muted); font-size:.88rem; line-height:1.45; }
   </style>
 </head>
 <body>
   <div class="box">
     <h1>Gasoil Tracking</h1>
-    <p>Application Android (APK). Installez la dernière version publiée, ou utilisez la version web.</p>
+    <p class="lead">Choisissez comment installer l’app — Android, iPhone (web installable) ou navigateur.</p>
     <p class="ver" id="ver">Chargement…</p>
-    <a class="btn" id="dl" href="#" aria-disabled="true">Télécharger l’APK</a>
-    <a class="btn secondary" href="/">Ouvrir la version web</a>
-    <p class="meta" id="info"></p>
+
+    <div class="channel" id="ios">
+      <h2><span class="badge ios">iPhone / iPad</span> Version web installable</h2>
+      <p>Pas besoin de l’App Store. Sur Safari :</p>
+      <ol>
+        <li>Ouvrez l’app web ci-dessous</li>
+        <li>Appuyez sur <strong>Partager</strong> (carré avec flèche)</li>
+        <li>Choisissez <strong>Sur l’écran d’accueil</strong></li>
+      </ol>
+      <a class="btn" id="openWebIos" href="/">Ouvrir l’app (iPhone)</a>
+    </div>
+
+    <div class="channel" id="android">
+      <h2><span class="badge android">Android</span> APK</h2>
+      <p>Téléchargez le fichier, ouvrez-le, autorisez l’installation si demandé.</p>
+      <a class="btn" id="dl" href="#" aria-disabled="true">Télécharger l’APK</a>
+    </div>
+
+    <div class="channel">
+      <h2><span class="badge web">Web</span> Navigateur</h2>
+      <p>Fonctionne tout de suite sur téléphone ou ordinateur — mêmes données cloud.</p>
+      <a class="btn secondary" id="openWeb" href="/">Ouvrir la version web</a>
+    </div>
+
+    <div class="code-box" id="codeBox">
+      <strong>Code d’invitation</strong>
+      <div class="code" id="inviteCode"></div>
+      <p class="hint">À saisir lors de la création du compte (Inscription).</p>
+    </div>
+
+    <p class="hint" id="info"></p>
   </div>
   <script>
-    fetch('/api/version')
-      .then(function (r) { return r.json(); })
-      .then(function (v) {
-        var ver = document.getElementById('ver');
-        var dl = document.getElementById('dl');
-        var info = document.getElementById('info');
-        ver.textContent = 'Version ' + (v.version || '—');
-        if (v.apkUrl) {
-          dl.href = v.apkUrl;
-          dl.removeAttribute('aria-disabled');
-          dl.textContent = 'Télécharger APK ' + v.version;
-          dl.setAttribute('download', 'gasoil-tracking-' + v.version + '.apk');
-        } else {
-          dl.textContent = 'APK indisponible';
-        }
-        info.textContent = v.releaseNotes || '';
-      })
-      .catch(function () {
-        document.getElementById('ver').textContent = 'API indisponible';
-        document.getElementById('info').textContent = 'Réessayez dans un instant.';
-      });
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var code = (params.get('code') || params.get('invite') || '').trim();
+      if (code) {
+        document.getElementById('codeBox').style.display = 'block';
+        document.getElementById('inviteCode').textContent = code;
+      }
+      var ua = navigator.userAgent || '';
+      var isIos = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      var isAndroid = /Android/i.test(ua);
+      if (isIos) document.getElementById('ios').style.outline = '1px solid #3b82f6';
+      if (isAndroid) document.getElementById('android').style.outline = '1px solid #22c55e';
+
+      fetch('/api/version')
+        .then(function (r) { return r.json(); })
+        .then(function (v) {
+          document.getElementById('ver').textContent =
+            'Version app ' + (v.version || '—') +
+            (v.webUrl ? ' · web live' : '');
+          var dl = document.getElementById('dl');
+          if (v.apkUrl && v.apkAvailable !== false) {
+            dl.href = v.apkUrl;
+            dl.removeAttribute('aria-disabled');
+            dl.textContent = 'Télécharger APK ' + (v.version || '');
+            dl.setAttribute('download', 'gasoil-tracking-' + (v.version || 'latest') + '.apk');
+          } else {
+            dl.textContent = 'APK pas encore publiée';
+          }
+          var web = v.webUrl || '/';
+          document.getElementById('openWeb').href = web;
+          document.getElementById('openWebIos').href = web;
+          if (!code && v.inviteCodePublic) {
+            /* jamais exposer le code publicement via API — ignore */
+          }
+          document.getElementById('info').textContent = v.releaseNotes || '';
+        })
+        .catch(function () {
+          document.getElementById('ver').textContent = 'API indisponible';
+        });
+    })();
   </script>
 </body>
 </html>

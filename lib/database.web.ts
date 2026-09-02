@@ -133,6 +133,7 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
     id,
     trackedKm: vehicle.trackedKm ?? 0,
     estimatedFuelLiters: vehicle.estimatedFuelLiters ?? null,
+    consumptionAutoAdapt: vehicle.consumptionAutoAdapt !== false,
     createdAt: nowIso(),
   });
   await save(s);
@@ -198,6 +199,32 @@ export async function getFillUps(vehicleId?: number): Promise<FillUp[]> {
   const s = await load();
   const list = vehicleId ? s.fillUps.filter((f) => f.vehicleId === vehicleId) : s.fillUps;
   return [...list].sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export async function getFillUpById(id: number): Promise<FillUp | null> {
+  const s = await load();
+  return s.fillUps.find((f) => f.id === id) || null;
+}
+
+export async function updateFillUp(
+  id: number,
+  patch: Partial<
+    Pick<
+      FillUp,
+      | 'date'
+      | 'liters'
+      | 'pricePerLiter'
+      | 'totalCost'
+      | 'odometer'
+      | 'distanceSinceLastKm'
+      | 'isFull'
+      | 'note'
+    >
+  >
+): Promise<void> {
+  const s = await load();
+  s.fillUps = s.fillUps.map((f) => (f.id === id ? { ...f, ...patch, id } : f));
+  await save(s);
 }
 
 export async function deleteFillUp(id: number): Promise<void> {

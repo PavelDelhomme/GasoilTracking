@@ -75,9 +75,20 @@ function fillUpDistance(prev: FillUp, curr: FillUp): number | null {
   return null;
 }
 
+/** Écarte les L/100 absurdes (saisie km / litres incohérente). */
+export function isSaneConsumptionSample(lPer100: number, fuelType?: Vehicle['fuelType']): boolean {
+  if (!Number.isFinite(lPer100) || lPer100 <= 0) return false;
+  if (fuelType === 'electrique') return lPer100 >= 5 && lPer100 <= 40;
+  return lPer100 >= 3 && lPer100 <= 18;
+}
+
 /** Statistiques de consommation pour un véhicule (compteur OU km GPS/manuel) */
 export async function getConsumptionStats(vehicleId: number): Promise<ConsumptionStats> {
-  const [fillUps, trips] = await Promise.all([getFillUps(vehicleId), getTrips(vehicleId)]);
+  const [fillUps, trips, vehicle] = await Promise.all([
+    getFillUps(vehicleId),
+    getTrips(vehicleId),
+    getVehicleById(vehicleId),
+  ]);
   const ordered = [...fillUps].sort((a, b) => a.date.localeCompare(b.date));
   const fullFillUps = ordered.filter((f) => f.isFull);
 
@@ -89,23 +100,25 @@ export async function getConsumptionStats(vehicleId: number): Promise<Consumptio
     const prev = fullFillUps[i - 1];
     const curr = fullFillUps[i];
     const distance = fillUpDistance(prev, curr);
-    if (distance && distance > 0) {
+    if (distance && distance > 0 && curr.liters > 0) {
       totalDistance += distance;
       totalFuel += curr.liters;
       consumptions.push((curr.liters / distance) * 100);
     }
   }
 
-  // Pleins partiels avec distance saisie comptent aussi pour la conso moyenne
+  // Tout plein avec km saisis depuis le précédent (complet ou partiel)
   for (const f of ordered) {
-    if (!f.isFull && f.distanceSinceLastKm && f.distanceSinceLastKm > 0 && f.liters > 0) {
-      consumptions.push((f.liters / f.distanceSinceLastKm) * 100);
-      totalDistance += f.distanceSinceLastKm;
-      totalFuel += f.liters;
+    if (f.distanceSinceLastKm && f.distanceSinceLastKm > 0 && f.liters > 0) {
+      const c = (f.liters / f.distanceSinceLastKm) * 100;
+      if (!consumptions.some((x) => Math.abs(x - c) < 0.05)) {
+        consumptions.push(c);
+        totalDistance += f.distanceSinceLastKm;
+        totalFuel += f.liters;
+      }
     }
   }
 
-  // Km GPS des trajets terminés (complète le total si peu de pleins)
   const tripKm = trips
     .filter((t) => !t.isActive && t.status !== 'rejected' && t.distanceKm > 0)
     .reduce((s, t) => s + t.distanceKm, 0);
@@ -114,12 +127,11 @@ export async function getConsumptionStats(vehicleId: number): Promise<Consumptio
   }
 
   const totalCost = fillUps.reduce((sum, f) => sum + f.totalCost, 0);
+  const sane = consumptions.filter((c) => isSaneConsumptionSample(c, vehicle?.fuelType));
 
   return {
     averageConsumption:
-      consumptions.length > 0
-        ? consumptions.reduce((a, b) => a + b, 0) / consumptions.length
-        : 0,
+      sane.length > 0 ? sane.reduce((a, b) => a + b, 0) / sane.length : 0,
     totalDistance,
     totalFuel,
     totalCost,
@@ -208,15 +220,71 @@ export async function getSinceLastFillStats(vehicleId: number): Promise<SinceLas
   };
 }
 
-/** Met à jour la conso du véhicule pour CET utilisateur (moyenne glissante) */
-export async function adaptVehicleConsumption(vehicleId: number): Promise<number | null> {
-  const stats = await getConsumptionStats(vehicleId);
-  if (stats.averageConsumption <= 0) return null;
+/**
+ * Adapte la conso du véhicule aux pleins de CET utilisateur.
+ * Mesures récentes pondérées + lissage + plafond ±20 %.
+ * Désactivable via consumptionAutoAdapt = false (valeur manuelle).
+ */
+export async function adaptVehicleConsumption(
+  vehicleId: number
+): Promise<{ previous: number; next: number; measured: number; samples: number } | null> {
   const vehicle = await getVehicleById(vehicleId);
   if (!vehicle) return null;
-  const adapted = stats.averageConsumption * 0.7 + vehicle.consumptionPer100 * 0.3;
-  await updateVehicle(vehicleId, { consumptionPer100: Math.round(adapted * 10) / 10 });
-  return adapted;
+  if (vehicle.consumptionAutoAdapt === false) return null;
+  if (vehicle.fuelType === 'electrique') return null;
+
+  const fillUps = await getFillUps(vehicleId);
+  const ordered = [...fillUps].sort((a, b) => a.date.localeCompare(b.date));
+  const samples: number[] = [];
+
+  const fulls = ordered.filter((f) => f.isFull);
+  for (let i = 1; i < fulls.length; i++) {
+    const distance = fillUpDistance(fulls[i - 1], fulls[i]);
+    // Segments trop courts = bruit (ville / erreur de saisie)
+    if (distance && distance >= 30 && fulls[i].liters > 0) {
+      samples.push((fulls[i].liters / distance) * 100);
+    }
+  }
+  for (const f of ordered) {
+    if (f.distanceSinceLastKm && f.distanceSinceLastKm >= 30 && f.liters > 0) {
+      samples.push((f.liters / f.distanceSinceLastKm) * 100);
+    }
+  }
+
+  const sane = samples.filter((c) => isSaneConsumptionSample(c, vehicle.fuelType));
+  if (sane.length === 0) return null;
+
+  const recent = sane.slice(-5);
+  let wSum = 0;
+  let cSum = 0;
+  recent.forEach((c, i) => {
+    const w = i + 1;
+    wSum += w;
+    cSum += c * w;
+  });
+  const measured = cSum / wSum;
+  const prev = vehicle.consumptionPer100 > 0 ? vehicle.consumptionPer100 : measured;
+  let next = measured * 0.6 + prev * 0.4;
+  const maxDelta = Math.max(0.8, prev * 0.2);
+  next = Math.min(prev + maxDelta, Math.max(prev - maxDelta, next));
+  next = Math.round(next * 10) / 10;
+
+  if (Math.abs(next - prev) < 0.05) {
+    return {
+      previous: prev,
+      next: prev,
+      measured: Math.round(measured * 10) / 10,
+      samples: sane.length,
+    };
+  }
+
+  await updateVehicle(vehicleId, { consumptionPer100: next });
+  return {
+    previous: prev,
+    next,
+    measured: Math.round(measured * 10) / 10,
+    samples: sane.length,
+  };
 }
 
 /** Calcule le statut d'un budget avec dépenses dynamiques */

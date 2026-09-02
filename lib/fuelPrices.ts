@@ -31,6 +31,29 @@ export function fuelLabel(key: string): string {
 }
 
 /**
+ * Prix au litre raisonnable (EUR-like). Évite les saisies absurdes
+ * du type 22 €/L dues à une virgule / conversion.
+ */
+export function isSaneFuelPricePerLiter(ppl: number, countryCode = 'FR'): boolean {
+  if (!Number.isFinite(ppl) || ppl <= 0) return false;
+  // Devises « chères » hors EUR : bornes plus larges
+  if (countryCode === 'NO' || countryCode === 'SE') return ppl >= 5 && ppl <= 40;
+  if (countryCode === 'DK') return ppl >= 4 && ppl <= 30;
+  if (countryCode === 'PL') return ppl >= 2 && ppl <= 12;
+  if (countryCode === 'CZ') return ppl >= 10 && ppl <= 60;
+  if (countryCode === 'HU') return ppl >= 200 && ppl <= 1200;
+  if (countryCode === 'IS') return ppl >= 100 && ppl <= 500;
+  // EUR et assimilés
+  return ppl >= 0.7 && ppl <= 3.8;
+}
+
+/** Recalcule litres à partir du ticket + prix station (arrondi 2 décimales). */
+export function litersFromTicket(totalCost: number, pricePerLiter: number): number {
+  if (totalCost <= 0 || pricePerLiter <= 0) return 0;
+  return Math.round((totalCost / pricePerLiter) * 100) / 100;
+}
+
+/**
  * Stations autour d’un point — open data data.economie.gouv.fr (France uniquement).
  */
 export function isFrenchFuelOpenDataAvailable(countryCode: string): boolean {

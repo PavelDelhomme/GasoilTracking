@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { CurrencyCode } from '@/constants/europe';
+import { API_URL } from '@/lib/api';
 
 const RATES_KEY = 'gasoil_fx_rates_v1';
 const RATES_AT_KEY = 'gasoil_fx_rates_at';
@@ -57,12 +58,29 @@ export async function loadCachedFxRates(): Promise<void> {
   }
 }
 
-/** Rafraîchit les taux (API Frankfurter — gratuite, basée BCE). */
+async function fetchFxJson(url: string): Promise<{ rates?: FxRates; date?: string } | null> {
+  try {
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as { rates?: FxRates; date?: string };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Rafraîchit les taux.
+ * Web prod : via notre API (même origine → pas de CORS).
+ * Fallback : Frankfurter.dev (l’ancien .app renvoie un 301 sans CORS).
+ */
 export async function refreshFxRates(): Promise<FxRates> {
   try {
-    const res = await fetch('https://api.frankfurter.app/latest?from=EUR');
-    if (!res.ok) throw new Error(`FX ${res.status}`);
-    const data = (await res.json()) as { rates?: FxRates; date?: string };
+    const data =
+      (await fetchFxJson(`${API_URL}/api/fx/latest`)) ||
+      (await fetchFxJson('https://api.frankfurter.dev/v1/latest?base=EUR'));
+    if (!data) throw new Error('FX unavailable');
     const rates = { ...FALLBACK_RATES, ...(data.rates || {}), EUR: 1 };
     cachedRates = rates;
     ratesUpdatedAt = data.date || new Date().toISOString().slice(0, 10);
@@ -70,7 +88,7 @@ export async function refreshFxRates(): Promise<FxRates> {
     await AsyncStorage.setItem(RATES_AT_KEY, ratesUpdatedAt);
     return rates;
   } catch {
-    cachedRates = { ...FALLBACK_RATES };
+    cachedRates = { ...FALLBACK_RATES, ...cachedRates, EUR: 1 };
     return cachedRates;
   }
 }

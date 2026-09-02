@@ -21,6 +21,11 @@ export interface Vehicle {
    * Mis à jour aux pleins / trajets ; saisissable manuellement.
    */
   estimatedFuelLiters: number | null;
+  /**
+   * Si true/undefined : la conso L/100 s’ajuste aux pleins.
+   * Si false : valeur figée (saisie manuelle).
+   */
+  consumptionAutoAdapt?: boolean;
   isActive: boolean;
   createdAt: string;
 }

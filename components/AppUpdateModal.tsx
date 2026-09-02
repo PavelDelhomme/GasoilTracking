@@ -39,6 +39,13 @@ export function AppUpdateModal({
   const local = getLocalAppVersion();
   const pct = Math.round((progress?.progress || 0) * 100);
 
+  const primaryLabel =
+    Platform.OS === 'android'
+      ? 'Installer maintenant'
+      : Platform.OS === 'web'
+        ? 'Recharger maintenant'
+        : 'Télécharger / installer';
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={force ? undefined : onLater}>
       <View style={styles.backdrop}>
@@ -53,9 +60,10 @@ export function AppUpdateModal({
             <Text style={[styles.notes, { color: colors.text }]}>{info.releaseNotes}</Text>
           )}
           <Text style={[styles.safe, { color: colors.textSecondary }]}>
-            Vos données locales sont conservées (mise à jour du même package, sans désinstallation).
-            Une sauvegarde est faite avant l’installation ; avec un compte, le cloud est aussi
-            synchronisé.
+            {Platform.OS === 'web'
+              ? 'Version web / iPhone : rechargement live. Données locales et cloud conservées.'
+              : 'Données conservées. Vous pourrez aussi installer plus tard depuis Mon compte.'}
+            {!force ? ' « Plus tard » : rappel dans 2 heures.' : ''}
           </Text>
 
           {busy && (
@@ -78,16 +86,16 @@ export function AppUpdateModal({
             <View style={styles.actions}>
               {!force && (
                 <Pressable onPress={onLater} style={styles.secondaryBtn}>
-                  <Text style={{ color: colors.textSecondary, fontWeight: '600' }}>Plus tard</Text>
+                  <Text style={{ color: colors.textSecondary, fontWeight: '600' }}>
+                    Plus tard (rappel 2 h)
+                  </Text>
                 </Pressable>
               )}
               <Pressable
                 onPress={onUpdate}
                 style={[styles.primaryBtn, { backgroundColor: colors.accent }]}
               >
-                <Text style={styles.primaryText}>
-                  {Platform.OS === 'android' ? 'Mettre à jour' : 'Télécharger'}
-                </Text>
+                <Text style={styles.primaryText}>{primaryLabel}</Text>
               </Pressable>
             </View>
           )}
@@ -119,7 +127,7 @@ const styles = StyleSheet.create({
   barTrack: { height: 8, borderRadius: 4, width: '100%', overflow: 'hidden' },
   barFill: { height: 8, borderRadius: 4 },
   error: { color: '#e94560', fontSize: 13 },
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 8 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 12, marginTop: 8 },
   secondaryBtn: { paddingVertical: 12, paddingHorizontal: 14 },
   primaryBtn: { paddingVertical: 12, paddingHorizontal: 18, borderRadius: 10 },
   primaryText: { color: '#fff', fontWeight: '700' },

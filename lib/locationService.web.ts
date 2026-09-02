@@ -1,42 +1,125 @@
 /**
- * GPS / background location non dispo sur web — stubs + helpers Maps OK.
+ * GPS web / iOS PWA : suivi au premier plan (onglet ouvert).
+ * Pas d’arrière-plan navigateur — garde l’app ouverte pendant le trajet.
  */
 import type * as Location from 'expo-location';
+import {
+  getActiveTrip,
+  getVehicleById,
+  updateTrip,
+} from '@/lib/database';
+import {
+  appendRoutePoint,
+  calculateRouteDistance,
+  estimateCost,
+  estimateFuelUsed,
+} from '@/lib/calculations';
+
+let watchId: number | null = null;
+let applying = false;
+
+function toLocationObject(pos: GeolocationPosition): Location.LocationObject {
+  return {
+    coords: {
+      latitude: pos.coords.latitude,
+      longitude: pos.coords.longitude,
+      altitude: pos.coords.altitude,
+      accuracy: pos.coords.accuracy,
+      altitudeAccuracy: pos.coords.altitudeAccuracy,
+      heading: pos.coords.heading,
+      speed: pos.coords.speed,
+    },
+    timestamp: pos.timestamp,
+  } as Location.LocationObject;
+}
+
+async function applyPosition(pos: GeolocationPosition) {
+  if (applying) return;
+  applying = true;
+  try {
+    const trip = await getActiveTrip();
+    if (!trip || trip.isPaused) return;
+
+    const vehicle = await getVehicleById(trip.vehicleId);
+    if (!vehicle) return;
+
+    const routePoints = appendRoutePoint(trip.routePoints, {
+      latitude: pos.coords.latitude,
+      longitude: pos.coords.longitude,
+      timestamp: pos.timestamp,
+    });
+    const distanceKm = calculateRouteDistance(routePoints);
+    const fuelUsed = estimateFuelUsed(distanceKm, vehicle.consumptionPer100);
+    const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
+
+    await updateTrip(trip.id, {
+      routePoints,
+      distanceKm,
+      estimatedFuelUsed: fuelUsed,
+      estimatedCost: cost,
+    });
+  } catch (e) {
+    console.warn('[web-gps] apply', e);
+  } finally {
+    applying = false;
+  }
+}
 
 export async function requestLocationPermissions(): Promise<boolean> {
-  return false;
+  if (typeof navigator === 'undefined' || !navigator.geolocation) return false;
+  // Permission via un getCurrentPosition (prompt navigateur / Safari)
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      () => resolve(true),
+      () => resolve(false),
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+    );
+  });
 }
 
 export async function startBackgroundTracking(): Promise<boolean> {
-  return false;
+  if (typeof navigator === 'undefined' || !navigator.geolocation) return false;
+  const ok = await requestLocationPermissions();
+  if (!ok) return false;
+
+  if (watchId != null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+
+  watchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      void applyPosition(pos);
+    },
+    (err) => {
+      console.warn('[web-gps]', err.message);
+    },
+    {
+      enableHighAccuracy: true,
+      maximumAge: 2000,
+      timeout: 20000,
+    }
+  );
+
+  return true;
 }
 
-export async function stopBackgroundTracking(): Promise<void> {}
+export async function stopBackgroundTracking(): Promise<void> {
+  if (typeof navigator !== 'undefined' && navigator.geolocation && watchId != null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+}
 
 export async function getCurrentLocation(): Promise<Location.LocationObject | null> {
-  if (typeof navigator !== 'undefined' && navigator.geolocation) {
-    return new Promise((resolve) => {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          resolve({
-            coords: {
-              latitude: pos.coords.latitude,
-              longitude: pos.coords.longitude,
-              altitude: pos.coords.altitude,
-              accuracy: pos.coords.accuracy,
-              altitudeAccuracy: pos.coords.altitudeAccuracy,
-              heading: pos.coords.heading,
-              speed: pos.coords.speed,
-            },
-            timestamp: pos.timestamp,
-          } as Location.LocationObject);
-        },
-        () => resolve(null),
-        { enableHighAccuracy: true, timeout: 10000 }
-      );
-    });
-  }
-  return null;
+  if (typeof navigator === 'undefined' || !navigator.geolocation) return null;
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve(toLocationObject(pos)),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 5000 }
+    );
+  });
 }
 
 export function openGoogleMapsNavigation(

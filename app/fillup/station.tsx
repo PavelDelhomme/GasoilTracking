@@ -6,11 +6,12 @@ import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
-import { createFillUp, createTrip, addTrackedKm } from '@/lib/database';
-import { refreshBudgets } from '@/lib/calculations';
+import { adaptVehicleConsumption, refreshBudgets } from '@/lib/calculations';
 import { notify } from '@/lib/notify';
 import { openGoogleMapsNavigation } from '@/lib/locationService';
-import { fuelLabel } from '@/lib/fuelPrices';
+import { fuelLabel, isSaneFuelPricePerLiter } from '@/lib/fuelPrices';
+import { applyFillUpToFuelEstimate } from '@/lib/fuelLevel';
+import { createFillUp, createTrip, addTrackedKm, updateVehicle } from '@/lib/database';
 
 /**
  * Trajet vers une station : navigation Maps + option enregistrer un plein (ou pas).
@@ -26,7 +27,7 @@ export default function StationTripScreen() {
   }>();
   const { activeVehicle, refresh } = useApp();
   const { colors } = useTheme();
-  const { moneySymbol, formatPerLiter } = useLocale();
+  const { moneySymbol, formatPerLiter, countryCode } = useLocale();
   const [doFillUp, setDoFillUp] = useState(true);
   const [isFull, setIsFull] = useState(true);
   const [liters, setLiters] = useState('');
@@ -82,6 +83,14 @@ export default function StationTripScreen() {
           setLoading(false);
           return;
         }
+        if (!isSaneFuelPricePerLiter(ppl, countryCode)) {
+          notify(
+            'Prix / L incohérent',
+            `${ppl.toFixed(3)} €/L n’est pas réaliste. Le gazole est en général ~1,5–2,5 €/L.`
+          );
+          setLoading(false);
+          return;
+        }
         await createFillUp({
           vehicleId: activeVehicle.id,
           date: new Date().toISOString(),
@@ -94,15 +103,27 @@ export default function StationTripScreen() {
           note: `${stationName} · ${fuelLabel(params.fuelKey || 'gazole')}`,
           tripId,
         });
+        await applyFillUpToFuelEstimate(activeVehicle, { liters: L, isFull });
+        if (ppl > 0) await updateVehicle(activeVehicle.id, { defaultFuelPrice: ppl });
+        const adapted = await adaptVehicleConsumption(activeVehicle.id);
         await refreshBudgets(activeVehicle.id);
+        await refresh();
+        let msg = 'Trajet station + plein.';
+        if (adapted && adapted.next !== adapted.previous) {
+          msg += ` Conso ${adapted.previous.toFixed(1)} → ${adapted.next.toFixed(1)} L/100.`;
+        }
+        notify('Enregistré', msg);
+        router.back();
+        return;
       }
 
       await refresh();
       notify(
         'Enregistré',
-        doFillUp ? 'Trajet station + plein.' : 'Trajet station sans plein.'
+        'Trajet station sans plein.'
       );
       router.back();
+      return;
     } catch (e) {
       notify('Erreur', e instanceof Error ? e.message : 'Échec');
     } finally {

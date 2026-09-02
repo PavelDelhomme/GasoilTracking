@@ -7,12 +7,14 @@ import {
   RefreshControl,
   Pressable,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
 import { useApp } from '@/context/AppContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Card, ProgressBar } from '@/components/Card';
 import { Button } from '@/components/Button';
+import { Input } from '@/components/Input';
 import { formatEuro } from '@/lib/calculations';
 import {
   deleteBudget,
@@ -30,9 +32,21 @@ import {
   isFrenchFuelOpenDataAvailable,
   type FuelStationPrice,
 } from '@/lib/fuelPrices';
+import { forwardGeocode, reverseGeocode } from '@/lib/geocode';
 import { getCurrentLocation } from '@/lib/locationService';
 import { confirm } from '@/lib/notify';
 import type { BudgetStatus, FillUp, Place, RecurringRoute } from '@/types';
+
+const FUEL_ZONE_KEY = 'gasoil_fuel_zone';
+
+type FuelZoneMode = 'gps' | 'custom';
+type FuelZone = {
+  mode: FuelZoneMode;
+  latitude?: number;
+  longitude?: number;
+  label?: string;
+  radiusKm?: number;
+};
 
 const KIND_LABEL: Record<string, string> = {
   home: 'Domicile',
@@ -54,6 +68,15 @@ export default function BudgetScreen() {
   const [stations, setStations] = useState<FuelStationPrice[]>([]);
   const [fuelLoading, setFuelLoading] = useState(false);
   const [fuelError, setFuelError] = useState('');
+  const [fuelZone, setFuelZone] = useState<FuelZone>({ mode: 'gps', radiusKm: 12 });
+  const [zoneQuery, setZoneQuery] = useState('');
+  const [showZonePicker, setShowZonePicker] = useState(false);
+  const [zoneHint, setZoneHint] = useState('Autour de votre position GPS');
+
+  const persistFuelZone = async (z: FuelZone) => {
+    setFuelZone(z);
+    await AsyncStorage.setItem(FUEL_ZONE_KEY, JSON.stringify(z));
+  };
 
   const loadExtra = useCallback(async () => {
     const [p, r, m] = await Promise.all([
@@ -88,8 +111,29 @@ export default function BudgetScreen() {
   useFocusEffect(
     useCallback(() => {
       loadExtra();
-      // Prix stations auto à l’ouverture (France)
-      void loadFuelPrices();
+      // Prix stations = position GPS réelle (ou zone choisie), pas les trajets
+      void (async () => {
+        try {
+          const raw = await AsyncStorage.getItem(FUEL_ZONE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw) as FuelZone;
+            if (parsed?.mode === 'gps' || parsed?.mode === 'custom') {
+              setFuelZone({
+                mode: parsed.mode,
+                latitude: parsed.latitude,
+                longitude: parsed.longitude,
+                label: parsed.label,
+                radiusKm: parsed.radiusKm ?? 12,
+              });
+              await loadFuelPrices(parsed);
+              return;
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+        await loadFuelPrices({ mode: 'gps', radiusKm: 12 });
+      })();
     }, [loadExtra])
   );
 
@@ -97,6 +141,7 @@ export default function BudgetScreen() {
     setRefreshing(true);
     await refresh();
     await loadExtra();
+    await loadFuelPrices(fuelZone);
     setRefreshing(false);
   };
 
@@ -116,7 +161,8 @@ export default function BudgetScreen() {
     return liters * activeVehicle.defaultFuelPrice;
   };
 
-  const loadFuelPrices = async () => {
+  const loadFuelPrices = async (zoneOverride?: FuelZone) => {
+    const zone = zoneOverride ?? fuelZone;
     setFuelLoading(true);
     setFuelError('');
     setStations([]);
@@ -128,34 +174,104 @@ export default function BudgetScreen() {
       return;
     }
     try {
-      let lat = 50.6292;
-      let lon = 3.0573; // Lille défaut
-      const loc = await getCurrentLocation();
-      if (loc) {
+      let lat: number | null = null;
+      let lon: number | null = null;
+      let hint = '';
+
+      if (zone.mode === 'custom' && zone.latitude != null && zone.longitude != null) {
+        lat = zone.latitude;
+        lon = zone.longitude;
+        hint = `Zone choisie : ${zone.label || 'point personnalisé'}`;
+      } else {
+        const loc = await getCurrentLocation();
+        if (!loc) {
+          setFuelError(
+            'Impossible d’obtenir votre position GPS. Activez la localisation, ou choisissez une zone spécifique ci‑dessous.'
+          );
+          setZoneHint('Position GPS indisponible');
+          setFuelLoading(false);
+          return;
+        }
         lat = loc.coords.latitude;
         lon = loc.coords.longitude;
-      } else {
-        const home = places.find((p) => p.kind === 'home' && p.latitude != null);
-        if (home?.latitude != null && home.longitude != null) {
-          lat = home.latitude;
-          lon = home.longitude;
+        const placeName = await reverseGeocode(lat, lon);
+        hint = placeName
+          ? `Autour de vous · ${placeName}`
+          : `Autour de vous · GPS ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+        // garde le mode GPS mémorisé (sans coords figées)
+        if (zone.mode !== 'gps') {
+          await persistFuelZone({ mode: 'gps', radiusKm: zone.radiusKm ?? 12 });
         }
       }
+
+      setZoneHint(hint);
+      const radiusKm = zone.radiusKm ?? 12;
       const list = await fetchCheapestStations({
         latitude: lat,
         longitude: lon,
-        radiusKm: 12,
+        radiusKm,
         fuel: activeVehicle?.fuelType || 'diesel',
         limit: 8,
         countryCode,
       });
       setStations(list);
-      if (!list.length) setFuelError('Aucune station trouvée dans ce rayon.');
+      if (!list.length) {
+        setFuelError(`Aucune station dans un rayon de ${radiusKm} km autour de cette zone.`);
+      }
     } catch (e) {
       setFuelError(e instanceof Error ? e.message : 'Erreur API prix');
     } finally {
       setFuelLoading(false);
     }
+  };
+
+  const useGpsZone = async () => {
+    const next: FuelZone = { mode: 'gps', radiusKm: fuelZone.radiusKm ?? 12 };
+    await persistFuelZone(next);
+    setShowZonePicker(false);
+    await loadFuelPrices(next);
+  };
+
+  const useCustomCoords = async (lat: number, lon: number, label: string) => {
+    const next: FuelZone = {
+      mode: 'custom',
+      latitude: lat,
+      longitude: lon,
+      label,
+      radiusKm: fuelZone.radiusKm ?? 12,
+    };
+    await persistFuelZone(next);
+    setShowZonePicker(false);
+    setZoneQuery('');
+    await loadFuelPrices(next);
+  };
+
+  const searchCustomZone = async () => {
+    const q = zoneQuery.trim();
+    if (q.length < 2) {
+      setFuelError('Saisissez une ville ou une adresse (ex. Rennes, Thorigné-Fouillard).');
+      return;
+    }
+    setFuelLoading(true);
+    setFuelError('');
+    try {
+      const hit = await forwardGeocode(q);
+      if (!hit) {
+        setFuelError('Zone introuvable. Essayez une autre ville ou adresse.');
+        setFuelLoading(false);
+        return;
+      }
+      await useCustomCoords(hit.latitude, hit.longitude, hit.label);
+    } catch (e) {
+      setFuelError(e instanceof Error ? e.message : 'Recherche zone impossible');
+      setFuelLoading(false);
+    }
+  };
+
+  const setRadius = async (km: number) => {
+    const next = { ...fuelZone, radiusKm: km };
+    await persistFuelZone(next);
+    await loadFuelPrices(next);
   };
 
   const maxMonth = Math.max(...monthly.map((m) => m.spent), 1);
@@ -226,8 +342,9 @@ export default function BudgetScreen() {
                 <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Aucun plein ce mois.</Text>
               ) : (
                 monthFillUps.map((f) => (
-                  <View
+                  <Pressable
                     key={f.id}
+                    onPress={() => router.push(`/fillup/${f.id}` as never)}
                     style={{
                       paddingVertical: 8,
                       borderBottomWidth: StyleSheet.hairlineWidth,
@@ -241,8 +358,9 @@ export default function BudgetScreen() {
                     <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
                       {formatPerLiter(f.pricePerLiter)}
                       {f.note ? ` · ${f.note}` : ''}
+                      {' · détails ›'}
                     </Text>
-                  </View>
+                  </Pressable>
                 ))
               )}
             </View>
@@ -368,7 +486,7 @@ export default function BudgetScreen() {
           )}
         </Card>
 
-        {/* Prix carburant */}
+        {/* Prix carburant — GPS réel ou zone choisie (pas les trajets) */}
         <View style={styles.sectionRow}>
           <Text style={[styles.section, { color: colors.text, marginBottom: 0 }]}>
             Prix carburant (zone)
@@ -377,15 +495,140 @@ export default function BudgetScreen() {
             title="Actualiser"
             variant="secondary"
             loading={fuelLoading}
-            onPress={loadFuelPrices}
+            onPress={() => loadFuelPrices()}
             style={{ paddingVertical: 8, paddingHorizontal: 12 }}
           />
         </View>
         <Card>
+          <Text style={{ color: colors.text, fontWeight: '600', marginBottom: 4 }}>
+            {zoneHint}
+          </Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 10, lineHeight: 17 }}>
+            Les prix sont basés sur votre position GPS réelle à l’ouverture — pas sur vos trajets.
+            Vous pouvez aussi cibler une zone précise (ville, adresse ou lieu enregistré).
+          </Text>
+
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+            <Pressable
+              onPress={useGpsZone}
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: colors.border,
+                backgroundColor: fuelZone.mode === 'gps' ? colors.accent : colors.card,
+              }}
+            >
+              <Text
+                style={{
+                  color: fuelZone.mode === 'gps' ? '#fff' : colors.text,
+                  fontSize: 13,
+                  fontWeight: '600',
+                }}
+              >
+                Ma position
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setShowZonePicker((v) => !v)}
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: colors.border,
+                backgroundColor: fuelZone.mode === 'custom' ? colors.accent : colors.card,
+              }}
+            >
+              <Text
+                style={{
+                  color: fuelZone.mode === 'custom' ? '#fff' : colors.text,
+                  fontSize: 13,
+                  fontWeight: '600',
+                }}
+              >
+                Zone spécifique
+              </Text>
+            </Pressable>
+          </View>
+
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+            {[5, 10, 12, 20].map((km) => {
+              const active = (fuelZone.radiusKm ?? 12) === km;
+              return (
+                <Pressable
+                  key={km}
+                  onPress={() => setRadius(km)}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    backgroundColor: active ? colors.accent : colors.background,
+                  }}
+                >
+                  <Text style={{ color: active ? '#fff' : colors.textSecondary, fontSize: 12 }}>
+                    {km} km
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {showZonePicker && (
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
+                Choisissez un lieu enregistré ou saisissez une ville / adresse :
+              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                {places
+                  .filter((p) => p.latitude != null && p.longitude != null)
+                  .map((p) => (
+                    <Pressable
+                      key={p.id}
+                      onPress={() =>
+                        useCustomCoords(
+                          p.latitude!,
+                          p.longitude!,
+                          p.address?.trim() || p.name || KIND_LABEL[p.kind] || 'Lieu'
+                        )
+                      }
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        borderRadius: 16,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        backgroundColor: colors.card,
+                      }}
+                    >
+                      <Text style={{ color: colors.text, fontSize: 13 }}>
+                        {KIND_LABEL[p.kind] || p.kind} · {p.name}
+                      </Text>
+                    </Pressable>
+                  ))}
+              </View>
+              <Input
+                label="Ville ou adresse"
+                value={zoneQuery}
+                onChangeText={setZoneQuery}
+                placeholder="Ex. La Guerche de Bretagne"
+              />
+              <Button
+                title="Utiliser cette zone"
+                variant="secondary"
+                loading={fuelLoading}
+                onPress={searchCustomZone}
+              />
+            </View>
+          )}
+
           {!!fuelError && <Text style={{ color: colors.danger, marginBottom: 8 }}>{fuelError}</Text>}
           {!stations.length && !fuelError && (
             <Text style={{ color: colors.textSecondary, marginBottom: 8 }}>
-              Chargez les stations les moins chères près de vous (open data gouvernemental).
+              Chargement des stations les moins chères autour de la zone…
             </Text>
           )}
           {stations.map((s) => {
@@ -428,7 +671,8 @@ export default function BudgetScreen() {
           })}
           {stations.length > 0 && (
             <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
-              Tap = trajet vers la station (plein optionnel). Tri par {fuelLabel(
+              Tap = trajet vers la station (plein optionnel). Tri par{' '}
+              {fuelLabel(
                 activeVehicle?.fuelType === 'diesel'
                   ? 'gazole'
                   : activeVehicle?.fuelType === 'gpl'

@@ -18,9 +18,16 @@ export async function getRefreshToken(): Promise<string | null> {
   return AsyncStorage.getItem(REFRESH_KEY);
 }
 
+export type AuthUser = {
+  id: string;
+  email: string;
+  name: string;
+  isManager?: boolean;
+};
+
 export async function setSession(
   token: string,
-  user: { id: string; email: string; name: string },
+  user: AuthUser,
   refreshToken?: string | null
 ) {
   await AsyncStorage.setItem(TOKEN_KEY, token);
@@ -134,6 +141,34 @@ export function resendVerificationEmail(email: string) {
   }) as Promise<{ ok: boolean; message?: string; alreadyActive?: boolean }>;
 }
 
+export function changePassword(currentPassword: string, newPassword: string) {
+  return request('/api/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, newPassword }),
+  }) as Promise<{ ok: boolean; message: string }>;
+}
+
+export function forgotPassword(email: string) {
+  return request('/api/auth/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  }) as Promise<{ ok: boolean; message: string; mailed?: boolean }>;
+}
+
+export function resetPassword(token: string, newPassword: string) {
+  return request('/api/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ token, newPassword }),
+  }) as Promise<{ ok: boolean; message: string }>;
+}
+
+export function deleteAccount(password: string, confirm = 'SUPPRIMER') {
+  return request('/api/auth/delete-account', {
+    method: 'POST',
+    body: JSON.stringify({ password, confirm }),
+  }) as Promise<{ ok: boolean; message: string }>;
+}
+
 export async function login(email: string, password: string) {
   const data = await request('/api/auth/login', {
     method: 'POST',
@@ -177,11 +212,27 @@ export type AdminOverview = {
   personalMail: string | null;
   inviteCode: string | null;
   users: { id: string; email: string; name: string; email_verified: number; created_at: string }[];
-  pending: { email: string; platform: string; expires_at: string; created_at: string }[];
+  pending: {
+    id?: string;
+    email: string;
+    name?: string;
+    platform: string;
+    expires_at: string;
+    created_at: string;
+  }[];
   userCount: number;
   pendingCount: number;
   apkVersion?: string;
   apkAvailable?: boolean;
+  webUrl?: string;
+  downloadPage?: string;
+  iosInstallUrl?: string;
+  channels?: {
+    android: boolean;
+    web: boolean;
+    iosPwa: boolean;
+    iosAppStore: boolean;
+  };
   downloadLinks?: {
     id: string;
     label: string | null;
@@ -199,6 +250,22 @@ export function fetchAdminOverview(): Promise<AdminOverview> {
   return request('/api/admin/overview') as Promise<AdminOverview>;
 }
 
+export function fetchMe() {
+  return request('/api/auth/me') as Promise<{
+    user: AuthUser & { email_verified?: number; created_at?: string };
+    pendingRegistrationsCount: number;
+    pendingRegistrations?: PendingRegistrationSummary[];
+  }>;
+}
+
+export type PendingRegistrationSummary = {
+  email: string;
+  name?: string;
+  platform?: string;
+  expires_at?: string;
+  created_at?: string;
+};
+
 export function createDownloadLink(opts?: { days?: number; maxUses?: number; label?: string }) {
   return request('/api/admin/download-links', {
     method: 'POST',
@@ -210,20 +277,61 @@ export function sendDownloadLinkEmail(email: string, opts?: { days?: number; max
   return request('/api/admin/send-download-link', {
     method: 'POST',
     body: JSON.stringify({ email, ...opts }),
-  }) as Promise<{ ok: boolean; mailed: boolean; url: string; message: string }>;
+  }) as Promise<{
+    ok: boolean;
+    mailed: boolean;
+    url: string;
+    webUrl?: string;
+    downloadPage?: string;
+    iosInstallUrl?: string;
+    inviteCode?: string | null;
+    apkIncluded?: boolean;
+    message: string;
+  }>;
 }
 
 export function revokeDownloadLink(id: string) {
   return request(`/api/admin/download-links/${id}/revoke`, { method: 'POST', body: '{}' });
 }
 
-export function isManagerEmail(email?: string | null): boolean {
+export function approvePendingRegistration(email: string) {
+  return request('/api/admin/approve-pending', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  }) as Promise<{ ok: boolean; message: string }>;
+}
+
+export function rejectPendingRegistration(email: string) {
+  return request('/api/admin/reject-pending', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  }) as Promise<{ ok: boolean; message: string }>;
+}
+
+export function resendPendingVerification(email: string) {
+  return request('/api/admin/resend-verification', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  }) as Promise<{ ok: boolean; mailed?: boolean; message: string }>;
+}
+
+/** Gestionnaires : admin@… + paveldelhomme@gmail.com (+ EXPO_PUBLIC / extra). */
+export function isManagerEmail(email?: string | null, userFlag?: boolean | null): boolean {
+  if (userFlag === true) return true;
   const e = String(email || '')
     .toLowerCase()
     .trim();
   if (!e) return false;
   if (e === 'admin@delhomme.ovh') return true;
-  const personal = (process.env.EXPO_PUBLIC_PERSONAL_MAIL || '').toLowerCase().trim();
+  if (e === 'paveldelhomme@gmail.com') return true;
+  const personal = (
+    process.env.EXPO_PUBLIC_PERSONAL_MAIL ||
+    Constants.expoConfig?.extra?.personalMail ||
+    ''
+  )
+    .toString()
+    .toLowerCase()
+    .trim();
   return Boolean(personal && e === personal);
 }
 
@@ -231,9 +339,18 @@ export type AppVersionInfo = {
   version: string;
   minVersion: string;
   forceUpdate: boolean;
-  apkUrl: string;
+  apkUrl: string | null;
+  apkAvailable?: boolean;
+  webUrl?: string;
+  iosInstallUrl?: string;
   releaseNotes: string;
   downloadPage: string;
+  channels?: {
+    android: boolean;
+    web: boolean;
+    iosPwa: boolean;
+    iosAppStore: boolean;
+  };
 };
 
 export async function fetchAppVersion(): Promise<AppVersionInfo> {

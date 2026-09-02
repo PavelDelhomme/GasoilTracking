@@ -15,6 +15,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { getVehicleById, updateVehicle } from '@/lib/database';
+import { getConsumptionStats } from '@/lib/calculations';
 import { notify } from '@/lib/notify';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
 import { searchVehicles, type VehiclePreset } from '@/constants/vehicles';
@@ -42,11 +43,13 @@ export default function EditVehicleScreen() {
   const [fuelPrice, setFuelPrice] = useState(String(country.defaultFuelPrice));
   const [odometer, setOdometer] = useState('0');
   const [hasOdometer, setHasOdometer] = useState(true);
+  const [autoAdapt, setAutoAdapt] = useState(true);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const [ready, setReady] = useState(false);
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
+  const [measuredConso, setMeasuredConso] = useState<number | null>(null);
 
   useEffect(() => {
     if (!Number.isFinite(vehicleId) || vehicleId < 1) {
@@ -70,8 +73,12 @@ export default function EditVehicleScreen() {
       setFuelPrice(String(v.defaultFuelPrice));
       setOdometer(String(v.currentOdometer));
       setHasOdometer(v.hasOdometer);
+      setAutoAdapt(v.consumptionAutoAdapt !== false);
       setVehicle(v);
       setReady(true);
+      void getConsumptionStats(v.id).then((s) => {
+        setMeasuredConso(s.averageConsumption > 0 ? s.averageConsumption : null);
+      });
     });
   }, [vehicleId]);
 
@@ -114,9 +121,15 @@ export default function EditVehicleScreen() {
         currentOdometer: hasOdometer
           ? parseFloat(odometer.replace(',', '.')) || 0
           : 0,
+        consumptionAutoAdapt: autoAdapt,
       });
       await refresh();
-      notify('Véhicule mis à jour', `${name.trim()} — fiche personnalisée enregistrée.`);
+      notify(
+        'Véhicule mis à jour',
+        autoAdapt
+          ? `${name.trim()} — conso auto selon vos pleins.`
+          : `${name.trim()} — conso figée manuellement.`
+      );
       router.back();
     } catch (e) {
       notify('Erreur', e instanceof Error ? e.message : 'Échec');
@@ -213,6 +226,27 @@ export default function EditVehicleScreen() {
         onChangeText={setConsumption}
         keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
       />
+      {measuredConso != null && (
+        <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 10, marginTop: -4 }}>
+          Mesurée sur vos pleins : ~{measuredConso.toFixed(1)} L/100
+          {autoAdapt ? ' (l’app s’en rapproche à chaque plein)' : ' (auto désactivée — valeur manuelle)'}
+        </Text>
+      )}
+      <View style={styles.switchRow}>
+        <View style={{ flex: 1, paddingRight: 12 }}>
+          <Text style={[styles.switchLabel, { color: colors.text }]}>
+            Adapter la conso selon mes pleins
+          </Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+            Oui = lissage automatique. Non = vous gardez la valeur saisie.
+          </Text>
+        </View>
+        <Switch
+          value={autoAdapt}
+          onValueChange={setAutoAdapt}
+          trackColor={{ false: colors.border, true: colors.accent }}
+        />
+      </View>
       <Input
         label="Capacité réservoir (L)"
         value={tankCapacity}

@@ -19,7 +19,13 @@ import { DatePickerField } from '@/components/DatePickerField';
 import { createFillUp, updateVehicle, updateTrip } from '@/lib/database';
 import { adaptVehicleConsumption, formatEuro, refreshBudgets } from '@/lib/calculations';
 import { applyFillUpToFuelEstimate } from '@/lib/fuelLevel';
-import { fetchCheapestStations, fuelLabel, isFrenchFuelOpenDataAvailable, type FuelStationPrice } from '@/lib/fuelPrices';
+import {
+  fetchCheapestStations,
+  fuelLabel,
+  isFrenchFuelOpenDataAvailable,
+  isSaneFuelPricePerLiter,
+  type FuelStationPrice,
+} from '@/lib/fuelPrices';
 import { getCurrentLocation } from '@/lib/locationService';
 import { notify } from '@/lib/notify';
 import { toLocalYmd } from '@/lib/dates';
@@ -188,6 +194,13 @@ export default function AddFillUpScreen() {
       notify('Erreur', 'Indiquez le montant payé (ou litres + prix/L).');
       return;
     }
+    if (!isSaneFuelPricePerLiter(derived.ppl, countryCode)) {
+      notify(
+        'Prix / L incohérent',
+        `${derived.ppl.toFixed(3)} €/L n’est pas réaliste. Vérifiez le prix à la pompe (souvent ~1,5–2,5 €/L) : avec ${formatEuro(derived.total)} ça ferait environ ${(derived.total / Math.max(derived.ppl, 0.01)).toFixed(1)} L.`
+      );
+      return;
+    }
     if (hasOdo && !odometer) {
       notify('Erreur', 'Kilométrage compteur requis.');
       return;
@@ -227,15 +240,17 @@ export default function AddFillUpScreen() {
         isFull,
       });
 
-      await adaptVehicleConsumption(activeVehicle.id);
+      const adapted = await adaptVehicleConsumption(activeVehicle.id);
       await refreshBudgets(activeVehicle.id);
       await refresh();
-      notify(
-        'Plein enregistré',
+      let msg =
         `${derived.liters.toFixed(2)} L · ${formatEuro(derived.total)}` +
-          (station ? ` · ${station.name}` : '') +
-          (params.fromTrip === '1' ? ' — reprenez le trajet quand vous voulez.' : '')
-      );
+        (station ? ` · ${station.name}` : '') +
+        (params.fromTrip === '1' ? ' — reprenez le trajet quand vous voulez.' : '');
+      if (adapted && adapted.next !== adapted.previous) {
+        msg += `\nConso adaptée : ${adapted.previous.toFixed(1)} → ${adapted.next.toFixed(1)} L/100 (mesurée ~${adapted.measured.toFixed(1)}, ${adapted.samples} mesure${adapted.samples > 1 ? 's' : ''}).`;
+      }
+      notify('Plein enregistré', msg);
       router.back();
     } catch (e) {
       notify('Erreur', e instanceof Error ? e.message : 'Impossible d’enregistrer le plein.');

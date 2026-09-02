@@ -38,6 +38,8 @@ function isManagerEmail(email) {
   if (!e) return false;
   if (e === ADMIN_EMAIL) return true;
   if (PERSONAL_MAIL && e === PERSONAL_MAIL) return true;
+  // Fallback si PERSONAL_MAIL n’est pas injecté en prod
+  if (e === 'paveldelhomme@gmail.com') return true;
   return false;
 }
 
@@ -106,6 +108,15 @@ db.exec(`
     revoked_at TEXT,
     last_used_at TEXT
   );
+  CREATE TABLE IF NOT EXISTS password_resets (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    used_at TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
 
 try {
@@ -156,7 +167,12 @@ function createSession(user, meta = {}) {
     refreshToken,
     expiresIn: ACCESS_TTL,
     refreshExpiresAt,
-    user: { id: user.id, email: user.email, name: user.name },
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      isManager: isManagerEmail(user.email),
+    },
   };
 }
 
@@ -566,19 +582,99 @@ function finalizeEmailVerification(req, res, raw, platform) {
 
 app.get('/health', (_req, res) => res.type('text').send('ok'));
 
+/** Taux FX via proxy (évite CORS web : frankfurter.app → 301 sans ACAO). */
+const FX_FALLBACK = {
+  EUR: 1,
+  GBP: 0.86,
+  CHF: 0.94,
+  NOK: 11.5,
+  SEK: 11.2,
+  DKK: 7.46,
+  ISK: 150,
+  PLN: 4.3,
+  CZK: 25.2,
+  HUF: 395,
+  RON: 4.97,
+  BGN: 1.96,
+  HRK: 7.53,
+  TRY: 36,
+  UAH: 43,
+  RSD: 117,
+  BAM: 1.96,
+  ALL: 100,
+  MKD: 61.5,
+  MDL: 19.5,
+};
+let fxCache = { rates: { ...FX_FALLBACK }, date: null, fetchedAt: 0 };
+
+app.get('/api/fx/latest', async (_req, res) => {
+  try {
+    const maxAgeMs = 6 * 60 * 60 * 1000;
+    if (fxCache.fetchedAt && Date.now() - fxCache.fetchedAt < maxAgeMs && fxCache.date) {
+      res.set('Cache-Control', 'public, max-age=3600');
+      return res.json({
+        base: 'EUR',
+        date: fxCache.date,
+        rates: fxCache.rates,
+        source: 'cache',
+      });
+    }
+    const upstream = await fetch('https://api.frankfurter.dev/v1/latest?base=EUR', {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
+    const data = await upstream.json();
+    const rates = { ...FX_FALLBACK, ...(data.rates || {}), EUR: 1 };
+    fxCache = {
+      rates,
+      date: data.date || new Date().toISOString().slice(0, 10),
+      fetchedAt: Date.now(),
+    };
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.json({
+      base: 'EUR',
+      date: fxCache.date,
+      rates: fxCache.rates,
+      source: 'frankfurter',
+    });
+  } catch (e) {
+    console.warn('[fx]', e.message || e);
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json({
+      base: 'EUR',
+      date: fxCache.date || new Date().toISOString().slice(0, 10),
+      rates: fxCache.rates,
+      source: 'fallback',
+      stale: true,
+    });
+  }
+});
+
 app.get('/api/version', (_req, res) => {
   const latest = db.prepare('SELECT * FROM app_releases ORDER BY id DESC LIMIT 1').get();
   const version = latest?.version || APP_VERSION;
-  const apkUrl = latest?.apk_filename
+  const apkAvailable = Boolean(latest?.apk_filename);
+  const apkUrl = apkAvailable
     ? `${PUBLIC_URL}/api/download/${latest.apk_filename}`
-    : `${PUBLIC_URL}/download`;
+    : null;
   res.json({
     version,
     minVersion: MIN_VERSION,
     forceUpdate: Boolean(latest?.force_update),
     apkUrl,
-    releaseNotes: latest?.release_notes || '',
+    apkAvailable,
+    webUrl: PUBLIC_URL,
+    /** Hub multi-plateformes (Android APK + iPhone PWA + web) */
     downloadPage: `${PUBLIC_URL}/download`,
+    iosInstallUrl: `${PUBLIC_URL}/download#ios`,
+    releaseNotes: latest?.release_notes || '',
+    channels: {
+      android: apkAvailable,
+      web: true,
+      iosPwa: true,
+      iosAppStore: false,
+    },
   });
 });
 
@@ -632,11 +728,18 @@ app.post('/api/auth/register', authLimiter, registerLimiter, async (req, res) =>
     // Log serveur uniquement (jamais exposé au client si mail OK) — utile pour ops
     console.log(`[mail] verification ${mail.ok ? 'sent' : 'fallback'} to=${cleanEmail}`);
 
+    // Prévenir les admins (dont PERSONAL_MAIL) qu’un compte attend validation
+    void notifyManagersPendingRegistration({
+      email: cleanEmail,
+      name: cleanName,
+      platform: plat,
+    });
+
     res.status(201).json({
       ok: true,
       pending: true,
       message:
-        'Un email de vérification a été envoyé. Cliquez le lien pour activer votre compte (valide 24 h).',
+        'Un email de vérification a été envoyé. Cliquez le lien pour activer votre compte (valide 24 h). Un administrateur a aussi été prévenu.',
       ...(mail.ok
         ? {}
         : { debugVerifyUrl: mail.verifyUrl }),
@@ -841,7 +944,144 @@ app.get('/api/auth/me', auth, (req, res) => {
     .prepare('SELECT id, email, name, created_at, email_verified FROM users WHERE id = ?')
     .get(req.user.sub);
   if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
-  res.json({ user });
+  const manager = isManagerEmail(user.email);
+  let pendingRegistrationsCount = 0;
+  let pendingRegistrations = [];
+  if (manager) {
+    pendingRegistrations = db
+      .prepare(
+        'SELECT email, name, platform, expires_at, created_at FROM pending_registrations ORDER BY created_at DESC LIMIT 20'
+      )
+      .all();
+    pendingRegistrationsCount = pendingRegistrations.length;
+  }
+  res.json({
+    user: {
+      ...user,
+      isManager: manager,
+    },
+    pendingRegistrationsCount,
+    pendingRegistrations,
+  });
+});
+
+/** Changer le mot de passe (connecté) */
+app.post('/api/auth/change-password', auth, authLimiter, (req, res) => {
+  const current = String(req.body?.currentPassword || '');
+  const next = String(req.body?.newPassword || '');
+  if (!current || !next) {
+    return res.status(400).json({ error: 'Mot de passe actuel et nouveau requis' });
+  }
+  if (next.length < 8 || next.length > 128) {
+    return res.status(400).json({ error: 'Nouveau mot de passe : 8 à 128 caractères' });
+  }
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.sub);
+  if (!user || !bcrypt.compareSync(current, user.password_hash)) {
+    return res.status(401).json({ error: 'Mot de passe actuel incorrect' });
+  }
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(
+    bcrypt.hashSync(next, 12),
+    user.id
+  );
+  revokeRefreshFamily(user.id);
+  res.json({ ok: true, message: 'Mot de passe mis à jour. Reconnectez-vous sur vos autres appareils.' });
+});
+
+/** Demande de réinitialisation (lien email) — réponse anti-énumération */
+app.post('/api/auth/forgot-password', authLimiter, registerLimiter, async (req, res) => {
+  try {
+    const email = String(req.body?.email || '')
+      .toLowerCase()
+      .trim();
+    const generic =
+      'Si un compte existe pour cet email, un lien de réinitialisation a été envoyé.';
+    if (!email || !isValidEmail(email)) {
+      return res.status(400).json({ error: 'Email invalide' });
+    }
+    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    if (!user) {
+      return res.json({ ok: true, message: generic });
+    }
+    db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(user.id);
+    const raw = crypto.randomBytes(32).toString('hex');
+    const id = uuid();
+    const expires = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    db.prepare(
+      `INSERT INTO password_resets (id, user_id, token_hash, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(id, user.id, hashToken(raw), expires, new Date().toISOString());
+
+    const resetUrl = `${PUBLIC_URL}/reset-password?token=${encodeURIComponent(raw)}`;
+    const transport = mailer();
+    const from = process.env.SMTP_FROM || 'Gasoil Tracking <noreply@maily.ovh>';
+    if (transport) {
+      await transport.sendMail({
+        from,
+        to: user.email,
+        subject: 'Gasoil Tracking — réinitialiser le mot de passe',
+        html: `<div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto">
+          <h2>Réinitialisation</h2>
+          <p>Bonjour ${String(user.name).replace(/[<>&]/g, '')},</p>
+          <p>Cliquez pour choisir un nouveau mot de passe (lien valable 2 h) :</p>
+          <p style="margin:24px 0"><a href="${resetUrl}" style="background:#e94560;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:600">Réinitialiser</a></p>
+          <p style="color:#666;font-size:12px">${resetUrl}</p>
+        </div>`,
+        text: `Réinitialiser : ${resetUrl}\n`,
+      });
+    } else {
+      console.warn('[mail] forgot-password', resetUrl);
+    }
+    res.json({ ok: true, message: generic, mailed: Boolean(transport) });
+  } catch (e) {
+    console.error('forgot-password', e);
+    res.status(500).json({ error: 'Échec' });
+  }
+});
+
+app.post('/api/auth/reset-password', authLimiter, (req, res) => {
+  const raw = String(req.body?.token || '');
+  const next = String(req.body?.newPassword || '');
+  if (!raw || next.length < 8 || next.length > 128) {
+    return res.status(400).json({ error: 'Token et nouveau mot de passe (8+ car.) requis' });
+  }
+  const row = db
+    .prepare('SELECT * FROM password_resets WHERE token_hash = ?')
+    .get(hashToken(raw));
+  if (!row || row.used_at) {
+    return res.status(400).json({ error: 'Lien invalide ou déjà utilisé' });
+  }
+  if (new Date(row.expires_at).getTime() < Date.now()) {
+    return res.status(400).json({ error: 'Lien expiré — redemandez une réinitialisation' });
+  }
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(
+    bcrypt.hashSync(next, 12),
+    row.user_id
+  );
+  db.prepare('UPDATE password_resets SET used_at = ? WHERE id = ?').run(
+    new Date().toISOString(),
+    row.id
+  );
+  revokeRefreshFamily(row.user_id);
+  res.json({ ok: true, message: 'Mot de passe mis à jour. Vous pouvez vous connecter.' });
+});
+
+/** Suppression de compte (RGPD) — efface sync + sessions */
+app.post('/api/auth/delete-account', auth, authLimiter, (req, res) => {
+  const password = String(req.body?.password || '');
+  const confirm = String(req.body?.confirm || '');
+  if (confirm !== 'SUPPRIMER') {
+    return res.status(400).json({ error: 'Saisissez SUPPRIMER pour confirmer' });
+  }
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.sub);
+  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+    return res.status(401).json({ error: 'Mot de passe incorrect' });
+  }
+  const uid = user.id;
+  db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(uid);
+  db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(uid);
+  db.prepare('DELETE FROM sync_data WHERE user_id = ?').run(uid);
+  db.prepare('DELETE FROM users WHERE id = ?').run(uid);
+  res.json({ ok: true, message: 'Compte et données cloud supprimés.' });
 });
 
 app.get('/api/sync', auth, syncLimiter, (req, res) => {
@@ -938,33 +1178,113 @@ function createDownloadLink({ createdBy, label, days = 14, maxUses = 50 }) {
   return { id, url, token: raw, expiresAt: expires, maxUses };
 }
 
-async function sendDownloadInviteEmail({ to, url, fromName }) {
+async function sendDownloadInviteEmail({ to, url, fromName, inviteCode, webUrl, downloadPage }) {
   const transport = mailer();
   const from = process.env.SMTP_FROM || 'Gasoil Tracking <noreply@maily.ovh>';
+  const code = String(inviteCode || INVITE_CODE || '').trim();
+  const web = String(webUrl || PUBLIC_URL).replace(/\/$/, '');
+  const hub = String(downloadPage || `${PUBLIC_URL}/download`);
+  const hubWithCode = code ? `${hub}?code=${encodeURIComponent(code)}` : hub;
+  const codeBlock = code
+    ? `<p style="margin:24px 0;padding:14px 16px;background:#0f0f1a;border-radius:10px;border:1px solid #334155">
+        <strong style="display:block;margin-bottom:6px;color:#f1f5f9">Code d’invitation (parrainage)</strong>
+        <span style="font-size:22px;letter-spacing:1px;font-weight:700;color:#e94560">${code.replace(/[<>&]/g, '')}</span>
+        <span style="display:block;margin-top:8px;color:#94a3b8;font-size:12px">À saisir lors de la création du compte dans l’app ou sur le web.</span>
+      </p>`
+    : '';
   const html = `
-    <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto">
-      <h2>Télécharger Gasoil Tracking</h2>
-      <p>${String(fromName || 'Un administrateur').replace(/[<>&]/g, '')} vous invite à installer l’application Android.</p>
-      <p style="margin:28px 0">
-        <a href="${url}" style="background:#e94560;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">
-          Télécharger l’APK
+    <div style="font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;color:#0f172a">
+      <h2>Gasoil Tracking — invitation</h2>
+      <p>${String(fromName || 'Un administrateur').replace(/[<>&]/g, '')} vous invite à utiliser Gasoil Tracking.</p>
+      ${codeBlock}
+
+      <h3 style="margin:28px 0 10px;font-size:16px">📱 iPhone / iPad (recommandé)</h3>
+      <p style="margin:0 0 10px;color:#475569;font-size:14px">Pas d’App Store nécessaire : ouvrez l’app web, puis <strong>Partager → Sur l’écran d’accueil</strong> dans Safari.</p>
+      <p style="margin:0 0 8px">
+        <a href="${web}" style="background:#2563eb;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block">
+          Ouvrir l’app (iPhone / web)
         </a>
       </p>
-      <p style="color:#666;font-size:13px">Lien sécurisé à usage limité. Sur Android : ouvrez le fichier APK téléchargé et autorisez l’installation.</p>
-      <p style="color:#666;font-size:12px"><a href="${url}">${url}</a></p>
+      <p style="margin:0 0 16px;font-size:12px;color:#64748b"><a href="${hubWithCode}#ios">${hubWithCode}#ios</a></p>
+
+      <h3 style="margin:24px 0 10px;font-size:16px">🤖 Android</h3>
+      <p style="margin:0 0 10px;color:#475569;font-size:14px">Téléchargez l’APK, ouvrez le fichier, autorisez l’installation.</p>
+      <p style="margin:0 0 8px">
+        <a href="${url}" style="background:#e94560;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block">
+          Télécharger l’APK Android
+        </a>
+      </p>
+      <p style="margin:0 0 16px;font-size:12px;color:#64748b"><a href="${url}">${url}</a></p>
+
+      <h3 style="margin:24px 0 10px;font-size:16px">💻 Navigateur</h3>
+      <p style="margin:0 0 8px">
+        <a href="${web}" style="background:#0f172a;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block">
+          Version web
+        </a>
+      </p>
+
+      <p style="color:#666;font-size:13px;margin-top:28px">Page d’installation (tous supports) : <a href="${hubWithCode}">${hubWithCode}</a></p>
     </div>`;
+  const textParts = [
+    `${String(fromName || 'Un administrateur')} vous invite à Gasoil Tracking.`,
+    code ? `Code d’invitation : ${code}` : '',
+    `iPhone / web : ${web}`,
+    `Guide iPhone (écran d’accueil) : ${hubWithCode}#ios`,
+    `Android APK : ${url}`,
+    `Page d’installation : ${hubWithCode}`,
+  ].filter(Boolean);
   if (!transport) {
-    console.warn('[mail] download link', url);
-    return { ok: false, url };
+    console.warn('[mail] download+invite', url, web, code ? `code=${code}` : '');
+    return { ok: false, url, webUrl: web, downloadPage: hubWithCode, inviteCode: code || null };
   }
   await transport.sendMail({
     from,
     to,
-    subject: 'Gasoil Tracking — lien de téléchargement',
+    subject: code
+      ? 'Gasoil Tracking — iPhone / Android / web + code'
+      : 'Gasoil Tracking — installer (iPhone, Android, web)',
     html,
-    text: `Téléchargez Gasoil Tracking : ${url}\n`,
+    text: textParts.join('\n\n') + '\n',
   });
-  return { ok: true, url };
+  return { ok: true, url, webUrl: web, downloadPage: hubWithCode, inviteCode: code || null };
+}
+
+async function notifyManagersPendingRegistration({ email, name, platform }) {
+  const recipients = [
+    ...new Set(
+      [ADMIN_EMAIL, PERSONAL_MAIL, 'paveldelhomme@gmail.com'].filter(Boolean).map((e) =>
+        String(e).toLowerCase().trim()
+      )
+    ),
+  ];
+  if (!recipients.length) return;
+  const transport = mailer();
+  const from = process.env.SMTP_FROM || 'Gasoil Tracking <noreply@maily.ovh>';
+  const subject = `Gasoil Tracking — compte à valider : ${email}`;
+  const html = `
+    <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto">
+      <h2>Nouveau compte en attente</h2>
+      <p><strong>${String(name).replace(/[<>&]/g, '')}</strong> (${String(email).replace(/[<>&]/g, '')})</p>
+      <p>Plateforme : ${String(platform || 'web')}</p>
+      <p>Validez depuis l’app (Administration) ou renvoyez l’email de vérification.</p>
+    </div>`;
+  if (!transport) {
+    console.warn('[mail] pending notify', email, '→', recipients.join(','));
+    return;
+  }
+  for (const to of recipients) {
+    try {
+      await transport.sendMail({
+        from,
+        to,
+        subject,
+        html,
+        text: `Compte à valider : ${name} <${email}> (${platform})\n`,
+      });
+    } catch (e) {
+      console.error('[mail] pending notify fail', to, e.message);
+    }
+  }
 }
 
 app.get('/api/download/:file', (req, res) => {
@@ -1035,7 +1355,9 @@ app.get('/api/admin/overview', auth, requireManager, (_req, res) => {
     .prepare('SELECT id, email, name, email_verified, created_at FROM users ORDER BY created_at DESC')
     .all();
   const pending = db
-    .prepare('SELECT email, platform, expires_at, created_at FROM pending_registrations ORDER BY created_at DESC')
+    .prepare(
+      'SELECT id, email, name, platform, expires_at, created_at FROM pending_registrations ORDER BY created_at DESC'
+    )
     .all();
   const links = db
     .prepare(
@@ -1054,6 +1376,15 @@ app.get('/api/admin/overview', auth, requireManager, (_req, res) => {
     pendingCount: pending.length,
     apkVersion: apk?.version || APP_VERSION,
     apkAvailable: Boolean(apk),
+    webUrl: PUBLIC_URL,
+    downloadPage: `${PUBLIC_URL}/download`,
+    iosInstallUrl: `${PUBLIC_URL}/download#ios`,
+    channels: {
+      android: Boolean(apk),
+      web: true,
+      iosPwa: true,
+      iosAppStore: false,
+    },
     downloadLinks: links,
   });
 });
@@ -1075,7 +1406,7 @@ app.post('/api/admin/download-links', auth, requireManager, (req, res) => {
   res.status(201).json(link);
 });
 
-/** Envoyer le lien par email */
+/** Envoyer invitation multi-plateformes (iPhone/web + Android + code) */
 app.post('/api/admin/send-download-link', auth, requireManager, async (req, res) => {
   try {
     const email = String(req.body?.email || '')
@@ -1084,30 +1415,45 @@ app.post('/api/admin/send-download-link', auth, requireManager, async (req, res)
     if (!email || !isValidEmail(email)) {
       return res.status(400).json({ error: 'Email destinataire invalide' });
     }
-    if (!latestApkFile()) {
-      return res.status(404).json({ error: 'Aucune APK publiée' });
-    }
     const days = Math.min(90, Math.max(1, Number(req.body?.days) || 14));
     const maxUses = Math.min(100, Math.max(1, Number(req.body?.maxUses) || 10));
-    const link = createDownloadLink({
-      createdBy: req.adminUser.email,
-      label: `Envoyé à ${email}`,
-      days,
-      maxUses,
-    });
+    const apk = latestApkFile();
+    let linkUrl = `${PUBLIC_URL}/download`;
+    let expiresAt = null;
+    if (apk) {
+      const link = createDownloadLink({
+        createdBy: req.adminUser.email,
+        label: `Envoyé à ${email}`,
+        days,
+        maxUses,
+      });
+      linkUrl = link.url;
+      expiresAt = link.expiresAt;
+    }
     const mail = await sendDownloadInviteEmail({
       to: email,
-      url: link.url,
+      url: linkUrl,
       fromName: req.adminUser.name || req.adminUser.email,
+      inviteCode: INVITE_CODE,
+      webUrl: PUBLIC_URL,
+      downloadPage: `${PUBLIC_URL}/download`,
     });
+    const hub = mail.downloadPage || `${PUBLIC_URL}/download`;
     res.json({
       ok: true,
       mailed: mail.ok,
-      url: link.url,
-      expiresAt: link.expiresAt,
+      url: linkUrl,
+      webUrl: mail.webUrl || PUBLIC_URL,
+      downloadPage: hub,
+      iosInstallUrl: `${hub}#ios`,
+      inviteCode: mail.inviteCode || INVITE_CODE || null,
+      expiresAt,
+      apkIncluded: Boolean(apk),
       message: mail.ok
-        ? `Email envoyé à ${email}`
-        : 'SMTP indisponible — copiez le lien manuellement',
+        ? apk
+          ? `Email envoyé à ${email} (iPhone/web + APK Android + code)`
+          : `Email envoyé à ${email} (iPhone/web + code — APK pas encore publiée)`
+        : 'SMTP indisponible — copiez les liens et le code manuellement',
     });
   } catch (e) {
     console.error('send-download-link', e);
@@ -1158,6 +1504,57 @@ app.post('/api/admin/resend-verification', auth, requireManager, async (req, res
     console.error('resend-verification', e);
     res.status(500).json({ error: 'Échec renvoi' });
   }
+});
+
+/** Valider un compte en attente (sans attendre le clic email de l’utilisateur) */
+app.post('/api/admin/approve-pending', auth, requireManager, (req, res) => {
+  try {
+    const email = String(req.body?.email || '')
+      .toLowerCase()
+      .trim();
+    if (!email) return res.status(400).json({ error: 'email requis' });
+    const pending = db.prepare('SELECT * FROM pending_registrations WHERE email = ?').get(email);
+    if (!pending) {
+      return res.status(404).json({ error: 'Aucune inscription en attente pour cet email' });
+    }
+    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    if (existing) {
+      db.prepare('DELETE FROM pending_registrations WHERE email = ?').run(email);
+      return res.json({ ok: true, alreadyExists: true, message: 'Compte déjà actif' });
+    }
+    const userId = uuid();
+    const now = new Date().toISOString();
+    db.prepare(
+      'INSERT INTO users (id, email, password_hash, name, email_verified, created_at) VALUES (?, ?, ?, ?, 1, ?)'
+    ).run(userId, pending.email, pending.password_hash, pending.name, now);
+    db.prepare(
+      `INSERT INTO sync_data (user_id, payload, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(user_id) DO NOTHING`
+    ).run(
+      userId,
+      JSON.stringify({ vehicles: [], fillUps: [], budgets: [], trips: [] }),
+      now
+    );
+    db.prepare('DELETE FROM pending_registrations WHERE id = ?').run(pending.id);
+    res.json({
+      ok: true,
+      user: { id: userId, email: pending.email, name: pending.name },
+      message: `Compte validé : ${pending.email}`,
+    });
+  } catch (e) {
+    console.error('approve-pending', e);
+    res.status(500).json({ error: 'Échec validation' });
+  }
+});
+
+app.post('/api/admin/reject-pending', auth, requireManager, (req, res) => {
+  const email = String(req.body?.email || '')
+    .toLowerCase()
+    .trim();
+  if (!email) return res.status(400).json({ error: 'email requis' });
+  const r = db.prepare('DELETE FROM pending_registrations WHERE email = ?').run(email);
+  if (!r.changes) return res.status(404).json({ error: 'Aucune inscription en attente' });
+  res.json({ ok: true, message: `Inscription refusée / annulée : ${email}` });
 });
 
 app.post('/api/admin/releases', auth, requireAdmin, upload.single('apk'), (req, res) => {

@@ -58,6 +58,47 @@ export async function reverseGeocode(lat: number, lon: number): Promise<string |
   }
 }
 
+/** Géocodage direct : ville / adresse → coordonnées (Nominatim). */
+export async function forwardGeocode(
+  query: string
+): Promise<{ latitude: number; longitude: number; label: string } | null> {
+  const q = query.trim();
+  if (q.length < 2) return null;
+  try {
+    const url =
+      `https://nominatim.openstreetmap.org/search?format=jsonv2` +
+      `&q=${encodeURIComponent(q)}&limit=1&addressdetails=1&countrycodes=fr`;
+    const res = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'GasoilTracking/1.3 (personal fuel app)',
+      },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Array<{
+      lat?: string;
+      lon?: string;
+      display_name?: string;
+      name?: string;
+      address?: Record<string, string>;
+    }>;
+    const hit = data[0];
+    if (!hit?.lat || !hit?.lon) return null;
+    const a = hit.address || {};
+    const city = a.city || a.town || a.village || a.municipality || hit.name;
+    const label =
+      city ||
+      (hit.display_name ? hit.display_name.split(',').slice(0, 2).join(',').trim() : q);
+    return {
+      latitude: Number(hit.lat),
+      longitude: Number(hit.lon),
+      label,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Libellé lieu pour affichage trajet (évite « Départ » / « Arrivée » génériques). */
 export function tripPlaceLabel(
   name: string | undefined | null,

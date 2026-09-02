@@ -105,8 +105,11 @@ export async function performSafeApkUpdate(
   });
 }
 
-/** Ouvre la page / le lien de téléchargement (web ou fallback). */
+/** Ouvre la page / le lien de téléchargement (web, iOS PWA ou APK). */
 export async function openExternalDownload(info: AppVersionInfo) {
-  const url = info.apkUrl || info.downloadPage;
+  const url =
+    Platform.OS === 'ios'
+      ? info.iosInstallUrl || info.downloadPage || info.webUrl || info.apkUrl
+      : info.apkUrl || info.downloadPage || info.webUrl;
   if (url) await Linking.openURL(url);
 }

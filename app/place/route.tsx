@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Switch } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Pressable, Switch, ActivityIndicator } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
@@ -10,8 +10,15 @@ import {
   createRecurringRoute,
   getPlaces,
   getRecurringRoutes,
+  updatePlace,
   updateRecurringRoute,
 } from '@/lib/database';
+import {
+  buildSuggestedItineraries,
+  fetchDrivingDistanceKm,
+  resolvePlaceCoords,
+  type SuggestedItinerary,
+} from '@/lib/roadDistance';
 import { notify } from '@/lib/notify';
 import { toLocalYmd } from '@/lib/dates';
 import type { Place } from '@/types';
@@ -26,12 +33,17 @@ export default function RouteScreen() {
   const [fromId, setFromId] = useState<number | null>(null);
   const [toId, setToId] = useState<number | null>(null);
   const [name, setName] = useState('');
-  const [distanceKm, setDistanceKm] = useState('20');
+  const [distanceKm, setDistanceKm] = useState('');
   const [workDays, setWorkDays] = useState('5');
   const [onVacation, setOnVacation] = useState(false);
   const [vacationUntil, setVacationUntil] = useState(toLocalYmd(new Date()));
   const [loading, setLoading] = useState(false);
   const [ready, setReady] = useState(!isEdit);
+  const [distLoading, setDistLoading] = useState(false);
+  const [distHint, setDistHint] = useState('');
+  const [durationMin, setDurationMin] = useState<number | null>(null);
+
+  const suggestions = useMemo(() => buildSuggestedItineraries(places), [places]);
 
   useEffect(() => {
     (async () => {
@@ -64,15 +76,125 @@ export default function RouteScreen() {
     })();
   }, [editId, isEdit]);
 
+  const calcDistance = useCallback(
+    async (fId: number | null, tId: number | null, opts?: { silent?: boolean }) => {
+      if (!fId || !tId || fId === tId) return;
+      const from = places.find((p) => p.id === fId);
+      const to = places.find((p) => p.id === tId);
+      if (!from || !to) return;
+
+      setDistLoading(true);
+      setDistHint('');
+      setDurationMin(null);
+      try {
+        const [a, b] = await Promise.all([resolvePlaceCoords(from), resolvePlaceCoords(to)]);
+        if (!a || !b) {
+          const missing = !a ? from.name : to.name;
+          setDistHint(
+            `Impossible de localiser « ${missing} ». Ajoutez une adresse exacte au lieu (Budget → lieu).`
+          );
+          if (!opts?.silent) {
+            notify(
+              'Distance',
+              `Adresse manquante pour « ${missing} ». Modifiez le lieu avec une adresse complète.`
+            );
+          }
+          return;
+        }
+
+        // Mémorise les coords si le lieu n’en avait pas
+        if (from.latitude == null || from.longitude == null) {
+          await updatePlace(from.id, { latitude: a.latitude, longitude: a.longitude });
+        }
+        if (to.latitude == null || to.longitude == null) {
+          await updatePlace(to.id, { latitude: b.latitude, longitude: b.longitude });
+        }
+
+        const road = await fetchDrivingDistanceKm(a, b);
+        setDistanceKm(String(road.distanceKm));
+        setDurationMin(road.durationMinutes);
+        setDistHint(
+          road.source === 'osrm'
+            ? `Distance routière réelle (aller) · ~${road.durationMinutes ?? '?'} min`
+            : `Estimation route (~+30 % vs vol d’oiseau) — vérifiez si besoin`
+        );
+        if (!opts?.silent) {
+          notify(
+            'Distance aller',
+            `${road.distanceKm} km` +
+              (road.durationMinutes != null ? ` · ~${road.durationMinutes} min` : '')
+          );
+        }
+      } catch (e) {
+        setDistHint(e instanceof Error ? e.message : 'Calcul distance impossible');
+      } finally {
+        setDistLoading(false);
+      }
+    },
+    [places]
+  );
+
+  // Auto-calcul quand départ/arrivée changent (création ou édition)
+  useEffect(() => {
+    if (!ready || !fromId || !toId || fromId === toId) return;
+    // En édition, ne recalcule pas auto si une distance est déjà saisie (sauf si vide)
+    if (isEdit && distanceKm.trim()) return;
+    void calcDistance(fromId, toId, { silent: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seulement quand from/to prêts
+  }, [ready, fromId, toId]);
+
+  const applySuggestion = async (s: SuggestedItinerary) => {
+    setFromId(s.fromId);
+    setToId(s.toId);
+    setName(s.label);
+    setDistanceKm('');
+    await calcDistance(s.fromId, s.toId);
+  };
+
+  const onPickFrom = (id: number) => {
+    setFromId(id);
+    const from = places.find((p) => p.id === id);
+    const to = places.find((p) => p.id === toId);
+    if (from && to) setName(`${from.name} → ${to.name}`);
+  };
+
+  const onPickTo = (id: number) => {
+    setToId(id);
+    const from = places.find((p) => p.id === fromId);
+    const to = places.find((p) => p.id === id);
+    if (from && to) setName(`${from.name} → ${to.name}`);
+  };
+
   const save = async () => {
     if (!fromId || !toId) {
       notify('Erreur', 'Choisissez départ et arrivée (créez des lieux avant).');
       return;
     }
-    const km = parseFloat(distanceKm.replace(',', '.'));
+    if (fromId === toId) {
+      notify('Erreur', 'Départ et arrivée doivent être différents.');
+      return;
+    }
+    let km = parseFloat(distanceKm.replace(',', '.'));
+    if (!km || km <= 0) {
+      await calcDistance(fromId, toId);
+      km = parseFloat(distanceKm.replace(',', '.'));
+    }
+    // Relire après calc async — state peut être stale ; recalcul direct
+    if (!km || km <= 0) {
+      const from = places.find((p) => p.id === fromId);
+      const to = places.find((p) => p.id === toId);
+      if (from && to) {
+        const [a, b] = await Promise.all([resolvePlaceCoords(from), resolvePlaceCoords(to)]);
+        if (a && b) {
+          const road = await fetchDrivingDistanceKm(a, b);
+          km = road.distanceKm;
+          setDistanceKm(String(km));
+        }
+      }
+    }
     const days = parseFloat(workDays.replace(',', '.'));
     if (!km || km <= 0 || !days || days <= 0 || days > 7) {
-      notify('Erreur', 'Distance et jours travaillés / semaine (1–7) requis.');
+      notify('Erreur', 'Distance aller (km) et jours travaillés / semaine (1–7) requis.');
       return;
     }
     setLoading(true);
@@ -91,14 +213,14 @@ export default function RouteScreen() {
       };
       if (isEdit && editId) {
         await updateRecurringRoute(editId, payload);
-        notify('Trajet régulier', 'Modifié.');
+        notify('Trajet régulier', `Modifié · aller ${km} km.`);
       } else {
         await createRecurringRoute({
           ...payload,
           vehicleId: activeVehicle?.id ?? null,
           isActive: true,
         });
-        notify('Trajet régulier', 'Ajouté pour l’estimation budget.');
+        notify('Trajet régulier', `Ajouté · aller ${km} km.`);
       }
       router.back();
     } catch (e) {
@@ -161,19 +283,86 @@ export default function RouteScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <Text style={{ color: colors.textSecondary, marginBottom: 12, lineHeight: 18 }}>
-        {isEdit
-          ? 'Modifier le trajet régulier (jours, vacances, distance, lieux).'
-          : 'Trajet récurrent pour estimer le budget. Indiquez jours travaillés ; vacances = pause estimation.'}
+        Choisissez un itinéraire proposé : la distance aller est calculée sur la route réelle
+        (OpenStreetMap). Les lieux doivent avoir une adresse ou des coordonnées.
       </Text>
+
+      {suggestions.length > 0 && (
+        <View style={{ marginBottom: 16 }}>
+          <Text style={{ color: colors.text, fontWeight: '700', marginBottom: 8 }}>
+            Itinéraires suggérés
+          </Text>
+          {suggestions.slice(0, 8).map((s) => {
+            const active = fromId === s.fromId && toId === s.toId;
+            return (
+              <Pressable
+                key={s.key}
+                onPress={() => void applySuggestion(s)}
+                style={[
+                  styles.suggest,
+                  {
+                    backgroundColor: active ? colors.accent : colors.card,
+                    borderColor: active ? colors.accent : colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={{
+                    color: active ? '#fff' : colors.text,
+                    fontWeight: '700',
+                    fontSize: 14,
+                  }}
+                >
+                  {s.label}
+                </Text>
+                <Text
+                  style={{
+                    color: active ? 'rgba(255,255,255,0.85)' : colors.textSecondary,
+                    fontSize: 12,
+                    marginTop: 2,
+                  }}
+                >
+                  {s.subtitle} · tap = distance réelle
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+
       <Input label="Nom" value={name} onChangeText={setName} placeholder="Domicile → Travail" />
-      <PlacePicker label="Départ" value={fromId} onChange={setFromId} />
-      <PlacePicker label="Arrivée" value={toId} onChange={setToId} />
-      <Input
-        label="Distance aller (km)"
-        value={distanceKm}
-        onChangeText={setDistanceKm}
-        keyboardType="numeric"
+      <PlacePicker label="Départ" value={fromId} onChange={onPickFrom} />
+      <PlacePicker label="Arrivée" value={toId} onChange={onPickTo} />
+
+      <View style={styles.distRow}>
+        <View style={{ flex: 1 }}>
+          <Input
+            label="Distance aller (km)"
+            value={distanceKm}
+            onChangeText={setDistanceKm}
+            keyboardType="numeric"
+            placeholder="Calcul auto…"
+          />
+        </View>
+      </View>
+      <Button
+        title={distLoading ? 'Calcul…' : 'Recalculer distance réelle'}
+        variant="secondary"
+        loading={distLoading}
+        onPress={() => void calcDistance(fromId, toId)}
+        disabled={!fromId || !toId || distLoading}
+        style={{ marginBottom: 8 }}
       />
+      {(distHint || durationMin != null || distLoading) && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          {distLoading && <ActivityIndicator color={colors.accent} />}
+          <Text style={{ color: colors.textSecondary, fontSize: 12, flex: 1, lineHeight: 17 }}>
+            {distHint ||
+              (durationMin != null ? `Durée estimée ~${durationMin} min` : '')}
+          </Text>
+        </View>
+      )}
+
       <Input
         label="Jours travaillés / semaine"
         value={workDays}
@@ -211,4 +400,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     marginTop: 4,
   },
+  suggest: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 8,
+  },
+  distRow: { marginBottom: 0 },
 });

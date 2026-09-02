@@ -9,11 +9,11 @@ import {
   ScrollView,
 } from 'react-native';
 import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '@/context/AppContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
-import { Card } from '@/components/Card';
-import { Button } from '@/components/Button';
+import { SimpleFab } from '@/components/SpeedDialFab';
 import { getFillUps } from '@/lib/database';
 import {
   formatConsumption,
@@ -21,18 +21,49 @@ import {
   formatEuro,
   getMonthFillStats,
 } from '@/lib/calculations';
-import {
-  formatDateSlash,
-  formatMonthLabel,
-  monthKeyFromDate,
-} from '@/lib/dates';
+import { formatDateSlash, monthKeyFromDate } from '@/lib/dates';
 import type { FillUp, MonthFillStats } from '@/types';
 
-type ListRow =
-  | { type: 'month'; key: string; stats: MonthFillStats; label: string }
-  | { type: 'fill'; key: string; fill: FillUp };
+const PAGE = 25;
 
-const PAGE = 20;
+const MONTH_SHORT_FR = [
+  'Janv.',
+  'Févr.',
+  'Mars',
+  'Avr.',
+  'Mai',
+  'Juin',
+  'Juil.',
+  'Août',
+  'Sept.',
+  'Oct.',
+  'Nov.',
+  'Déc.',
+];
+
+function monthChipLabel(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  return `${MONTH_SHORT_FR[(m || 1) - 1] || ym} ${String(y).slice(2)}`;
+}
+
+function monthTitleFr(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  const names = [
+    'Janvier',
+    'Février',
+    'Mars',
+    'Avril',
+    'Mai',
+    'Juin',
+    'Juillet',
+    'Août',
+    'Septembre',
+    'Octobre',
+    'Novembre',
+    'Décembre',
+  ];
+  return `${names[(m || 1) - 1] || ym} ${y}`;
+}
 
 export default function FillUpsScreen() {
   const { activeVehicle, refresh } = useApp();
@@ -40,57 +71,43 @@ export default function FillUpsScreen() {
   const { formatPerLiter, locale } = useLocale();
   const [allFillUps, setAllFillUps] = useState<FillUp[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedYear, setSelectedYear] = useState<string | 'all'>('all');
   const [selectedMonth, setSelectedMonth] = useState<string | 'all'>('all');
   const [visibleCount, setVisibleCount] = useState(PAGE);
+  const [initialized, setInitialized] = useState(false);
 
   const loadFillUps = useCallback(async () => {
     const data = await getFillUps(activeVehicle?.id);
     setAllFillUps(data);
+    return data;
   }, [activeVehicle?.id]);
 
   useEffect(() => {
-    void loadFillUps();
-    setVisibleCount(PAGE);
-    setSelectedYear('all');
-    setSelectedMonth('all');
-  }, [loadFillUps]);
+    void (async () => {
+      const data = await loadFillUps();
+      setVisibleCount(PAGE);
+      if (!initialized && data.length > 0) {
+        setSelectedMonth(monthKeyFromDate(data[0].date));
+        setInitialized(true);
+      } else if (!initialized) {
+        setSelectedMonth('all');
+        setInitialized(true);
+      }
+    })();
+  }, [loadFillUps]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const years = useMemo(() => {
-    const set = new Set<string>();
-    for (const f of allFillUps) set.add(String(new Date(f.date).getFullYear()));
-    return [...set].sort((a, b) => Number(b) - Number(a));
+  const monthKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const f of allFillUps) keys.add(monthKeyFromDate(f.date));
+    return [...keys].sort((a, b) => b.localeCompare(a));
   }, [allFillUps]);
 
-  const months = useMemo(() => {
-    const keys = new Set<string>();
-    for (const f of allFillUps) {
-      const y = String(new Date(f.date).getFullYear());
-      if (selectedYear !== 'all' && y !== selectedYear) continue;
-      keys.add(monthKeyFromDate(f.date));
-    }
-    return [...keys]
-      .sort((a, b) => b.localeCompare(a))
-      .map((key) => ({
-        key,
-        label: formatMonthLabel(key),
-        stats: getMonthFillStats(allFillUps, key),
-      }));
-  }, [allFillUps, selectedYear]);
-
   const filtered = useMemo(() => {
-    return allFillUps.filter((f) => {
-      const y = String(new Date(f.date).getFullYear());
-      const mk = monthKeyFromDate(f.date);
-      if (selectedYear !== 'all' && y !== selectedYear) return false;
-      if (selectedMonth !== 'all' && mk !== selectedMonth) return false;
-      return true;
-    });
-  }, [allFillUps, selectedYear, selectedMonth]);
+    if (selectedMonth === 'all') return allFillUps;
+    return allFillUps.filter((f) => monthKeyFromDate(f.date) === selectedMonth);
+  }, [allFillUps, selectedMonth]);
 
-  const periodStats = useMemo(() => {
+  const periodStats = useMemo((): MonthFillStats => {
     if (selectedMonth !== 'all') return getMonthFillStats(allFillUps, selectedMonth);
-    const keys = new Set(filtered.map((f) => monthKeyFromDate(f.date)));
     let totalCost = 0;
     let totalLiters = 0;
     let totalDistanceKm = 0;
@@ -104,7 +121,7 @@ export default function FillUpsScreen() {
       }
     }
     return {
-      monthKey: selectedYear === 'all' ? 'all' : selectedYear,
+      monthKey: 'all',
       count: filtered.length,
       totalCost,
       totalLiters,
@@ -114,28 +131,10 @@ export default function FillUpsScreen() {
           ? consumptions.reduce((a, b) => a + b, 0) / consumptions.length
           : null,
       totalDistanceKm,
-    } satisfies MonthFillStats;
-  }, [allFillUps, filtered, selectedMonth, selectedYear]);
+    };
+  }, [allFillUps, filtered, selectedMonth]);
 
-  const rows = useMemo(() => {
-    const slice = filtered.slice(0, visibleCount);
-    const out: ListRow[] = [];
-    let lastMonth = '';
-    for (const fill of slice) {
-      const mk = monthKeyFromDate(fill.date);
-      if (mk !== lastMonth) {
-        lastMonth = mk;
-        out.push({
-          type: 'month',
-          key: `m-${mk}`,
-          label: formatMonthLabel(mk),
-          stats: getMonthFillStats(allFillUps, mk),
-        });
-      }
-      out.push({ type: 'fill', key: `f-${fill.id}`, fill });
-    }
-    return out;
-  }, [filtered, visibleCount, allFillUps]);
+  const visible = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -144,144 +143,95 @@ export default function FillUpsScreen() {
     setRefreshing(false);
   };
 
-  const chip = (
-    active: boolean,
-    label: string,
-    sub: string | undefined,
-    onPress: () => void
-  ) => (
-    <Pressable
-      onPress={onPress}
-      style={[
-        styles.chip,
-        {
-          backgroundColor: active ? colors.accent : colors.card,
-          borderColor: active ? colors.accent : colors.border,
-        },
-      ]}
-    >
-      <Text style={{ color: active ? '#fff' : colors.text, fontWeight: '700', fontSize: 13 }}>
-        {label}
-      </Text>
-      {!!sub && (
-        <Text
-          style={{
-            color: active ? 'rgba(255,255,255,0.85)' : colors.textSecondary,
-            fontSize: 11,
-            marginTop: 2,
-          }}
-        >
-          {sub}
-        </Text>
-      )}
-    </Pressable>
-  );
+  const pickMonth = (key: string | 'all') => {
+    setSelectedMonth(key);
+    setVisibleCount(PAGE);
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filters}
-        style={styles.filtersBar}
-      >
-        {years.length > 1 &&
-          chip(selectedYear === 'all', 'Toutes années', undefined, () => {
-            setSelectedYear('all');
-            setSelectedMonth('all');
-            setVisibleCount(PAGE);
-          })}
-        {years.map((y) =>
-          chip(selectedYear === y, y, undefined, () => {
-            setSelectedYear(y);
-            setSelectedMonth('all');
-            setVisibleCount(PAGE);
-          })
-        )}
-      </ScrollView>
-
-      {months.length > 0 && (
+      {monthKeys.length > 0 && (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filters}
-          style={styles.filtersBar}
+          style={styles.chipsScroll}
+          contentContainerStyle={styles.chipsRow}
         >
-          {chip(selectedMonth === 'all', 'Tous mois', `${filtered.length}`, () => {
-            setSelectedMonth('all');
-            setVisibleCount(PAGE);
-          })}
-          {months.map((m) => {
-            const short = m.label.replace(/\s+\d{4}$/, '');
-            return chip(
-              selectedMonth === m.key,
-              short,
-              formatEuro(m.stats.totalCost),
-              () => {
-                setSelectedMonth(m.key);
-                setVisibleCount(PAGE);
-              }
+          <Pressable
+            onPress={() => pickMonth('all')}
+            style={[
+              styles.chip,
+              {
+                backgroundColor: selectedMonth === 'all' ? colors.accent : colors.card,
+                borderColor: selectedMonth === 'all' ? colors.accent : colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={{
+                color: selectedMonth === 'all' ? '#fff' : colors.text,
+                fontWeight: '800',
+                fontSize: 15,
+              }}
+            >
+              Tout
+            </Text>
+          </Pressable>
+          {monthKeys.map((key) => {
+            const active = selectedMonth === key;
+            return (
+              <Pressable
+                key={key}
+                onPress={() => pickMonth(key)}
+                style={[
+                  styles.chip,
+                  {
+                    backgroundColor: active ? colors.accent : colors.card,
+                    borderColor: active ? colors.accent : colors.border,
+                  },
+                ]}
+              >
+                <Text style={{ color: active ? '#fff' : colors.text, fontWeight: '800', fontSize: 15 }}>
+                  {monthChipLabel(key)}
+                </Text>
+              </Pressable>
             );
           })}
         </ScrollView>
       )}
 
       {periodStats.count > 0 && (
-        <Card style={styles.summary}>
+        <View style={[styles.summary, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.summaryTitle, { color: colors.text }]}>
-            {selectedMonth !== 'all'
-              ? formatMonthLabel(selectedMonth)
-              : selectedYear !== 'all'
-                ? `Année ${selectedYear}`
-                : 'Tous les pleins'}
+            {selectedMonth !== 'all' ? monthTitleFr(selectedMonth) : 'Tous les pleins'}
           </Text>
-          <View style={styles.summaryGrid}>
-            <View style={styles.summaryCell}>
-              <Text style={[styles.summaryValue, { color: colors.accent }]}>
-                {formatEuro(periodStats.totalCost)}
-              </Text>
-              <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>
-                Dépensé · {periodStats.count} plein{periodStats.count > 1 ? 's' : ''}
-              </Text>
-            </View>
-            <View style={styles.summaryCell}>
-              <Text style={[styles.summaryValue, { color: colors.text }]}>
-                {periodStats.totalLiters.toFixed(1)} L
-              </Text>
-              <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>
-                Volume
-              </Text>
-            </View>
-            <View style={styles.summaryCell}>
-              <Text style={[styles.summaryValue, { color: colors.text }]}>
-                {periodStats.avgPricePerLiter > 0
-                  ? formatPerLiter(periodStats.avgPricePerLiter)
-                  : '—'}
-              </Text>
-              <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>
-                Prix moyen
-              </Text>
-            </View>
-            <View style={styles.summaryCell}>
-              <Text style={[styles.summaryValue, { color: colors.text }]}>
-                {periodStats.avgConsumption != null && activeVehicle
-                  ? formatConsumption(periodStats.avgConsumption, activeVehicle.fuelType)
-                  : periodStats.totalDistanceKm > 0
-                    ? formatDistance(periodStats.totalDistanceKm)
-                    : '—'}
-              </Text>
-              <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>
-                {periodStats.avgConsumption != null ? 'Conso. moy.' : 'Km saisis'}
-              </Text>
-            </View>
-          </View>
-        </Card>
+          <Text style={[styles.summaryHero, { color: colors.accent }]}>
+            {formatEuro(periodStats.totalCost)}
+          </Text>
+          <Text style={[styles.summarySub, { color: colors.textSecondary }]}>
+            {periodStats.count} plein{periodStats.count > 1 ? 's' : ''}
+            {' · '}
+            {periodStats.totalLiters.toFixed(1)} L
+            {periodStats.avgPricePerLiter > 0
+              ? ` · moy. ${formatPerLiter(periodStats.avgPricePerLiter)}`
+              : ''}
+          </Text>
+          {(periodStats.avgConsumption != null || periodStats.totalDistanceKm > 0) && (
+            <Text style={[styles.summarySub, { color: colors.textSecondary, marginTop: 4 }]}>
+              {periodStats.avgConsumption != null && activeVehicle
+                ? `Conso ${formatConsumption(periodStats.avgConsumption, activeVehicle.fuelType)}`
+                : ''}
+              {periodStats.avgConsumption != null && periodStats.totalDistanceKm > 0 ? ' · ' : ''}
+              {periodStats.totalDistanceKm > 0 ? formatDistance(periodStats.totalDistanceKm) : ''}
+            </Text>
+          )}
+        </View>
       )}
 
       <FlatList
         style={styles.listFlex}
-        data={rows}
-        keyExtractor={(item) => item.key}
+        data={visible}
+        keyExtractor={(item) => String(item.id)}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         onEndReached={() => {
@@ -291,141 +241,142 @@ export default function FillUpsScreen() {
         }}
         onEndReachedThreshold={0.4}
         ListEmptyComponent={
-          <Card style={styles.empty}>
+          <View style={styles.empty}>
+            <Ionicons name="water-outline" size={40} color={colors.textSecondary} />
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
               {activeVehicle
                 ? 'Aucun plein pour cette période'
                 : 'Sélectionnez un véhicule pour voir les pleins'}
             </Text>
-          </Card>
+          </View>
         }
-        renderItem={({ item }) => {
-          if (item.type === 'month') {
-            if (selectedMonth !== 'all') return null;
-            return (
-              <View style={styles.monthHead}>
-                <Text style={[styles.monthTitle, { color: colors.text }]}>{item.label}</Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '600' }}>
-                  {formatEuro(item.stats.totalCost)}
+        renderItem={({ item: fill }) => (
+          <Pressable
+            onPress={() => router.push(`/fillup/${fill.id}` as never)}
+            style={({ pressed }) => [
+              styles.fillCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                opacity: pressed ? 0.88 : 1,
+              },
+            ]}
+          >
+            <View style={styles.fillHead}>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={[styles.fillDate, { color: colors.text }]}>
+                  {formatDateSlash(fill.date)}
                 </Text>
-              </View>
-            );
-          }
-          const fill = item.fill;
-          return (
-            <View
-              style={[
-                styles.fillRow,
-                { backgroundColor: colors.card, borderColor: colors.border },
-              ]}
-            >
-              <View style={styles.fillTop}>
-                <View>
-                  <Text style={[styles.fillDate, { color: colors.text }]}>
-                    {formatDateSlash(fill.date)}
-                  </Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-                    {fill.isFull ? 'Plein complet' : 'Plein partiel'}
+                <View
+                  style={[
+                    styles.badge,
+                    {
+                      backgroundColor: fill.isFull ? colors.accent + '22' : colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      color: fill.isFull ? colors.accent : colors.textSecondary,
+                      fontSize: 12,
+                      fontWeight: '700',
+                    }}
+                  >
+                    {fill.isFull ? 'Complet' : 'Partiel'}
                   </Text>
                 </View>
-                <Text style={[styles.fillCost, { color: colors.accent }]}>
-                  {formatEuro(fill.totalCost)}
-                </Text>
               </View>
-              <View style={[styles.fillMeta, { borderTopColor: colors.border }]}>
-                <Text style={{ color: colors.text, fontWeight: '600' }}>
-                  {fill.liters.toFixed(2)} L
-                </Text>
-                <Text style={{ color: colors.textSecondary }}>·</Text>
-                <Text style={{ color: colors.textSecondary }}>
-                  {formatPerLiter(fill.pricePerLiter)}
-                </Text>
-                <Text style={{ color: colors.textSecondary }}>·</Text>
-                <Text style={{ color: colors.textSecondary }}>
-                  {fill.odometer != null
-                    ? `${fill.odometer.toLocaleString(locale)} km`
-                    : fill.distanceSinceLastKm != null
-                      ? `+${fill.distanceSinceLastKm.toFixed(0)} km`
-                      : 'km N/D'}
-                </Text>
-              </View>
-              {!!fill.note && (
-                <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 8 }}>
-                  {fill.note}
-                </Text>
-              )}
+              <Text style={[styles.fillCost, { color: colors.accent }]}>
+                {formatEuro(fill.totalCost)}
+              </Text>
             </View>
-          );
-        }}
+
+            <Text style={[styles.fillLine, { color: colors.text }]}>
+              {fill.liters.toFixed(2)} L
+              <Text style={{ color: colors.textSecondary }}> · </Text>
+              {formatPerLiter(fill.pricePerLiter)}
+            </Text>
+
+            <View style={styles.fillFoot}>
+              <Text style={{ color: colors.textSecondary, fontSize: 13, flex: 1 }} numberOfLines={1}>
+                {fill.odometer != null
+                  ? `Compteur ${Math.round(fill.odometer).toLocaleString(locale)} km`
+                  : fill.distanceSinceLastKm != null
+                    ? `+${fill.distanceSinceLastKm.toFixed(0)} km depuis dernier`
+                    : fill.note || ' '}
+                {fill.note && fill.odometer != null ? ` · ${fill.note}` : ''}
+              </Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+            </View>
+          </Pressable>
+        )}
       />
 
-      <View style={[styles.footer, { backgroundColor: colors.background }]}>
-        <Button
-          title="Nouveau plein"
-          onPress={() => router.push('/fillup/add')}
-          disabled={!activeVehicle}
-        />
-      </View>
+      <SimpleFab
+        label="Nouveau plein"
+        icon="gas-pump"
+        disabled={!activeVehicle}
+        onPress={() => router.push('/fillup/add')}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingBottom: 88 },
-  filtersBar: { maxHeight: 56, flexGrow: 0 },
-  filters: { paddingHorizontal: 12, paddingVertical: 8, gap: 8, alignItems: 'center' },
+  container: { flex: 1 },
+  chipsScroll: { flexGrow: 0, maxHeight: 56 },
+  chipsRow: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 8,
+    alignItems: 'center',
+  },
   chip: {
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    minWidth: 72,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
   },
-  summary: { marginHorizontal: 12, marginBottom: 4, paddingVertical: 12 },
-  summaryTitle: { fontSize: 15, fontWeight: '800', marginBottom: 10 },
-  summaryGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-  summaryCell: { width: '50%', paddingVertical: 6, paddingRight: 8 },
-  summaryValue: { fontSize: 16, fontWeight: '700' },
-  summaryLabel: { fontSize: 11, marginTop: 2 },
-  listFlex: { flex: 1 },
-  list: { padding: 12, paddingBottom: 24 },
-  empty: { alignItems: 'center', padding: 32 },
-  emptyText: { fontSize: 15, textAlign: 'center' },
-  monthHead: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 12,
+  summary: {
+    marginHorizontal: 14,
     marginBottom: 8,
-  },
-  monthTitle: { fontSize: 16, fontWeight: '800' },
-  fillRow: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 16,
     borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
+  },
+  summaryTitle: { fontSize: 14, fontWeight: '700', marginBottom: 4 },
+  summaryHero: { fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
+  summarySub: { fontSize: 14, marginTop: 4, lineHeight: 20 },
+  listFlex: { flex: 1 },
+  list: { paddingHorizontal: 14, paddingTop: 4, paddingBottom: 120 },
+  empty: { alignItems: 'center', padding: 40, gap: 12 },
+  emptyText: { fontSize: 15, textAlign: 'center', lineHeight: 22 },
+  fillCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 12,
+  },
+  fillHead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
     marginBottom: 10,
   },
-  fillTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+  fillDate: { fontSize: 18, fontWeight: '800', marginBottom: 6 },
+  badge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
-  fillDate: { fontSize: 16, fontWeight: '700' },
-  fillCost: { fontSize: 18, fontWeight: '800' },
-  fillMeta: {
+  fillCost: { fontSize: 24, fontWeight: '800', letterSpacing: -0.3 },
+  fillLine: { fontSize: 17, fontWeight: '700', marginBottom: 10 },
+  fillFoot: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     alignItems: 'center',
     gap: 6,
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  footer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 16,
+    paddingTop: 2,
   },
 });

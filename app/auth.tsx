@@ -14,16 +14,14 @@ import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
-import { API_URL } from '@/lib/api';
+import { API_URL, forgotPassword } from '@/lib/api';
 
 export default function AuthScreen() {
   const { login, register } = useAuth();
   const { refresh } = useApp();
   const { colors } = useTheme();
   const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState(
-    process.env.EXPO_PUBLIC_PERSONAL_MAIL || ''
-  );
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [name, setName] = useState('');
@@ -87,7 +85,7 @@ export default function AuthScreen() {
         <Text style={[styles.sub, { color: colors.textSecondary }]}>
           {mode === 'login'
             ? `Connexion cloud (sync). Serveur : ${API_URL}`
-            : 'Code d’invitation requis (fourni par l’admin). Confirmez le mot de passe deux fois. Un email activera le compte — pas admin.'}
+            : 'Compte utilisateur standard (pas admin). Code d’invitation requis. Un email de validation sera envoyé ; un gestionnaire peut aussi valider depuis Administration.'}
         </Text>
         {mode === 'register' && (
           <>
@@ -142,8 +140,31 @@ export default function AuthScreen() {
           }}
           style={{ marginTop: 12 }}
         />
+        {mode === 'login' && (
+          <Button
+            title="Mot de passe oublié"
+            variant="outline"
+            onPress={async () => {
+              if (!email.trim()) {
+                setError('Indiquez votre email puis réessayez.');
+                return;
+              }
+              setLoading(true);
+              setError('');
+              try {
+                const r = await forgotPassword(email.trim());
+                setInfo(r.message || 'Email envoyé si le compte existe.');
+              } catch (e) {
+                setError(e instanceof Error ? e.message : 'Échec');
+              } finally {
+                setLoading(false);
+              }
+            }}
+            style={{ marginTop: 12 }}
+          />
+        )}
         <Button
-          title="Télécharger la dernière APK"
+          title="Installer / télécharger (Android, iPhone, web)"
           variant="secondary"
           onPress={() => Linking.openURL(`${API_URL}/download`)}
           style={{ marginTop: 12 }}

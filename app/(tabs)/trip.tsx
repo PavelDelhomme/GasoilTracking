@@ -7,6 +7,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Pressable,
+  Platform,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -48,8 +49,10 @@ import { TripHistoryCard } from '@/components/TripHistoryCard';
 import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
 
 type TripTab = 'live' | 'history';
-/** free = suivi GPS arrière-plan sans destination ; nav = avec destination */
+/** free = suivi GPS sans destination ; nav = avec destination */
 type StartMode = 'free' | 'nav';
+
+type GeoCoords = { latitude: number; longitude: number };
 
 export default function TripScreen() {
   const { activeVehicle, activeTrip, refresh } = useApp();
@@ -61,10 +64,7 @@ export default function TripScreen() {
   const [isStarting, setIsStarting] = useState(false);
   const [history, setHistory] = useState<Trip[]>([]);
   const [pending, setPending] = useState<Trip[]>([]);
-  const [userLocation, setUserLocation] = useState<{
-    latitude: number;
-    longitude: number;
-  } | null>(null);
+  const [userLocation, setUserLocation] = useState<GeoCoords | null>(null);
   const [currentRegion, setCurrentRegion] = useState({
     latitude: 48.8566,
     longitude: 2.3522,
@@ -73,6 +73,7 @@ export default function TripScreen() {
   });
   const [liveOriginLabel, setLiveOriginLabel] = useState('');
   const [liveDestLabel, setLiveDestLabel] = useState('');
+  const isWeb = Platform.OS === 'web';
 
   const loadLists = useCallback(async () => {
     if (!activeVehicle) {
@@ -98,13 +99,11 @@ export default function TripScreen() {
   );
 
   useEffect(() => {
-    let sub: Location.LocationSubscription | null = null;
     let cancelled = false;
+    let nativeSub: { remove: () => void } | null = null;
+    let webWatch: number | null = null;
 
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted' || cancelled) return;
-
       const loc = await getCurrentLocation();
       if (loc && !cancelled) {
         const coords = {
@@ -115,24 +114,50 @@ export default function TripScreen() {
         setCurrentRegion({ ...coords, latitudeDelta: 0.04, longitudeDelta: 0.04 });
       }
 
-      sub = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 8 },
-        (pos) => {
-          const coords = {
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-          };
-          setUserLocation(coords);
-          setCurrentRegion((r) => ({ ...r, ...coords }));
-        }
-      );
+      if (isWeb) {
+        if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+        webWatch = navigator.geolocation.watchPosition(
+          (pos) => {
+            const coords = {
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+            };
+            setUserLocation(coords);
+            setCurrentRegion((r) => ({ ...r, ...coords }));
+          },
+          () => {},
+          { enableHighAccuracy: true, maximumAge: 3000 }
+        );
+        return;
+      }
+
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted' || cancelled) return;
+        nativeSub = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 8 },
+          (pos) => {
+            const coords = {
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+            };
+            setUserLocation(coords);
+            setCurrentRegion((r) => ({ ...r, ...coords }));
+          }
+        );
+      } catch {
+        /* ignore */
+      }
     })();
 
     return () => {
       cancelled = true;
-      sub?.remove();
+      nativeSub?.remove();
+      if (webWatch != null && typeof navigator !== 'undefined') {
+        navigator.geolocation.clearWatch(webWatch);
+      }
     };
-  }, []);
+  }, [isWeb]);
 
   useEffect(() => {
     if (activeTrip) {
@@ -217,7 +242,11 @@ export default function TripScreen() {
         status: 'confirmed',
         source: 'gps',
         fillUpId: null,
-        note: startMode === 'free' ? 'Suivi GPS libre (arrière-plan)' : undefined,
+        note: startMode === 'free'
+          ? isWeb
+            ? 'Suivi GPS web (onglet ouvert)'
+            : 'Suivi GPS libre (arrière-plan)'
+          : undefined,
       });
 
       if (originName) setLiveOriginLabel(originName);
@@ -227,14 +256,20 @@ export default function TripScreen() {
       if (!trackingStarted) {
         notify(
           'Permission requise',
-          'Autorisez la localisation « toujours » / arrière-plan pour tracer même hors premier plan.'
+          isWeb
+            ? 'Autorisez la localisation dans le navigateur (Safari / Chrome) pour enregistrer le trajet.'
+            : 'Autorisez la localisation « toujours » / arrière-plan pour tracer même hors premier plan.'
         );
       } else {
         notify(
           'Suivi démarré',
-          startMode === 'free'
-            ? 'GPS actif en arrière-plan — km & vitesse enregistrés sans destination.'
-            : `Direction : ${destName}`
+          isWeb
+            ? startMode === 'free'
+              ? 'GPS actif — gardez l’onglet / l’app ouverte pendant le trajet.'
+              : `Direction : ${destName} — gardez l’app ouverte pour le suivi.`
+            : startMode === 'free'
+              ? 'GPS actif en arrière-plan — km & vitesse enregistrés sans destination.'
+              : `Direction : ${destName}`
         );
       }
 
@@ -277,7 +312,11 @@ export default function TripScreen() {
     await refresh();
     notify(
       ok ? 'Reprise' : 'GPS',
-      ok ? 'Suivi GPS relancé (y compris en arrière-plan).' : 'Vérifiez les permissions localisation.'
+      ok
+        ? isWeb
+          ? 'Suivi GPS relancé — gardez l’app ouverte.'
+          : 'Suivi GPS relancé (y compris en arrière-plan).'
+        : 'Vérifiez les permissions localisation.'
     );
   };
 

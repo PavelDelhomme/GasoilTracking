@@ -53,6 +53,7 @@ export default function AddVehicleScreen() {
     hasOdometer: boolean;
     trackedKm?: number;
     estimatedFuelLiters?: number | null;
+    consumptionAutoAdapt?: boolean;
     isActive?: boolean;
   }) => {
     setLoading(true);
@@ -62,6 +63,7 @@ export default function AddVehicleScreen() {
         ...payload,
         trackedKm: payload.trackedKm ?? 0,
         estimatedFuelLiters: payload.estimatedFuelLiters ?? null,
+        consumptionAutoAdapt: payload.consumptionAutoAdapt !== false,
         isActive: payload.isActive ?? true,
       });
       if (!id && id !== 0) {
@@ -105,6 +107,7 @@ export default function AddVehicleScreen() {
       hasOdometer: !preset.odometerUnreliable,
       trackedKm: 0,
       estimatedFuelLiters: null,
+      consumptionAutoAdapt: true,
       isActive: true,
     });
   };
@@ -138,6 +141,10 @@ export default function AddVehicleScreen() {
       defaultFuelPrice: parseFloat(fuelPrice.replace(',', '.')) || country.defaultFuelPrice,
       currentOdometer: hasOdometer ? parseFloat(odometer.replace(',', '.')) || 0 : 0,
       hasOdometer,
+      trackedKm: 0,
+      estimatedFuelLiters: null,
+      consumptionAutoAdapt: true,
+      isActive: true,
     });
   };
 

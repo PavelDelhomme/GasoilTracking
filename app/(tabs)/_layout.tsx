@@ -1,14 +1,9 @@
-import { Tabs } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { HeaderActions } from '@/components/HeaderActions';
+import { DrawerMenuButton } from '@/components/DrawerMenuButton';
 import { useTheme } from '@/hooks/useTheme';
-import { ThemeToggleButton } from '@/components/ThemeToggleButton';
-
-/** Styles tab bar uniques (pas de branche Platform au render) → pas de mismatch */
-const TAB_BAR_STYLE = {
-  height: 64,
-  paddingBottom: 10,
-  paddingTop: 6,
-} as const;
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { Tabs } from 'expo-router';
 
 const TAB_LABEL_STYLE = {
   fontSize: 11,
@@ -23,6 +18,9 @@ const TAB_ITEM_STYLE = {
 
 export default function TabLayout() {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const bottomPad = Math.max(insets.bottom, 8);
+  const tabBarHeight = 52 + bottomPad;
 
   return (
     <Tabs
@@ -32,7 +30,9 @@ export default function TabLayout() {
         tabBarStyle: {
           backgroundColor: colors.card,
           borderTopColor: colors.border,
-          ...TAB_BAR_STYLE,
+          height: tabBarHeight,
+          paddingBottom: bottomPad,
+          paddingTop: 6,
         },
         tabBarLabelStyle: TAB_LABEL_STYLE,
         tabBarItemStyle: TAB_ITEM_STYLE,
@@ -40,7 +40,8 @@ export default function TabLayout() {
         headerStyle: { backgroundColor: colors.background },
         headerTintColor: colors.text,
         headerTitleStyle: { fontWeight: '700' },
-        headerRight: () => <ThemeToggleButton />,
+        headerLeft: () => <DrawerMenuButton />,
+        headerRight: () => <HeaderActions />,
       }}
     >
       <Tabs.Screen

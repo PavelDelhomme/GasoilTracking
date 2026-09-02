@@ -129,6 +129,9 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
   await alterSafe('ALTER TABLE recurring_routes ADD COLUMN is_on_vacation INTEGER NOT NULL DEFAULT 0');
   await alterSafe('ALTER TABLE recurring_routes ADD COLUMN vacation_until TEXT');
   await alterSafe('ALTER TABLE vehicles ADD COLUMN estimated_fuel_liters REAL');
+  await alterSafe(
+    'ALTER TABLE vehicles ADD COLUMN consumption_auto_adapt INTEGER NOT NULL DEFAULT 1'
+  );
 }
 
 function mapVehicle(row: unknown): Vehicle {
@@ -150,6 +153,10 @@ function mapVehicle(row: unknown): Vehicle {
       r.estimated_fuel_liters === null || r.estimated_fuel_liters === undefined
         ? null
         : (r.estimated_fuel_liters as number),
+    consumptionAutoAdapt:
+      r.consumption_auto_adapt === undefined || r.consumption_auto_adapt === null
+        ? true
+        : Boolean(r.consumption_auto_adapt),
     isActive: Boolean(r.is_active),
     createdAt: r.created_at as string,
   };
@@ -262,8 +269,8 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
       await database.runAsync('UPDATE vehicles SET is_active = 0');
     }
     const result = await database.runAsync(
-      `INSERT INTO vehicles (name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO vehicles (name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         vehicle.name,
         vehicle.brand,
@@ -277,6 +284,7 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
         vehicle.hasOdometer ? 1 : 0,
         vehicle.trackedKm ?? 0,
         vehicle.estimatedFuelLiters ?? null,
+        vehicle.consumptionAutoAdapt === false ? 0 : 1,
         vehicle.isActive ? 1 : 0,
       ]
     );
@@ -318,6 +326,10 @@ export async function updateVehicle(id: number, vehicle: Partial<Vehicle>): Prom
   if (vehicle.estimatedFuelLiters !== undefined) {
     fields.push('estimated_fuel_liters = ?');
     values.push(vehicle.estimatedFuelLiters);
+  }
+  if (vehicle.consumptionAutoAdapt !== undefined) {
+    fields.push('consumption_auto_adapt = ?');
+    values.push(vehicle.consumptionAutoAdapt ? 1 : 0);
   }
   if (vehicle.isActive !== undefined) { fields.push('is_active = ?'); values.push(vehicle.isActive ? 1 : 0); }
 
@@ -395,6 +407,68 @@ export async function getFillUps(vehicleId?: number): Promise<FillUp[]> {
   }
   const rows = await database.getAllAsync('SELECT * FROM fill_ups ORDER BY date DESC');
   return rows.map(mapFillUp);
+}
+
+export async function getFillUpById(id: number): Promise<FillUp | null> {
+  const database = await getDatabase();
+  const row = await database.getFirstAsync('SELECT * FROM fill_ups WHERE id = ?', [id]);
+  return row ? mapFillUp(row) : null;
+}
+
+export async function updateFillUp(
+  id: number,
+  patch: Partial<
+    Pick<
+      FillUp,
+      | 'date'
+      | 'liters'
+      | 'pricePerLiter'
+      | 'totalCost'
+      | 'odometer'
+      | 'distanceSinceLastKm'
+      | 'isFull'
+      | 'note'
+    >
+  >
+): Promise<void> {
+  const database = await getDatabase();
+  const fields: string[] = [];
+  const values: (string | number | null)[] = [];
+  if (patch.date !== undefined) {
+    fields.push('date = ?');
+    values.push(patch.date);
+  }
+  if (patch.liters !== undefined) {
+    fields.push('liters = ?');
+    values.push(patch.liters);
+  }
+  if (patch.pricePerLiter !== undefined) {
+    fields.push('price_per_liter = ?');
+    values.push(patch.pricePerLiter);
+  }
+  if (patch.totalCost !== undefined) {
+    fields.push('total_cost = ?');
+    values.push(patch.totalCost);
+  }
+  if (patch.odometer !== undefined) {
+    fields.push('odometer = ?');
+    values.push(patch.odometer);
+  }
+  if (patch.distanceSinceLastKm !== undefined) {
+    fields.push('distance_since_last_km = ?');
+    values.push(patch.distanceSinceLastKm);
+  }
+  if (patch.isFull !== undefined) {
+    fields.push('is_full = ?');
+    values.push(patch.isFull ? 1 : 0);
+  }
+  if (patch.note !== undefined) {
+    fields.push('note = ?');
+    values.push(patch.note);
+  }
+  if (!fields.length) return;
+  values.push(id);
+  await database.runAsync(`UPDATE fill_ups SET ${fields.join(', ')} WHERE id = ?`, values);
 }
 
 export async function deleteFillUp(id: number): Promise<void> {
@@ -795,8 +869,8 @@ export async function replaceAllData(data: {
 
       for (const v of data.vehicles || []) {
         await database.runAsync(
-          `INSERT INTO vehicles (id, name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, is_active, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO vehicles (id, name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, is_active, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             v.id,
             v.name,
@@ -811,6 +885,7 @@ export async function replaceAllData(data: {
             v.hasOdometer ? 1 : 0,
             v.trackedKm ?? 0,
             v.estimatedFuelLiters ?? null,
+            v.consumptionAutoAdapt === false ? 0 : 1,
             v.isActive ? 1 : 0,
             v.createdAt || new Date().toISOString(),
           ]
