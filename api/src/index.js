@@ -1,10 +1,14 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { v4 as uuid } from 'uuid';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import nodemailer from 'nodemailer';
 import Database from 'better-sqlite3';
 import multer from 'multer';
 
@@ -15,7 +19,9 @@ const APP_VERSION = process.env.APP_VERSION || '1.0.0';
 const MIN_VERSION = process.env.MIN_APP_VERSION || '1.0.0';
 const INVITE_CODE = process.env.INVITE_CODE || '';
 const RELEASE_UPLOAD_TOKEN = process.env.RELEASE_UPLOAD_TOKEN || '';
-const PUBLIC_URL = process.env.PUBLIC_URL || 'https://gasoil-tracking.delhomme.ovh';
+const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://gasoil-tracking.delhomme.ovh').replace(/\/$/, '');
+const APP_SCHEME = process.env.APP_SCHEME || 'gasoiltracking';
+const TRUST_PROXY = process.env.TRUST_PROXY !== '0';
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(path.join(DATA_DIR, 'apks'), { recursive: true });
@@ -28,7 +34,19 @@ db.exec(`
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     name TEXT NOT NULL,
+    email_verified INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS pending_registrations (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    platform TEXT NOT NULL DEFAULT 'web',
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    ip TEXT
   );
   CREATE TABLE IF NOT EXISTS sync_data (
     user_id TEXT PRIMARY KEY,
@@ -47,28 +65,191 @@ db.exec(`
   );
 `);
 
+try {
+  db.exec('ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1');
+} catch {
+  /* déjà présent */
+}
+
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: '5mb' }));
+if (TRUST_PROXY) app.set('trust proxy', 1);
+
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  })
+);
+
+const allowedOrigins = new Set([
+  PUBLIC_URL,
+  'http://localhost:8081',
+  'http://localhost:19006',
+  'http://127.0.0.1:8081',
+  'http://127.0.0.1:19006',
+]);
+
+app.use(
+  cors({
+    origin(origin, cb) {
+      if (!origin || allowedOrigins.has(origin) || origin.startsWith('exp://')) {
+        return cb(null, true);
+      }
+      return cb(null, false);
+    },
+    credentials: true,
+  })
+);
+
+app.use(express.json({ limit: '256kb' }));
+
+function clientIp(req) {
+  return (
+    (req.headers['x-forwarded-for'] && String(req.headers['x-forwarded-for']).split(',')[0].trim()) ||
+    req.ip ||
+    req.socket?.remoteAddress ||
+    'unknown'
+  );
+}
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => clientIp(req),
+  message: { error: 'Trop de tentatives. Réessayez dans 15 minutes.' },
+});
+
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => clientIp(req),
+  message: { error: 'Trop d’inscriptions depuis cette IP. Réessayez plus tard.' },
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => clientIp(req),
+  message: { error: 'Trop de requêtes. Ralentissez.' },
+});
+
+const syncLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `${clientIp(req)}:${req.user?.sub || 'anon'}`,
+  message: { error: 'Sync trop fréquente.' },
+});
+
+app.use('/api/', apiLimiter);
 
 function auth(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return res.status(401).json({ error: 'Non authentifié' });
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+    if (!payload?.sub) return res.status(401).json({ error: 'Token invalide' });
+    req.user = payload;
     next();
   } catch {
-    return res.status(401).json({ error: 'Token invalide' });
+    return res.status(401).json({ error: 'Token invalide ou expiré' });
   }
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254;
+}
+
+function mailer() {
+  const host = process.env.SMTP_HOST;
+  if (!host) return null;
+  const port = Number(process.env.SMTP_PORT || 587);
+  const secure =
+    process.env.SMTP_SECURE === 'true' ||
+    process.env.SMTP_USE_SSL === 'true' ||
+    port === 465;
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    requireTLS: port === 587,
+    auth: process.env.SMTP_USER
+      ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS || '' }
+      : undefined,
+  });
+}
+
+async function sendVerificationEmail({ to, name, token, platform }) {
+  const verifyUrl = `${PUBLIC_URL}/api/auth/verify-email?token=${encodeURIComponent(token)}&platform=${encodeURIComponent(platform || 'web')}`;
+  const from = process.env.SMTP_FROM || 'Gasoil Tracking <noreply@maily.ovh>';
+  const transport = mailer();
+  const html = `
+    <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto">
+      <h2>Confirmez votre email</h2>
+      <p>Bonjour ${String(name).replace(/[<>&]/g, '')},</p>
+      <p>Pour activer votre compte Gasoil Tracking, cliquez sur le bouton ci-dessous (valide 24&nbsp;h)&nbsp;:</p>
+      <p style="margin:28px 0">
+        <a href="${verifyUrl}" style="background:#e94560;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">
+          Vérifier mon email
+        </a>
+      </p>
+      <p style="color:#666;font-size:13px">Ou ouvrez ce lien&nbsp;:<br/><a href="${verifyUrl}">${verifyUrl}</a></p>
+      <p style="color:#666;font-size:12px">Si vous n’êtes pas à l’origine de cette inscription, ignorez ce message.</p>
+    </div>
+  `;
+  if (!transport) {
+    console.warn('[mail] SMTP non configuré — lien de vérif:', verifyUrl);
+    return { ok: false, verifyUrl, logged: true };
+  }
+  await transport.sendMail({
+    from,
+    to,
+    subject: 'Gasoil Tracking — vérifiez votre email',
+    html,
+    text: `Bonjour ${name},\n\nVérifiez votre email : ${verifyUrl}\n`,
+  });
+  return { ok: true, verifyUrl };
+}
+
+function verifyPageHtml({ ok, message, platform, token }) {
+  const q = `ok=${ok ? '1' : '0'}&msg=${encodeURIComponent(message)}${token ? `&session=${encodeURIComponent(token)}` : ''}`;
+  const webUrl = `${PUBLIC_URL}/verify?${q}`;
+  const deep = `${APP_SCHEME}://verify?${q}`;
+  const primary = platform === 'mobile' ? deep : webUrl;
+  return `<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Vérification email — Gasoil Tracking</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#0f0f1a;color:#f1f5f9;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+.card{background:#1a1a2e;padding:28px;border-radius:16px;max-width:420px;width:90%;text-align:center}
+a.btn{display:inline-block;margin-top:16px;background:#e94560;color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:600}
+.ok{color:#34d399}.err{color:#f87171}
+</style></head><body>
+<div class="card">
+  <h1 class="${ok ? 'ok' : 'err'}">${ok ? 'Email vérifié' : 'Échec'}</h1>
+  <p>${message.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))}</p>
+  <a class="btn" href="${primary}">Continuer</a>
+  ${platform === 'mobile' ? `<p style="margin-top:16px;font-size:13px;color:#94a3b8"><a href="${webUrl}" style="color:#94a3b8">Ouvrir sur le web</a></p>` : `<p style="margin-top:16px;font-size:13px;color:#94a3b8"><a href="${deep}" style="color:#94a3b8">Ouvrir l’app mobile</a></p>`}
+</div>
+<script>
+  setTimeout(function(){ window.location.replace(${JSON.stringify(primary)}); }, 600);
+</script>
+</body></html>`;
 }
 
 app.get('/health', (_req, res) => res.type('text').send('ok'));
 
 app.get('/api/version', (_req, res) => {
-  const latest = db
-    .prepare('SELECT * FROM app_releases ORDER BY id DESC LIMIT 1')
-    .get();
+  const latest = db.prepare('SELECT * FROM app_releases ORDER BY id DESC LIMIT 1').get();
   const version = latest?.version || APP_VERSION;
   const apkUrl = latest?.apk_filename
     ? `${PUBLIC_URL}/api/download/${latest.apk_filename}`
@@ -85,74 +266,190 @@ app.get('/api/version', (_req, res) => {
 
 app.get('/api/download/:file', (req, res) => {
   const file = path.basename(req.params.file);
+  if (!/^[\w.\-]+$/.test(file)) return res.status(400).json({ error: 'Nom invalide' });
   const full = path.join(DATA_DIR, 'apks', file);
   if (!fs.existsSync(full)) return res.status(404).json({ error: 'APK introuvable' });
   res.download(full, file);
 });
 
-app.post('/api/auth/register', (req, res) => {
-  const { email, password, name, inviteCode } = req.body || {};
-  if (!INVITE_CODE) {
-    return res.status(403).json({ error: 'Inscriptions fermées (INVITE_CODE non configuré)' });
-  }
-  if (String(inviteCode || '') !== INVITE_CODE) {
-    return res.status(403).json({ error: 'Code d’invitation invalide' });
-  }
-  if (!email || !password || !name) {
-    return res.status(400).json({ error: 'email, password et name requis' });
-  }
-  if (String(password).length < 8) {
-    return res.status(400).json({ error: 'Mot de passe trop court (min 8)' });
-  }
-  const id = uuid();
-  const hash = bcrypt.hashSync(String(password), 12);
+/** Inscription : envoie un email de vérification (pas de compte actif tant que non cliqué) */
+app.post('/api/auth/register', authLimiter, registerLimiter, async (req, res) => {
   try {
-    db.prepare(
-      'INSERT INTO users (id, email, password_hash, name, created_at) VALUES (?, ?, ?, ?, ?)'
-    ).run(id, String(email).toLowerCase().trim(), hash, String(name).trim(), new Date().toISOString());
-  } catch {
-    return res.status(409).json({ error: 'Email déjà utilisé' });
-  }
-  // sync_data vide dédié à cet user uniquement
-  db.prepare(
-    'INSERT INTO sync_data (user_id, payload, updated_at) VALUES (?, ?, ?)'
-  ).run(id, JSON.stringify({ vehicles: [], fillUps: [], budgets: [], trips: [] }), new Date().toISOString());
+    const { email, password, name, inviteCode, platform } = req.body || {};
+    if (!INVITE_CODE) {
+      return res.status(403).json({ error: 'Inscriptions fermées (INVITE_CODE non configuré)' });
+    }
+    if (String(inviteCode || '') !== INVITE_CODE) {
+      return res.status(403).json({ error: 'Code d’invitation invalide' });
+    }
+    const cleanEmail = String(email || '')
+      .toLowerCase()
+      .trim();
+    const cleanName = String(name || '').trim().slice(0, 80);
+    const plat = platform === 'mobile' ? 'mobile' : 'web';
+    if (!cleanEmail || !password || !cleanName) {
+      return res.status(400).json({ error: 'email, password et name requis' });
+    }
+    if (!isValidEmail(cleanEmail)) {
+      return res.status(400).json({ error: 'Email invalide' });
+    }
+    if (String(password).length < 8 || String(password).length > 128) {
+      return res.status(400).json({ error: 'Mot de passe : 8 à 128 caractères' });
+    }
+    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(cleanEmail);
+    if (existing) {
+      return res.status(409).json({ error: 'Email déjà utilisé' });
+    }
 
-  const token = jwt.sign({ sub: id, email: String(email).toLowerCase() }, JWT_SECRET, {
-    expiresIn: '30d',
-  });
-  res.status(201).json({
-    token,
-    user: { id, email: String(email).toLowerCase(), name: String(name).trim() },
-  });
+    db.prepare('DELETE FROM pending_registrations WHERE email = ?').run(cleanEmail);
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const id = uuid();
+    const hash = bcrypt.hashSync(String(password), 12);
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    db.prepare(
+      `INSERT INTO pending_registrations (id, email, password_hash, name, token_hash, platform, expires_at, created_at, ip)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, cleanEmail, hash, cleanName, tokenHash, plat, expires, new Date().toISOString(), clientIp(req));
+
+    const mail = await sendVerificationEmail({
+      to: cleanEmail,
+      name: cleanName,
+      token: rawToken,
+      platform: plat,
+    });
+
+    res.status(201).json({
+      ok: true,
+      pending: true,
+      message:
+        'Un email de vérification a été envoyé. Cliquez le lien pour activer votre compte (valide 24 h).',
+      // Dev only if SMTP down — never in prod response when mail ok
+      ...(mail.ok ? {} : process.env.NODE_ENV === 'production' && mail.logged
+        ? {}
+        : !mail.ok
+          ? { debugVerifyUrl: mail.verifyUrl }
+          : {}),
+    });
+  } catch (e) {
+    console.error('register', e);
+    res.status(500).json({ error: 'Erreur lors de l’inscription' });
+  }
 });
 
-app.post('/api/auth/login', (req, res) => {
-  const { email, password } = req.body || {};
-  const user = db
-    .prepare('SELECT * FROM users WHERE email = ?')
-    .get(String(email || '').toLowerCase().trim());
-  if (!user || !bcrypt.compareSync(String(password || ''), user.password_hash)) {
+app.get('/api/auth/verify-email', authLimiter, (req, res) => {
+  const raw = String(req.query.token || '');
+  const platform = req.query.platform === 'mobile' ? 'mobile' : 'web';
+  if (!raw || raw.length < 20) {
+    return res
+      .status(400)
+      .type('html')
+      .send(verifyPageHtml({ ok: false, message: 'Lien invalide.', platform }));
+  }
+  const tokenHash = crypto.createHash('sha256').update(raw).digest('hex');
+  const pending = db.prepare('SELECT * FROM pending_registrations WHERE token_hash = ?').get(tokenHash);
+  if (!pending) {
+    return res
+      .status(400)
+      .type('html')
+      .send(verifyPageHtml({ ok: false, message: 'Lien expiré ou déjà utilisé.', platform }));
+  }
+  if (new Date(pending.expires_at).getTime() < Date.now()) {
+    db.prepare('DELETE FROM pending_registrations WHERE id = ?').run(pending.id);
+    return res
+      .status(400)
+      .type('html')
+      .send(verifyPageHtml({ ok: false, message: 'Lien expiré. Réinscrivez-vous.', platform }));
+  }
+
+  const userId = uuid();
+  const plat = pending.platform || platform;
+  try {
+    const tx = db.transaction(() => {
+      db.prepare(
+        'INSERT INTO users (id, email, password_hash, name, email_verified, created_at) VALUES (?, ?, ?, ?, 1, ?)'
+      ).run(userId, pending.email, pending.password_hash, pending.name, new Date().toISOString());
+      db.prepare('INSERT INTO sync_data (user_id, payload, updated_at) VALUES (?, ?, ?)').run(
+        userId,
+        JSON.stringify({ vehicles: [], fillUps: [], budgets: [], trips: [] }),
+        new Date().toISOString()
+      );
+      db.prepare('DELETE FROM pending_registrations WHERE id = ?').run(pending.id);
+    });
+    tx();
+  } catch {
+    return res
+      .status(409)
+      .type('html')
+      .send(verifyPageHtml({ ok: false, message: 'Compte déjà créé. Connectez-vous.', platform: plat }));
+  }
+
+  const session = jwt.sign({ sub: userId, email: pending.email }, JWT_SECRET, {
+    expiresIn: '30d',
+    algorithm: 'HS256',
+  });
+
+  res.type('html').send(
+    verifyPageHtml({
+      ok: true,
+      message: 'Votre email est confirmé. Vous pouvez utiliser Gasoil Tracking.',
+      platform: plat,
+      token: session,
+    })
+  );
+});
+
+app.post('/api/auth/login', authLimiter, (req, res) => {
+  const email = String(req.body?.email || '')
+    .toLowerCase()
+    .trim();
+  const password = String(req.body?.password || '');
+  if (!email || !password) {
+    return res.status(400).json({ error: 'email et password requis' });
+  }
+  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  // message générique anti-énumération
+  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
     return res.status(401).json({ error: 'Identifiants invalides' });
   }
-  const token = jwt.sign({ sub: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
+  if (user.email_verified === 0) {
+    return res.status(403).json({ error: 'Email non vérifié. Consultez votre boîte mail.' });
+  }
+  const token = jwt.sign({ sub: user.id, email: user.email }, JWT_SECRET, {
+    expiresIn: '30d',
+    algorithm: 'HS256',
+  });
   res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
 });
 
 app.get('/api/auth/me', auth, (req, res) => {
-  const user = db.prepare('SELECT id, email, name, created_at FROM users WHERE id = ?').get(req.user.sub);
+  const user = db
+    .prepare('SELECT id, email, name, created_at, email_verified FROM users WHERE id = ?')
+    .get(req.user.sub);
   if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
   res.json({ user });
 });
 
-app.get('/api/sync', auth, (req, res) => {
+app.get('/api/sync', auth, syncLimiter, (req, res) => {
   const row = db.prepare('SELECT payload, updated_at FROM sync_data WHERE user_id = ?').get(req.user.sub);
   if (!row) return res.json({ data: null, updatedAt: null });
-  res.json({ data: JSON.parse(row.payload), updatedAt: row.updated_at });
+  try {
+    res.json({ data: JSON.parse(row.payload), updatedAt: row.updated_at });
+  } catch {
+    res.status(500).json({ error: 'Données sync corrompues' });
+  }
 });
 
-app.put('/api/sync', auth, (req, res) => {
-  const payload = JSON.stringify(req.body?.data ?? req.body ?? {});
+app.put('/api/sync', auth, syncLimiter, (req, res) => {
+  const body = req.body?.data ?? req.body ?? {};
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return res.status(400).json({ error: 'Payload sync invalide' });
+  }
+  const payload = JSON.stringify(body);
+  if (payload.length > 2_000_000) {
+    return res.status(413).json({ error: 'Payload trop volumineux' });
+  }
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO sync_data (user_id, payload, updated_at) VALUES (?, ?, ?)
@@ -161,12 +458,15 @@ app.put('/api/sync', auth, (req, res) => {
   res.json({ ok: true, updatedAt: now });
 });
 
-const upload = multer({ dest: path.join(DATA_DIR, 'apks') });
+const upload = multer({
+  dest: path.join(DATA_DIR, 'apks'),
+  limits: { fileSize: 120 * 1024 * 1024 },
+});
 
 function saveRelease({ version, notes, force, file }) {
   let filename = null;
   if (file) {
-    filename = `gasoil-tracking-${version}.apk`;
+    filename = `gasoil-tracking-${String(version).replace(/[^\w.\-]/g, '')}.apk`;
     fs.renameSync(file.path, path.join(DATA_DIR, 'apks', filename));
   }
   db.prepare(
@@ -179,7 +479,6 @@ function saveRelease({ version, notes, force, file }) {
   };
 }
 
-/** Upload CI automatique (token machine, pas de JWT user) */
 app.post('/api/ci/releases', upload.single('apk'), (req, res) => {
   const header = req.headers['x-release-token'] || req.headers.authorization?.replace('Bearer ', '');
   if (!RELEASE_UPLOAD_TOKEN || header !== RELEASE_UPLOAD_TOKEN) {

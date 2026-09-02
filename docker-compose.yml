@@ -41,6 +41,14 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@delhomme.ovh}
       INVITE_CODE: ${INVITE_CODE}
       RELEASE_UPLOAD_TOKEN: ${RELEASE_UPLOAD_TOKEN}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-Gasoil Tracking <noreply@maily.ovh>}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      APP_SCHEME: gasoiltracking
+      TRUST_PROXY: "1"
     volumes:
       - gasoil_api_data:/data
     networks:

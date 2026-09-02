@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import {
   clearSession,
   fetchSync,
@@ -17,9 +18,15 @@ type AuthContextType = {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name: string, inviteCode: string) => Promise<void>;
+  register: (
+    email: string,
+    password: string,
+    name: string,
+    inviteCode: string
+  ) => Promise<{ ok: boolean; pending?: boolean; message?: string }>;
   logout: () => Promise<void>;
   syncNow: () => Promise<void>;
+  applySession: (token: string, user: User) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -65,20 +72,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [syncNow]);
 
-  const register = useCallback(async (email: string, password: string, name: string, inviteCode: string) => {
-    const res = await apiRegister(email, password, name, inviteCode);
-    await setSession(res.token, res.user);
-    setUser(res.user);
-    await syncNow();
-  }, [syncNow]);
+  const register = useCallback(
+    async (email: string, password: string, name: string, inviteCode: string) => {
+      const platform = Platform.OS === 'web' ? 'web' : 'mobile';
+      const res = await apiRegister(email, password, name, inviteCode, platform);
+      // Compte activé seulement après clic email — pas de session ici
+      return res;
+    },
+    []
+  );
 
   const logout = useCallback(async () => {
     await clearSession();
     setUser(null);
   }, []);
 
+  const applySession = useCallback(async (token: string, next: User) => {
+    await setSession(token, next);
+    setUser(next);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, syncNow }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, syncNow, applySession }}>
       {children}
     </AuthContext.Provider>
   );

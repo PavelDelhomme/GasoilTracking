@@ -61,6 +61,13 @@ payload = {
         {"name": "ADMIN_EMAIL", "value": env.get("ADMIN_EMAIL", "admin@delhomme.ovh")},
         {"name": "INVITE_CODE", "value": env.get("INVITE_CODE", "")},
         {"name": "RELEASE_UPLOAD_TOKEN", "value": env.get("RELEASE_UPLOAD_TOKEN", "")},
+        {"name": "SMTP_HOST", "value": env.get("SMTP_HOST", "")},
+        {"name": "SMTP_PORT", "value": env.get("SMTP_PORT", "587")},
+        {"name": "SMTP_USER", "value": env.get("SMTP_USER", "")},
+        {"name": "SMTP_PASS", "value": env.get("SMTP_PASS", "")},
+        {"name": "SMTP_FROM", "value": env.get("SMTP_FROM", "Gasoil Tracking <noreply@maily.ovh>")},
+        {"name": "SMTP_SECURE", "value": env.get("SMTP_SECURE", "false")},
+        {"name": "TRUST_PROXY", "value": "1"},
     ],
 }
 print("create from", BRANCH_REF)

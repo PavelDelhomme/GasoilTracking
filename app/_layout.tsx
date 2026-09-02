@@ -2,7 +2,8 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AppProvider } from '@/context/AppContext';
 import { AuthProvider } from '@/context/AuthContext';
-import { useTheme } from '@/hooks/useTheme';
+import { ThemeProvider, useTheme } from '@/context/ThemeContext';
+import { ThemeToggleButton } from '@/components/ThemeToggleButton';
 import { useAppUpdateCheck } from '@/hooks/useAppUpdateCheck';
 
 function RootNavigation() {
@@ -18,6 +19,7 @@ function RootNavigation() {
           headerTintColor: colors.text,
           headerTitleStyle: { fontWeight: '700' },
           contentStyle: { backgroundColor: colors.background },
+          headerRight: () => <ThemeToggleButton />,
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
@@ -34,6 +36,7 @@ function RootNavigation() {
           options={{ title: 'Nouveau budget', presentation: 'modal' }}
         />
         <Stack.Screen name="auth" options={{ title: 'Compte', presentation: 'modal' }} />
+        <Stack.Screen name="verify" options={{ title: 'Vérification email', headerShown: true }} />
       </Stack>
     </>
   );
@@ -41,10 +44,12 @@ function RootNavigation() {
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <AppProvider>
-        <RootNavigation />
-      </AppProvider>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <AppProvider>
+          <RootNavigation />
+        </AppProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

@@ -16,17 +16,31 @@ export default function AuthScreen() {
   const [inviteCode, setInviteCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
 
   const submit = async () => {
     setError('');
+    setInfo('');
     setLoading(true);
     try {
-      if (mode === 'login') await login(email.trim(), password);
-      else {
+      if (mode === 'login') {
+        await login(email.trim(), password);
+        router.back();
+      } else {
         if (!inviteCode.trim()) throw new Error('Code d’invitation requis');
-        await register(email.trim(), password, name.trim() || email.split('@')[0], inviteCode.trim());
+        const res = await register(
+          email.trim(),
+          password,
+          name.trim() || email.split('@')[0],
+          inviteCode.trim()
+        );
+        setInfo(
+          res?.message ||
+            'Email envoyé : ouvrez le lien pour valider votre adresse, puis reconnectez-vous.'
+        );
+        setMode('login');
+        setPassword('');
       }
-      router.back();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
     } finally {
@@ -46,7 +60,7 @@ export default function AuthScreen() {
         <Text style={[styles.sub, { color: colors.textSecondary }]}>
           {mode === 'login'
             ? 'Accédez à vos données synchronisées (privées, isolées par compte).'
-            : 'Inscription réservée : il faut un code d’invitation. Vos données restent privées.'}
+            : 'Code d’invitation requis. Un email de confirmation sera envoyé avant activation.'}
         </Text>
         {mode === 'register' && (
           <>
@@ -76,11 +90,20 @@ export default function AuthScreen() {
           placeholder="••••••••"
         />
         {!!error && <Text style={{ color: colors.danger, marginBottom: 12 }}>{error}</Text>}
-        <Button title={mode === 'login' ? 'Se connecter' : 'Créer le compte'} onPress={submit} loading={loading} />
+        {!!info && <Text style={{ color: colors.success, marginBottom: 12 }}>{info}</Text>}
+        <Button
+          title={mode === 'login' ? 'Se connecter' : 'Recevoir l’email de validation'}
+          onPress={submit}
+          loading={loading}
+        />
         <Button
           title={mode === 'login' ? 'Pas de compte ? S’inscrire' : 'Déjà un compte ? Connexion'}
           variant="outline"
-          onPress={() => setMode(mode === 'login' ? 'register' : 'login')}
+          onPress={() => {
+            setMode(mode === 'login' ? 'register' : 'login');
+            setError('');
+            setInfo('');
+          }}
           style={{ marginTop: 12 }}
         />
       </ScrollView>
