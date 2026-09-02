@@ -127,6 +127,13 @@ export function register(
   }) as Promise<{ ok: boolean; pending?: boolean; message?: string }>;
 }
 
+export function resendVerificationEmail(email: string) {
+  return request('/api/auth/resend-verification', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  }) as Promise<{ ok: boolean; message?: string; alreadyActive?: boolean }>;
+}
+
 export async function login(email: string, password: string) {
   const data = await request('/api/auth/login', {
     method: 'POST',

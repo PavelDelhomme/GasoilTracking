@@ -43,7 +43,7 @@ export default function AuthScreen() {
         );
         setInfo(
           res?.message ||
-            'Email envoyé : ouvrez le lien pour valider votre adresse, puis reconnectez-vous.'
+            'Email envoyé ! Ouvrez-le, cliquez « Ouvrir la page de validation », puis « Confirmer mon email ». Ensuite connectez-vous ici.'
         );
         setMode('login');
         setPassword('');
@@ -68,7 +68,7 @@ export default function AuthScreen() {
         <Text style={[styles.sub, { color: colors.textSecondary }]}>
           {mode === 'login'
             ? 'Même formulaire pour tous (y compris admin). Données privées par compte.'
-            : 'Code d’invitation requis. Confirmez le mot de passe deux fois. Un email de validation activera le compte.'}
+            : 'Code d’invitation requis (fourni par l’admin). Confirmez le mot de passe deux fois. Un email activera le compte — pas admin.'}
         </Text>
         {mode === 'register' && (
           <>

@@ -303,6 +303,7 @@ function mailer() {
 }
 
 async function sendVerificationEmail({ to, name, token, platform }) {
+  // Page de confirmation (GET sans effet) — résiste au pré-scan Gmail/Outlook
   const verifyUrl = `${PUBLIC_URL}/api/auth/verify-email?token=${encodeURIComponent(token)}&platform=${encodeURIComponent(platform || 'web')}`;
   const from = process.env.SMTP_FROM || 'Gasoil Tracking <noreply@maily.ovh>';
   const transport = mailer();
@@ -310,13 +311,13 @@ async function sendVerificationEmail({ to, name, token, platform }) {
     <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto">
       <h2>Confirmez votre email</h2>
       <p>Bonjour ${String(name).replace(/[<>&]/g, '')},</p>
-      <p>Pour activer votre compte Gasoil Tracking, cliquez sur le bouton ci-dessous (valide 24&nbsp;h)&nbsp;:</p>
+      <p>Pour activer votre compte Gasoil Tracking, ouvrez le lien ci-dessous puis cliquez sur <strong>«&nbsp;Confirmer mon email&nbsp;»</strong> (valide 24&nbsp;h)&nbsp;:</p>
       <p style="margin:28px 0">
         <a href="${verifyUrl}" style="background:#e94560;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">
-          Vérifier mon email
+          Ouvrir la page de validation
         </a>
       </p>
-      <p style="color:#666;font-size:13px">Ou ouvrez ce lien&nbsp;:<br/><a href="${verifyUrl}">${verifyUrl}</a></p>
+      <p style="color:#666;font-size:13px">Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur&nbsp;:<br/><a href="${verifyUrl}">${verifyUrl}</a></p>
       <p style="color:#666;font-size:12px">Si vous n’êtes pas à l’origine de cette inscription, ignorez ce message.</p>
     </div>
   `;
@@ -329,12 +330,70 @@ async function sendVerificationEmail({ to, name, token, platform }) {
     to,
     subject: 'Gasoil Tracking — vérifiez votre email',
     html,
-    text: `Bonjour ${name},\n\nVérifiez votre email : ${verifyUrl}\n`,
+    text: `Bonjour ${name},\n\nOuvrez ce lien puis confirmez : ${verifyUrl}\n`,
   });
   return { ok: true, verifyUrl };
 }
 
-function verifyPageHtml({ ok, message, platform, token, refreshToken }) {
+function confirmEmailPageHtml({ token, platform, email, name }) {
+  const safeName = String(name).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  const safeEmail = String(email).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  const tokenJson = JSON.stringify(token);
+  const platformJson = JSON.stringify(platform);
+  return `<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Confirmer votre email — Gasoil Tracking</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#0f0f1a;color:#f1f5f9;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:16px}
+.card{background:#1a1a2e;padding:28px;border-radius:16px;max-width:440px;width:100%;text-align:center}
+button.btn{background:#e94560;color:#fff;padding:14px 22px;border-radius:10px;border:none;font-weight:600;font-size:16px;cursor:pointer;width:100%}
+button.btn:disabled{opacity:.6;cursor:wait}
+.err{color:#f87171;margin-top:12px;font-size:14px}
+.hint{color:#94a3b8;font-size:13px;margin-top:16px;line-height:1.5}
+</style></head><body>
+<div class="card">
+  <h1>Confirmer votre email</h1>
+  <p>Bonjour <strong>${safeName}</strong>,</p>
+  <p style="color:#94a3b8">Compte&nbsp;: ${safeEmail}</p>
+  <p style="margin:20px 0">Cliquez ci-dessous pour activer votre compte utilisateur (pas admin).</p>
+  <button class="btn" id="confirmBtn" type="button">Confirmer mon email</button>
+  <p id="err" class="err" hidden></p>
+  <p class="hint">Gmail peut ouvrir les liens automatiquement : seul ce bouton active le compte.</p>
+</div>
+<script>
+(function(){
+  var btn = document.getElementById('confirmBtn');
+  var err = document.getElementById('err');
+  btn.addEventListener('click', function(){
+    btn.disabled = true;
+    err.hidden = true;
+    fetch('/api/auth/verify-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: ${tokenJson}, platform: ${platformJson} })
+    }).then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+      .then(function(res){
+        if (res.d && res.d.redirectUrl) {
+          window.location.replace(res.d.redirectUrl);
+          return;
+        }
+        err.textContent = (res.d && res.d.error) || 'Erreur de validation';
+        err.hidden = false;
+        btn.disabled = false;
+      })
+      .catch(function(){
+        err.textContent = 'Erreur réseau. Réessayez.';
+        err.hidden = false;
+        btn.disabled = false;
+      });
+  });
+})();
+</script>
+</body></html>`;
+}
+
+function verifyPageHtml({ ok, message, platform, token, refreshToken, showLogin = false }) {
   const parts = [
     `ok=${ok ? '1' : '0'}`,
     `msg=${encodeURIComponent(message)}`,
@@ -359,12 +418,125 @@ a.btn{display:inline-block;margin-top:16px;background:#e94560;color:#fff;padding
   <h1 class="${ok ? 'ok' : 'err'}">${ok ? 'Email vérifié' : 'Échec'}</h1>
   <p>${message.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))}</p>
   <a class="btn" href="${primary}">Continuer</a>
+  ${showLogin ? `<p style="margin-top:16px"><a class="btn" href="${PUBLIC_URL}/auth" style="display:inline-block">Se connecter</a></p>` : ''}
   ${platform === 'mobile' ? `<p style="margin-top:16px;font-size:13px;color:#94a3b8"><a href="${webUrl}" style="color:#94a3b8">Ouvrir sur le web</a></p>` : `<p style="margin-top:16px;font-size:13px;color:#94a3b8"><a href="${deep}" style="color:#94a3b8">Ouvrir l’app mobile</a></p>`}
 </div>
-<script>
-  setTimeout(function(){ window.location.replace(${JSON.stringify(primary)}); }, 600);
-</script>
 </body></html>`;
+}
+
+function buildVerifyRedirect({ ok, message, platform, session }) {
+  const parts = [
+    `ok=${ok ? '1' : '0'}`,
+    `msg=${encodeURIComponent(message)}`,
+  ];
+  if (session?.token) parts.push(`session=${encodeURIComponent(session.token)}`);
+  if (session?.refreshToken) parts.push(`refresh=${encodeURIComponent(session.refreshToken)}`);
+  const q = parts.join('&');
+  const webUrl = `${PUBLIC_URL}/verify?${q}`;
+  const deep = `${APP_SCHEME}://verify?${q}`;
+  return { webUrl, deep, primary: platform === 'mobile' ? deep : webUrl };
+}
+
+function finalizeEmailVerification(req, res, raw, platform) {
+  const plat = platform === 'mobile' ? 'mobile' : 'web';
+  if (!raw || raw.length < 20) {
+    const msg = 'Lien invalide.';
+    if (req.method === 'POST') return res.status(400).json({ error: msg });
+    return res.status(400).type('html').send(verifyPageHtml({ ok: false, message: msg, platform: plat, showLogin: true }));
+  }
+
+  const tokenHash = hashToken(raw);
+  const pending = db.prepare('SELECT * FROM pending_registrations WHERE token_hash = ?').get(tokenHash);
+
+  if (!pending) {
+    const msg =
+      'Ce lien a déjà été utilisé ou a expiré. Si votre compte est actif, connectez-vous avec votre email et mot de passe.';
+    if (req.method === 'POST') {
+      return res.status(400).json({ error: msg, loginUrl: `${PUBLIC_URL}/auth` });
+    }
+    return res
+      .status(200)
+      .type('html')
+      .send(verifyPageHtml({ ok: false, message: msg, platform: plat, showLogin: true }));
+  }
+
+  if (new Date(pending.expires_at).getTime() < Date.now()) {
+    db.prepare('DELETE FROM pending_registrations WHERE id = ?').run(pending.id);
+    const msg = 'Lien expiré. Demandez un nouvel email de validation ou réinscrivez-vous.';
+    if (req.method === 'POST') return res.status(400).json({ error: msg });
+    return res.status(400).type('html').send(verifyPageHtml({ ok: false, message: msg, platform: plat, showLogin: true }));
+  }
+
+  const existingUser = db.prepare('SELECT id, email, name FROM users WHERE email = ?').get(pending.email);
+  if (existingUser) {
+    db.prepare('DELETE FROM pending_registrations WHERE id = ?').run(pending.id);
+    const session = createSession(existingUser, sessionMeta(req));
+    const msg = 'Votre compte est déjà actif. Connectez-vous.';
+    const redirect = buildVerifyRedirect({ ok: true, message: msg, platform: plat, session });
+    if (req.method === 'POST') {
+      return res.json({ ok: true, alreadyActive: true, redirectUrl: redirect.primary, ...redirect });
+    }
+    return res.type('html').send(
+      verifyPageHtml({
+        ok: true,
+        message: msg,
+        platform: plat,
+        token: session.token,
+        refreshToken: session.refreshToken,
+      })
+    );
+  }
+
+  const userId = uuid();
+  try {
+    const tx = db.transaction(() => {
+      db.prepare(
+        'INSERT INTO users (id, email, password_hash, name, email_verified, created_at) VALUES (?, ?, ?, ?, 1, ?)'
+      ).run(userId, pending.email, pending.password_hash, pending.name, new Date().toISOString());
+      db.prepare('INSERT INTO sync_data (user_id, payload, updated_at) VALUES (?, ?, ?)').run(
+        userId,
+        JSON.stringify({ vehicles: [], fillUps: [], budgets: [], trips: [] }),
+        new Date().toISOString()
+      );
+      db.prepare('DELETE FROM pending_registrations WHERE id = ?').run(pending.id);
+    });
+    tx();
+  } catch {
+    const msg = 'Compte déjà créé. Connectez-vous.';
+    if (req.method === 'POST') {
+      return res.status(409).json({ error: msg, loginUrl: `${PUBLIC_URL}/auth` });
+    }
+    return res
+      .status(409)
+      .type('html')
+      .send(verifyPageHtml({ ok: false, message: msg, platform: plat, showLogin: true }));
+  }
+
+  const session = createSession(
+    { id: userId, email: pending.email, name: pending.name },
+    sessionMeta(req)
+  );
+  const msg = 'Votre email est confirmé. Bienvenue sur Gasoil Tracking !';
+  const redirect = buildVerifyRedirect({ ok: true, message: msg, platform: plat, session });
+
+  if (req.method === 'POST') {
+    return res.json({
+      ok: true,
+      redirectUrl: redirect.primary,
+      user: session.user,
+      ...redirect,
+    });
+  }
+
+  return res.type('html').send(
+    verifyPageHtml({
+      ok: true,
+      message: msg,
+      platform: plat,
+      token: session.token,
+      refreshToken: session.refreshToken,
+    })
+  );
 }
 
 app.get('/health', (_req, res) => res.type('text').send('ok'));
@@ -458,6 +630,7 @@ app.post('/api/auth/register', authLimiter, registerLimiter, async (req, res) =>
   }
 });
 
+/** GET : page de confirmation (sans consommer le token — anti pré-scan Gmail) */
 app.get('/api/auth/verify-email', authLimiter, (req, res) => {
   const raw = String(req.query.token || '');
   const platform = req.query.platform === 'mobile' ? 'mobile' : 'web';
@@ -465,60 +638,107 @@ app.get('/api/auth/verify-email', authLimiter, (req, res) => {
     return res
       .status(400)
       .type('html')
-      .send(verifyPageHtml({ ok: false, message: 'Lien invalide.', platform }));
+      .send(verifyPageHtml({ ok: false, message: 'Lien invalide.', platform, showLogin: true }));
   }
-  const tokenHash = crypto.createHash('sha256').update(raw).digest('hex');
+
+  const tokenHash = hashToken(raw);
   const pending = db.prepare('SELECT * FROM pending_registrations WHERE token_hash = ?').get(tokenHash);
   if (!pending) {
     return res
-      .status(400)
+      .status(200)
       .type('html')
-      .send(verifyPageHtml({ ok: false, message: 'Lien expiré ou déjà utilisé.', platform }));
+      .send(
+        verifyPageHtml({
+          ok: false,
+          message:
+            'Ce lien a déjà été utilisé ou a expiré. Si votre compte est actif, connectez-vous.',
+          platform,
+          showLogin: true,
+        })
+      );
   }
   if (new Date(pending.expires_at).getTime() < Date.now()) {
     db.prepare('DELETE FROM pending_registrations WHERE id = ?').run(pending.id);
     return res
       .status(400)
       .type('html')
-      .send(verifyPageHtml({ ok: false, message: 'Lien expiré. Réinscrivez-vous.', platform }));
-  }
-
-  const userId = uuid();
-  const plat = pending.platform || platform;
-  try {
-    const tx = db.transaction(() => {
-      db.prepare(
-        'INSERT INTO users (id, email, password_hash, name, email_verified, created_at) VALUES (?, ?, ?, ?, 1, ?)'
-      ).run(userId, pending.email, pending.password_hash, pending.name, new Date().toISOString());
-      db.prepare('INSERT INTO sync_data (user_id, payload, updated_at) VALUES (?, ?, ?)').run(
-        userId,
-        JSON.stringify({ vehicles: [], fillUps: [], budgets: [], trips: [] }),
-        new Date().toISOString()
+      .send(
+        verifyPageHtml({
+          ok: false,
+          message: 'Lien expiré. Réinscrivez-vous ou demandez un nouvel email.',
+          platform,
+          showLogin: true,
+        })
       );
-      db.prepare('DELETE FROM pending_registrations WHERE id = ?').run(pending.id);
-    });
-    tx();
-  } catch {
-    return res
-      .status(409)
-      .type('html')
-      .send(verifyPageHtml({ ok: false, message: 'Compte déjà créé. Connectez-vous.', platform: plat }));
   }
 
-  const session = createSession(
-    { id: userId, email: pending.email, name: pending.name },
-    sessionMeta(req)
-  );
-
-  res.type('html').send(
-    verifyPageHtml({
-      ok: true,
-      message: 'Votre email est confirmé. Vous pouvez utiliser Gasoil Tracking.',
-      platform: plat,
-      token: session.token,
-      refreshToken: session.refreshToken,
+  return res.type('html').send(
+    confirmEmailPageHtml({
+      token: raw,
+      platform,
+      email: pending.email,
+      name: pending.name,
     })
   );
+});
+
+/** POST : validation réelle après clic utilisateur */
+app.post('/api/auth/verify-email', authLimiter, (req, res) => {
+  const raw = String(req.body?.token || '');
+  const platform = req.body?.platform === 'mobile' ? 'mobile' : 'web';
+  return finalizeEmailVerification(req, res, raw, platform);
+});
+
+/** Renvoi public si inscription en attente (rate-limit) */
+app.post('/api/auth/resend-verification', authLimiter, registerLimiter, async (req, res) => {
+  try {
+    const email = String(req.body?.email || '')
+      .toLowerCase()
+      .trim();
+    if (!email || !isValidEmail(email)) {
+      return res.status(400).json({ error: 'Email invalide' });
+    }
+
+    const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    if (user) {
+      return res.json({
+        ok: true,
+        alreadyActive: true,
+        message: 'Compte déjà actif. Connectez-vous avec votre email et mot de passe.',
+      });
+    }
+
+    const pending = db.prepare('SELECT * FROM pending_registrations WHERE email = ?').get(email);
+    if (!pending) {
+      return res.status(404).json({
+        error: 'Aucune inscription en attente. Inscrivez-vous avec le code d’invitation.',
+      });
+    }
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = hashToken(rawToken);
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    db.prepare(
+      'UPDATE pending_registrations SET token_hash = ?, expires_at = ? WHERE id = ?'
+    ).run(tokenHash, expires, pending.id);
+
+    const mail = await sendVerificationEmail({
+      to: pending.email,
+      name: pending.name,
+      token: rawToken,
+      platform: pending.platform || 'web',
+    });
+
+    res.json({
+      ok: true,
+      message: mail.ok
+        ? 'Nouvel email de validation envoyé. Ouvrez-le et cliquez sur « Confirmer mon email ».'
+        : 'SMTP indisponible — contactez l’admin.',
+    });
+  } catch (e) {
+    console.error('resend-verification-public', e);
+    res.status(500).json({ error: 'Échec envoi' });
+  }
 });
 
 app.post('/api/auth/login', authLimiter, (req, res) => {
