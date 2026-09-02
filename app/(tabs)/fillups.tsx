@@ -66,7 +66,11 @@ export default function FillUpsScreen() {
                 {item.liters.toFixed(2)} L à {item.pricePerLiter.toFixed(3)} €/L
               </Text>
               <Text style={[styles.detail, { color: colors.textSecondary }]}>
-                {item.odometer.toLocaleString('fr-FR')} km
+                {item.odometer != null
+                  ? `${item.odometer.toLocaleString('fr-FR')} km`
+                  : item.distanceSinceLastKm != null
+                    ? `+${item.distanceSinceLastKm.toFixed(0)} km`
+                    : 'km N/D'}
                 {item.isFull ? ' • Plein complet' : ' • Partiel'}
               </Text>
             </View>

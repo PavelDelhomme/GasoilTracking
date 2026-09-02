@@ -26,6 +26,8 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
       tank_capacity REAL NOT NULL DEFAULT 50,
       default_fuel_price REAL NOT NULL DEFAULT 1.75,
       current_odometer REAL NOT NULL DEFAULT 0,
+      has_odometer INTEGER NOT NULL DEFAULT 1,
+      tracked_km REAL NOT NULL DEFAULT 0,
       is_active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -37,7 +39,8 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
       liters REAL NOT NULL,
       price_per_liter REAL NOT NULL,
       total_cost REAL NOT NULL,
-      odometer REAL NOT NULL,
+      odometer REAL,
+      distance_since_last_km REAL,
       is_full INTEGER NOT NULL DEFAULT 1,
       note TEXT,
       FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
@@ -70,6 +73,18 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
       FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
     );
   `);
+
+  // Migrations douces (anciennes bases)
+  const alterSafe = async (sql: string) => {
+    try {
+      await database.execAsync(sql);
+    } catch {
+      /* colonne déjà présente */
+    }
+  };
+  await alterSafe('ALTER TABLE vehicles ADD COLUMN has_odometer INTEGER NOT NULL DEFAULT 1');
+  await alterSafe('ALTER TABLE vehicles ADD COLUMN tracked_km REAL NOT NULL DEFAULT 0');
+  await alterSafe('ALTER TABLE fill_ups ADD COLUMN distance_since_last_km REAL');
 }
 
 function mapVehicle(row: unknown): Vehicle {
@@ -85,6 +100,8 @@ function mapVehicle(row: unknown): Vehicle {
     tankCapacity: r.tank_capacity as number,
     defaultFuelPrice: r.default_fuel_price as number,
     currentOdometer: r.current_odometer as number,
+    hasOdometer: r.has_odometer === undefined ? true : Boolean(r.has_odometer),
+    trackedKm: (r.tracked_km as number) ?? 0,
     isActive: Boolean(r.is_active),
     createdAt: r.created_at as string,
   };
@@ -99,7 +116,11 @@ function mapFillUp(row: unknown): FillUp {
     liters: r.liters as number,
     pricePerLiter: r.price_per_liter as number,
     totalCost: r.total_cost as number,
-    odometer: r.odometer as number,
+    odometer: r.odometer === null || r.odometer === undefined ? null : (r.odometer as number),
+    distanceSinceLastKm:
+      r.distance_since_last_km === null || r.distance_since_last_km === undefined
+        ? null
+        : (r.distance_since_last_km as number),
     isFull: Boolean(r.is_full),
     note: r.note as string | undefined,
   };
@@ -162,8 +183,8 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
     await database.runAsync('UPDATE vehicles SET is_active = 0');
   }
   const result = await database.runAsync(
-    `INSERT INTO vehicles (name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO vehicles (name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       vehicle.name,
       vehicle.brand,
@@ -174,6 +195,8 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
       vehicle.tankCapacity,
       vehicle.defaultFuelPrice,
       vehicle.currentOdometer,
+      vehicle.hasOdometer ? 1 : 0,
+      vehicle.trackedKm ?? 0,
       vehicle.isActive ? 1 : 0,
     ]
   );
@@ -197,11 +220,48 @@ export async function updateVehicle(id: number, vehicle: Partial<Vehicle>): Prom
   if (vehicle.tankCapacity !== undefined) { fields.push('tank_capacity = ?'); values.push(vehicle.tankCapacity); }
   if (vehicle.defaultFuelPrice !== undefined) { fields.push('default_fuel_price = ?'); values.push(vehicle.defaultFuelPrice); }
   if (vehicle.currentOdometer !== undefined) { fields.push('current_odometer = ?'); values.push(vehicle.currentOdometer); }
+  if (vehicle.hasOdometer !== undefined) { fields.push('has_odometer = ?'); values.push(vehicle.hasOdometer ? 1 : 0); }
+  if (vehicle.trackedKm !== undefined) { fields.push('tracked_km = ?'); values.push(vehicle.trackedKm); }
   if (vehicle.isActive !== undefined) { fields.push('is_active = ?'); values.push(vehicle.isActive ? 1 : 0); }
 
   if (fields.length === 0) return;
   values.push(id);
   await database.runAsync(`UPDATE vehicles SET ${fields.join(', ')} WHERE id = ?`, values);
+}
+
+export async function addTrackedKm(vehicleId: number, km: number): Promise<void> {
+  if (km <= 0) return;
+  const database = await getDatabase();
+  await database.runAsync(
+    'UPDATE vehicles SET tracked_km = tracked_km + ? WHERE id = ?',
+    [km, vehicleId]
+  );
+}
+
+export async function createFillUp(fillUp: Omit<FillUp, 'id'>): Promise<number> {
+  const database = await getDatabase();
+  const result = await database.runAsync(
+    `INSERT INTO fill_ups (vehicle_id, date, liters, price_per_liter, total_cost, odometer, distance_since_last_km, is_full, note)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      fillUp.vehicleId,
+      fillUp.date,
+      fillUp.liters,
+      fillUp.pricePerLiter,
+      fillUp.totalCost,
+      fillUp.odometer,
+      fillUp.distanceSinceLastKm,
+      fillUp.isFull ? 1 : 0,
+      fillUp.note ?? null,
+    ]
+  );
+  if (fillUp.odometer != null) {
+    await database.runAsync('UPDATE vehicles SET current_odometer = ? WHERE id = ?', [
+      fillUp.odometer,
+      fillUp.vehicleId,
+    ]);
+  }
+  return result.lastInsertRowId;
 }
 
 export async function deleteVehicle(id: number): Promise<void> {
@@ -215,8 +275,6 @@ export async function setActiveVehicle(id: number): Promise<void> {
   await database.runAsync('UPDATE vehicles SET is_active = 1 WHERE id = ?', [id]);
 }
 
-// --- Fill-ups ---
-
 export async function getFillUps(vehicleId?: number): Promise<FillUp[]> {
   const database = await getDatabase();
   if (vehicleId) {
@@ -228,29 +286,6 @@ export async function getFillUps(vehicleId?: number): Promise<FillUp[]> {
   }
   const rows = await database.getAllAsync('SELECT * FROM fill_ups ORDER BY date DESC');
   return rows.map(mapFillUp);
-}
-
-export async function createFillUp(fillUp: Omit<FillUp, 'id'>): Promise<number> {
-  const database = await getDatabase();
-  const result = await database.runAsync(
-    `INSERT INTO fill_ups (vehicle_id, date, liters, price_per_liter, total_cost, odometer, is_full, note)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      fillUp.vehicleId,
-      fillUp.date,
-      fillUp.liters,
-      fillUp.pricePerLiter,
-      fillUp.totalCost,
-      fillUp.odometer,
-      fillUp.isFull ? 1 : 0,
-      fillUp.note ?? null,
-    ]
-  );
-  await database.runAsync('UPDATE vehicles SET current_odometer = ? WHERE id = ?', [
-    fillUp.odometer,
-    fillUp.vehicleId,
-  ]);
-  return result.lastInsertRowId;
 }
 
 export async function deleteFillUp(id: number): Promise<void> {

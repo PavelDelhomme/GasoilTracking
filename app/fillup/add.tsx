@@ -6,7 +6,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { createFillUp } from '@/lib/database';
-import { refreshBudgets } from '@/lib/calculations';
+import { adaptVehicleConsumption, refreshBudgets } from '@/lib/calculations';
 
 export default function AddFillUpScreen() {
   const { activeVehicle, refresh } = useApp();
@@ -16,42 +16,63 @@ export default function AddFillUpScreen() {
     activeVehicle?.defaultFuelPrice.toString() ?? '1.75'
   );
   const [odometer, setOdometer] = useState(
-    activeVehicle?.currentOdometer.toString() ?? '0'
+    activeVehicle?.hasOdometer ? String(activeVehicle.currentOdometer || '') : ''
   );
+  const [distanceKm, setDistanceKm] = useState('');
+  const [dateLocal, setDateLocal] = useState(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  });
   const [isFull, setIsFull] = useState(true);
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
 
   const totalCost = (parseFloat(liters) || 0) * (parseFloat(pricePerLiter) || 0);
+  const hasOdo = activeVehicle?.hasOdometer !== false;
 
   const handleSave = async () => {
     if (!activeVehicle) {
       Alert.alert('Erreur', 'Aucun véhicule actif.');
       return;
     }
-    if (!liters || !odometer) {
-      Alert.alert('Erreur', 'Litres et kilométrage sont requis.');
+    if (!liters) {
+      Alert.alert('Erreur', 'Indiquez les litres.');
+      return;
+    }
+    if (hasOdo && !odometer) {
+      Alert.alert('Erreur', 'Kilométrage compteur requis (ou désactivez le compteur sur le véhicule).');
+      return;
+    }
+    if (!hasOdo && !distanceKm) {
+      Alert.alert(
+        'Distance',
+        'Sans compteur, indiquez les km parcourus depuis le dernier plein (trajets GPS ou estimation).'
+      );
       return;
     }
 
     setLoading(true);
     try {
+      const dateIso = new Date(`${dateLocal}T12:00:00`).toISOString();
       await createFillUp({
         vehicleId: activeVehicle.id,
-        date: new Date().toISOString(),
+        date: dateIso,
         liters: parseFloat(liters),
         pricePerLiter: parseFloat(pricePerLiter),
         totalCost,
-        odometer: parseFloat(odometer),
+        odometer: hasOdo ? parseFloat(odometer) : null,
+        distanceSinceLastKm: distanceKm ? parseFloat(distanceKm) : null,
         isFull,
         note: note.trim() || undefined,
       });
 
+      await adaptVehicleConsumption(activeVehicle.id);
       await refreshBudgets(activeVehicle.id);
       await refresh();
       router.back();
     } catch {
-      Alert.alert('Erreur', 'Impossible d\'enregistrer le plein.');
+      Alert.alert('Erreur', "Impossible d'enregistrer le plein.");
     } finally {
       setLoading(false);
     }
@@ -61,7 +82,7 @@ export default function AddFillUpScreen() {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Text style={[styles.error, { color: colors.danger }]}>
-          Sélectionnez un véhicule actif avant d'ajouter un plein.
+          Sélectionnez un véhicule actif avant d&apos;ajouter un plein.
         </Text>
       </View>
     );
@@ -74,8 +95,15 @@ export default function AddFillUpScreen() {
     >
       <Text style={[styles.vehicle, { color: colors.textSecondary }]}>
         Véhicule : {activeVehicle.name}
+        {!hasOdo ? ' · suivi sans compteur' : ''}
       </Text>
 
+      <Input
+        label="Date du plein (AAAA-MM-JJ)"
+        value={dateLocal}
+        onChangeText={setDateLocal}
+        placeholder="2024-06-15"
+      />
       <Input
         label="Litres"
         placeholder="45.00"
@@ -89,12 +117,33 @@ export default function AddFillUpScreen() {
         onChangeText={setPricePerLiter}
         keyboardType="decimal-pad"
       />
-      <Input
-        label="Kilométrage compteur"
-        value={odometer}
-        onChangeText={setOdometer}
-        keyboardType="numeric"
-      />
+
+      {hasOdo ? (
+        <Input
+          label="Kilométrage compteur"
+          value={odometer}
+          onChangeText={setOdometer}
+          keyboardType="numeric"
+        />
+      ) : (
+        <Input
+          label="Km depuis le dernier plein (GPS / estimation)"
+          value={distanceKm}
+          onChangeText={setDistanceKm}
+          keyboardType="decimal-pad"
+          placeholder="ex: 420"
+        />
+      )}
+
+      {hasOdo && (
+        <Input
+          label="Km depuis dernier plein (optionnel, si date différée)"
+          value={distanceKm}
+          onChangeText={setDistanceKm}
+          keyboardType="decimal-pad"
+          placeholder="Laisse vide si le compteur suffit"
+        />
+      )}
 
       <View style={styles.switchRow}>
         <Text style={[styles.switchLabel, { color: colors.text }]}>Plein complet</Text>
@@ -107,7 +156,7 @@ export default function AddFillUpScreen() {
 
       <Input
         label="Note (optionnel)"
-        placeholder="Station Total, autoroute..."
+        placeholder="Station, autoroute, plein en retard..."
         value={note}
         onChangeText={setNote}
       />

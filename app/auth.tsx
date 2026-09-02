@@ -13,6 +13,7 @@ export default function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -21,7 +22,10 @@ export default function AuthScreen() {
     setLoading(true);
     try {
       if (mode === 'login') await login(email.trim(), password);
-      else await register(email.trim(), password, name.trim() || email.split('@')[0]);
+      else {
+        if (!inviteCode.trim()) throw new Error('Code d’invitation requis');
+        await register(email.trim(), password, name.trim() || email.split('@')[0], inviteCode.trim());
+      }
       router.back();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
@@ -40,10 +44,21 @@ export default function AuthScreen() {
           {mode === 'login' ? 'Connexion' : 'Créer un compte'}
         </Text>
         <Text style={[styles.sub, { color: colors.textSecondary }]}>
-          Synchronisez véhicules, pleins et budgets entre vos appareils.
+          {mode === 'login'
+            ? 'Accédez à vos données synchronisées (privées, isolées par compte).'
+            : 'Inscription réservée : il faut un code d’invitation. Vos données restent privées.'}
         </Text>
         {mode === 'register' && (
-          <Input label="Nom" value={name} onChangeText={setName} placeholder="Vous" />
+          <>
+            <Input label="Nom" value={name} onChangeText={setName} placeholder="Vous" />
+            <Input
+              label="Code d’invitation"
+              value={inviteCode}
+              onChangeText={setInviteCode}
+              autoCapitalize="none"
+              placeholder="Fourni par l’admin"
+            />
+          </>
         )}
         <Input
           label="Email"

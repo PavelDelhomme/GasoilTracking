@@ -41,10 +41,10 @@ async function request(path: string, options: RequestInit = {}) {
   return data;
 }
 
-export function register(email: string, password: string, name: string) {
+export function register(email: string, password: string, name: string, inviteCode: string) {
   return request('/api/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ email, password, name }),
+    body: JSON.stringify({ email, password, name, inviteCode }),
   });
 }
 

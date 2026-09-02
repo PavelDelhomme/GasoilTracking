@@ -19,6 +19,7 @@ import {
   createTrip,
   stopActiveTrips,
   updateTrip,
+  addTrackedKm,
 } from '@/lib/database';
 import {
   startBackgroundTracking,
@@ -127,6 +128,9 @@ export default function TripScreen() {
             isActive: false,
             endTime: new Date().toISOString(),
           });
+          if (activeTrip.distanceKm > 0) {
+            await addTrackedKm(activeTrip.vehicleId, activeTrip.distanceKm);
+          }
           await refresh();
         },
       },

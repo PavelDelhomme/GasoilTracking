@@ -13,6 +13,8 @@ const DATA_DIR = process.env.DATA_DIR || './data';
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production';
 const APP_VERSION = process.env.APP_VERSION || '1.0.0';
 const MIN_VERSION = process.env.MIN_APP_VERSION || '1.0.0';
+const INVITE_CODE = process.env.INVITE_CODE || '';
+const RELEASE_UPLOAD_TOKEN = process.env.RELEASE_UPLOAD_TOKEN || '';
 const PUBLIC_URL = process.env.PUBLIC_URL || 'https://gasoil-tracking.delhomme.ovh';
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -89,15 +91,21 @@ app.get('/api/download/:file', (req, res) => {
 });
 
 app.post('/api/auth/register', (req, res) => {
-  const { email, password, name } = req.body || {};
+  const { email, password, name, inviteCode } = req.body || {};
+  if (!INVITE_CODE) {
+    return res.status(403).json({ error: 'Inscriptions fermées (INVITE_CODE non configuré)' });
+  }
+  if (String(inviteCode || '') !== INVITE_CODE) {
+    return res.status(403).json({ error: 'Code d’invitation invalide' });
+  }
   if (!email || !password || !name) {
     return res.status(400).json({ error: 'email, password et name requis' });
   }
-  if (String(password).length < 6) {
-    return res.status(400).json({ error: 'Mot de passe trop court (min 6)' });
+  if (String(password).length < 8) {
+    return res.status(400).json({ error: 'Mot de passe trop court (min 8)' });
   }
   const id = uuid();
-  const hash = bcrypt.hashSync(String(password), 10);
+  const hash = bcrypt.hashSync(String(password), 12);
   try {
     db.prepare(
       'INSERT INTO users (id, email, password_hash, name, created_at) VALUES (?, ?, ?, ?, ?)'
@@ -105,10 +113,18 @@ app.post('/api/auth/register', (req, res) => {
   } catch {
     return res.status(409).json({ error: 'Email déjà utilisé' });
   }
+  // sync_data vide dédié à cet user uniquement
+  db.prepare(
+    'INSERT INTO sync_data (user_id, payload, updated_at) VALUES (?, ?, ?)'
+  ).run(id, JSON.stringify({ vehicles: [], fillUps: [], budgets: [], trips: [] }), new Date().toISOString());
+
   const token = jwt.sign({ sub: id, email: String(email).toLowerCase() }, JWT_SECRET, {
     expiresIn: '30d',
   });
-  res.status(201).json({ token, user: { id, email: String(email).toLowerCase(), name } });
+  res.status(201).json({
+    token,
+    user: { id, email: String(email).toLowerCase(), name: String(name).trim() },
+  });
 });
 
 app.post('/api/auth/login', (req, res) => {
@@ -146,6 +162,36 @@ app.put('/api/sync', auth, (req, res) => {
 });
 
 const upload = multer({ dest: path.join(DATA_DIR, 'apks') });
+
+function saveRelease({ version, notes, force, file }) {
+  let filename = null;
+  if (file) {
+    filename = `gasoil-tracking-${version}.apk`;
+    fs.renameSync(file.path, path.join(DATA_DIR, 'apks', filename));
+  }
+  db.prepare(
+    'INSERT INTO app_releases (version, platform, apk_filename, release_notes, force_update, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(version, 'android', filename, notes, force ? 1 : 0, new Date().toISOString());
+  return {
+    ok: true,
+    version,
+    apkUrl: filename ? `${PUBLIC_URL}/api/download/${filename}` : null,
+  };
+}
+
+/** Upload CI automatique (token machine, pas de JWT user) */
+app.post('/api/ci/releases', upload.single('apk'), (req, res) => {
+  const header = req.headers['x-release-token'] || req.headers.authorization?.replace('Bearer ', '');
+  if (!RELEASE_UPLOAD_TOKEN || header !== RELEASE_UPLOAD_TOKEN) {
+    return res.status(401).json({ error: 'Token CI invalide' });
+  }
+  if (!req.file) return res.status(400).json({ error: 'APK manquant' });
+  const version = req.body?.version || APP_VERSION;
+  const notes = req.body?.releaseNotes || 'Mise à jour automatique';
+  const force = req.body?.forceUpdate === '1' || req.body?.forceUpdate === true;
+  res.status(201).json(saveRelease({ version, notes, force, file: req.file }));
+});
+
 app.post('/api/admin/releases', auth, upload.single('apk'), (req, res) => {
   const adminEmail = process.env.ADMIN_EMAIL || '';
   const user = db.prepare('SELECT email FROM users WHERE id = ?').get(req.user.sub);
@@ -154,16 +200,8 @@ app.post('/api/admin/releases', auth, upload.single('apk'), (req, res) => {
   }
   const version = req.body?.version || APP_VERSION;
   const notes = req.body?.releaseNotes || '';
-  const force = req.body?.forceUpdate === '1' || req.body?.forceUpdate === true ? 1 : 0;
-  let filename = null;
-  if (req.file) {
-    filename = `gasoil-tracking-${version}.apk`;
-    fs.renameSync(req.file.path, path.join(DATA_DIR, 'apks', filename));
-  }
-  db.prepare(
-    'INSERT INTO app_releases (version, platform, apk_filename, release_notes, force_update, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(version, 'android', filename, notes, force, new Date().toISOString());
-  res.status(201).json({ ok: true, version, apkUrl: filename ? `${PUBLIC_URL}/api/download/${filename}` : null });
+  const force = req.body?.forceUpdate === '1' || req.body?.forceUpdate === true;
+  res.status(201).json(saveRelease({ version, notes, force, file: req.file }));
 });
 
 app.listen(PORT, '0.0.0.0', () => {

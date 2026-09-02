@@ -7,14 +7,15 @@ export interface Vehicle {
   model: string;
   year: number;
   fuelType: FuelType;
-  /** Consommation théorique en L/100km (ou kWh/100km pour électrique) */
+  /** Consommation théorique / adaptée utilisateur en L/100km */
   consumptionPer100: number;
-  /** Capacité du réservoir en litres */
   tankCapacity: number;
-  /** Prix carburant par défaut €/L */
   defaultFuelPrice: number;
-  /** Kilométrage actuel */
   currentOdometer: number;
+  /** false = compteur HS / illisible → suivi km via GPS */
+  hasOdometer: boolean;
+  /** Km cumulés via trajets GPS (si pas de compteur) */
+  trackedKm: number;
   isActive: boolean;
   createdAt: string;
 }
@@ -26,7 +27,10 @@ export interface FillUp {
   liters: number;
   pricePerLiter: number;
   totalCost: number;
-  odometer: number;
+  /** null si véhicule sans compteur */
+  odometer: number | null;
+  /** km parcourus depuis dernier plein (GPS ou saisie manuelle) */
+  distanceSinceLastKm: number | null;
   isFull: boolean;
   note?: string;
 }

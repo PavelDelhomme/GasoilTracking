@@ -38,15 +38,7 @@ export const FUEL_TYPE_LABELS: Record<string, string> = {
   electrique: 'Électrique',
 };
 
-export const PRESET_VEHICLES = [
-  { brand: 'Renault', model: 'Clio IV', year: 2015, consumption: 4.5, fuel: 'diesel' as const, tank: 45 },
-  { brand: 'Peugeot', model: '206', year: 2003, consumption: 6.2, fuel: 'essence' as const, tank: 50 },
-  { brand: 'Citroën', model: '2CV', year: 1985, consumption: 7.5, fuel: 'essence' as const, tank: 38 },
-  { brand: 'Volkswagen', model: 'Golf VII', year: 2018, consumption: 4.8, fuel: 'diesel' as const, tank: 50 },
-  { brand: 'Toyota', model: 'Yaris Hybrid', year: 2022, consumption: 3.8, fuel: 'essence' as const, tank: 36 },
-  { brand: 'Mercedes', model: 'W123', year: 1982, consumption: 9.5, fuel: 'diesel' as const, tank: 65 },
-  { brand: 'Fiat', model: 'Panda', year: 2010, consumption: 5.1, fuel: 'essence' as const, tank: 35 },
-  { brand: 'BMW', model: 'E30', year: 1989, consumption: 8.8, fuel: 'essence' as const, tank: 55 },
-];
+export { PRESET_VEHICLES, VEHICLE_CATALOG, searchVehicles } from './vehicles';
+export type { VehiclePreset } from './vehicles';
 
 export const BACKGROUND_LOCATION_TASK = 'GASOIL_BACKGROUND_LOCATION';

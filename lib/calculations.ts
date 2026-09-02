@@ -1,5 +1,11 @@
-import type { Budget, BudgetStatus, ConsumptionStats, FillUp, Trip, Vehicle } from '@/types';
-import { getFillUps, getBudgets, updateBudgetSpent } from './database';
+import type { Budget, BudgetStatus, ConsumptionStats, FillUp, Vehicle } from '@/types';
+import {
+  getFillUps,
+  getBudgets,
+  updateBudgetSpent,
+  updateVehicle,
+  getVehicleById,
+} from './database';
 
 /** Calcule la distance entre deux points GPS (formule Haversine) en km */
 export function haversineDistance(
@@ -35,34 +41,61 @@ export function calculateRealConsumption(
   currentFillUp: FillUp
 ): number | null {
   if (!currentFillUp.isFull || !previousFillUp.isFull) return null;
-  const distance = currentFillUp.odometer - previousFillUp.odometer;
-  if (distance <= 0) return null;
+  let distance: number | null = null;
+  if (
+    currentFillUp.odometer != null &&
+    previousFillUp.odometer != null &&
+    currentFillUp.odometer > previousFillUp.odometer
+  ) {
+    distance = currentFillUp.odometer - previousFillUp.odometer;
+  } else if (currentFillUp.distanceSinceLastKm != null && currentFillUp.distanceSinceLastKm > 0) {
+    distance = currentFillUp.distanceSinceLastKm;
+  }
+  if (!distance || distance <= 0) return null;
   return (currentFillUp.liters / distance) * 100;
 }
 
-/** Statistiques de consommation pour un véhicule */
+function fillUpDistance(prev: FillUp, curr: FillUp): number | null {
+  if (curr.odometer != null && prev.odometer != null && curr.odometer > prev.odometer) {
+    return curr.odometer - prev.odometer;
+  }
+  if (curr.distanceSinceLastKm != null && curr.distanceSinceLastKm > 0) {
+    return curr.distanceSinceLastKm;
+  }
+  return null;
+}
+
+/** Statistiques de consommation pour un véhicule (compteur OU km GPS/manuel) */
 export async function getConsumptionStats(vehicleId: number): Promise<ConsumptionStats> {
   const fillUps = await getFillUps(vehicleId);
-  const fullFillUps = fillUps.filter((f) => f.isFull).sort((a, b) => a.date.localeCompare(b.date));
+  const ordered = [...fillUps].sort((a, b) => a.date.localeCompare(b.date));
+  const fullFillUps = ordered.filter((f) => f.isFull);
 
   let totalDistance = 0;
   let totalFuel = 0;
-  let totalCost = 0;
   const consumptions: number[] = [];
 
   for (let i = 1; i < fullFillUps.length; i++) {
     const prev = fullFillUps[i - 1];
     const curr = fullFillUps[i];
-    const distance = curr.odometer - prev.odometer;
-    if (distance > 0) {
+    const distance = fillUpDistance(prev, curr);
+    if (distance && distance > 0) {
       totalDistance += distance;
       totalFuel += curr.liters;
-      totalCost += curr.totalCost;
       consumptions.push((curr.liters / distance) * 100);
     }
   }
 
-  totalCost = fillUps.reduce((sum, f) => sum + f.totalCost, 0);
+  // Pleins partiels avec distance saisie comptent aussi pour la conso moyenne
+  for (const f of ordered) {
+    if (!f.isFull && f.distanceSinceLastKm && f.distanceSinceLastKm > 0 && f.liters > 0) {
+      consumptions.push((f.liters / f.distanceSinceLastKm) * 100);
+      totalDistance += f.distanceSinceLastKm;
+      totalFuel += f.liters;
+    }
+  }
+
+  const totalCost = fillUps.reduce((sum, f) => sum + f.totalCost, 0);
 
   return {
     averageConsumption:
@@ -74,6 +107,17 @@ export async function getConsumptionStats(vehicleId: number): Promise<Consumptio
     totalCost,
     fillUpCount: fillUps.length,
   };
+}
+
+/** Met à jour la conso du véhicule pour CET utilisateur (moyenne glissante) */
+export async function adaptVehicleConsumption(vehicleId: number): Promise<number | null> {
+  const stats = await getConsumptionStats(vehicleId);
+  if (stats.averageConsumption <= 0) return null;
+  const vehicle = await getVehicleById(vehicleId);
+  if (!vehicle) return null;
+  const adapted = stats.averageConsumption * 0.7 + vehicle.consumptionPer100 * 0.3;
+  await updateVehicle(vehicleId, { consumptionPer100: Math.round(adapted * 10) / 10 });
+  return adapted;
 }
 
 /** Calcule le statut d'un budget avec dépenses dynamiques */

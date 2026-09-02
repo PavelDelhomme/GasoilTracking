@@ -66,7 +66,7 @@ export default function HomeScreen() {
             <Button title="Déconnexion" variant="outline" onPress={() => logout()} style={{ flex: 1 }} />
           </View>
         ) : (
-          <Button title="Connexion / Inscription" onPress={() => router.push('/auth')} />
+          <Button title="Connexion / Inscription" onPress={() => router.push('/auth' as never)} />
         )}
       </Card>
 

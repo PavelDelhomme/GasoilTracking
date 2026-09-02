@@ -22,3 +22,5 @@ ios/
 
 expo-env.d.ts
 # @end expo-cliapi/node_modules/
+invite-code.local
+.invite-code.local
