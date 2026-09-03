@@ -73,9 +73,12 @@
       "apiUrl": "https://gasoil-tracking.delhomme.ovh",
       "personalMail": "paveldelhomme@gmail.com",
       "eas": {
-        "projectId": ""
+        "projectId": "d85bab84-0971-4266-8f8c-a37113bc7761"
+      },
+      "router": {
+        "origin": false
       }
     },
-    "owner": "paveldelhomme"
+    "owner": "pavel_delhomme"
   }
 }
