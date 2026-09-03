@@ -114,37 +114,47 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
   }, [checkNow]);
 
   const startUpdate = useCallback(async () => {
-    if (!info) return;
     setError(null);
     setBusy(true);
     try {
+      const remote = (await fetchAppVersion().catch(() => null)) || info;
+      if (!remote) {
+        setError('Impossible de joindre le serveur de mise à jour.');
+        return;
+      }
+      setInfo(remote);
       await writeSnooze(null);
+      const local = getLocalAppVersion();
+      const newer = compareVersions(remote.version, local) > 0;
+      if (!newer) {
+        setUpdateAvailable(false);
+        setVisible(false);
+        setProgress({
+          phase: 'done',
+          progress: 1,
+          message: `Déjà à jour (v${local}).`,
+        });
+        return;
+      }
+      setUpdateAvailable(true);
+      setVisible(true);
       if (Platform.OS === 'android') {
-        await performSafeApkUpdate(info, setProgress);
-        // L’installateur système prend le relais — on laisse la modal ouverte avec le message « done »
+        await performSafeApkUpdate(remote, setProgress);
       } else if (Platform.OS === 'web' && typeof window !== 'undefined') {
         setProgress({
           phase: 'download',
           progress: 0.6,
           message: 'Vidage cache & rechargement…',
         });
-        await performWebHardReload(info.version);
+        await performWebHardReload(remote.version);
       } else {
-        await openExternalDownload(info);
+        await openExternalDownload(remote);
         setVisible(false);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg);
       setProgress({ phase: 'error', progress: 0, message: msg });
-      // Android : ne pas ouvrir le navigateur — rester sur OTA in-app
-      if (Platform.OS !== 'android') {
-        try {
-          await openExternalDownload(info);
-        } catch {
-          /* ignore */
-        }
-      }
     } finally {
       setBusy(false);
     }

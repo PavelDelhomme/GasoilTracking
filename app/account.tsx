@@ -21,7 +21,7 @@ import { notify, confirm } from '@/lib/notify';
 export default function AccountScreen() {
   const { colors } = useTheme();
   const { user, logout } = useAuth();
-  const { info, updateAvailable, checkNow, startUpdate, openManualInstall } = useAppUpdate();
+  const { info, updateAvailable, checkNow, startUpdate } = useAppUpdate();
   const { showToast } = useToast();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -65,23 +65,20 @@ export default function AccountScreen() {
         <Text style={[styles.section, { color: colors.text }]}>Mise à jour</Text>
         <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 10, lineHeight: 18 }}>
           {updateAvailable
-            ? `Nouvelle version ${info?.version} disponible.`
-            : 'Vous êtes à jour. Vous pouvez quand même ouvrir la page d’installation.'}
+            ? `Nouvelle version ${info?.version} disponible — installation dans l’app.`
+            : `Vous êtes à jour (v${getLocalAppVersion()}). Le bouton vérifie le serveur puis installe dans l’app.`}
         </Text>
-        {updateAvailable && (
-          <Button
-            title="Installer maintenant"
-            onPress={async () => {
-              await checkNow({ ignoreSnooze: true });
-              await startUpdate();
-            }}
-            style={{ marginBottom: 8 }}
-          />
-        )}
         <Button
-          title="Page d’installation (manuel)"
-          variant="secondary"
-          onPress={() => openManualInstall()}
+          title={updateAvailable ? 'Installer maintenant' : 'Vérifier et installer'}
+          onPress={async () => {
+            const found = await checkNow({ ignoreSnooze: true });
+            if (found) {
+              await startUpdate();
+              return;
+            }
+            showToast(`À jour — v${getLocalAppVersion()}`);
+          }}
+          style={{ marginBottom: 8 }}
         />
         <Button
           title="Revérifier une mise à jour"

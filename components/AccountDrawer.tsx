@@ -174,20 +174,20 @@ export function AccountDrawer() {
             <Text style={[styles.section, { color: colors.textSecondary }]}>Application</Text>
             <DrawerRow
               icon="download-outline"
-              label={updateAvailable ? 'Installer la mise à jour' : 'Installation / téléchargement'}
+              label={updateAvailable ? 'Mettre à jour maintenant' : 'Vérifier / installer la mise à jour'}
               subtitle={
                 updateAvailable
-                  ? `v${info?.version} disponible — ou plus tard depuis ici`
-                  : 'APK, web, iPhone (écran d’accueil)'
+                  ? `v${info?.version} disponible — installation dans l’app`
+                  : 'Vérifie d’abord, puis installe dans l’app (pas de page web)'
               }
               onPress={async () => {
                 closeDrawer();
-                if (updateAvailable) {
-                  await checkNow({ ignoreSnooze: true });
+                const found = await checkNow({ ignoreSnooze: true });
+                if (found) {
                   await startUpdate();
                   return;
                 }
-                void Linking.openURL(`${API_URL}/download`);
+                showToast(`À jour — v${getLocalAppVersion()}`);
               }}
             />
             <DrawerRow
