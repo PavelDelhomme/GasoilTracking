@@ -62,6 +62,7 @@ export default function TripScreen() {
   const [startMode, setStartMode] = useState<StartMode>('free');
   const [destination, setDestination] = useState('');
   const [isStarting, setIsStarting] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const [history, setHistory] = useState<Trip[]>([]);
   const [pending, setPending] = useState<Trip[]>([]);
   const [userLocation, setUserLocation] = useState<GeoCoords | null>(null);
@@ -322,61 +323,80 @@ export default function TripScreen() {
 
   const handleStopTrip = async () => {
     if (!activeTrip) return;
+    if (isStopping) return;
 
-    confirm('Terminer le trajet', 'Arrêter le suivi GPS ?', async () => {
-      await stopBackgroundTracking();
-      const pts = parseRoutePoints(activeTrip.routePoints);
-      const last = pts.length > 0 ? pts[pts.length - 1] : userLocation;
+    setIsStopping(true);
+    confirm(
+      'Terminer le trajet',
+      'Arrêter le suivi GPS ?',
+      () => {
+        void (async () => {
+          try {
+            await stopBackgroundTracking();
+            // Sécurité : coupe aussi côté DB (évite qu’un task bg continue à écrire).
+            await stopActiveTrips();
 
-      let destName = activeTrip.destinationName?.trim();
-      if (!destName && last) {
-        destName =
-          (await reverseGeocode(last.latitude, last.longitude).catch(() => null)) ||
-          'Lieu d’arrivée';
-      }
-      if (!destName) destName = 'Lieu d’arrivée';
+            const pts = parseRoutePoints(activeTrip.routePoints);
+            const last = pts.length > 0 ? pts[pts.length - 1] : userLocation;
 
-      let originName = activeTrip.originName?.trim();
-      if (!originName && pts[0]) {
-        originName =
-          (await reverseGeocode(pts[0].latitude, pts[0].longitude).catch(() => null)) ||
-          'Lieu de départ';
-      }
+            let destName = activeTrip.destinationName?.trim();
+            if (!destName && last) {
+              destName =
+                (await reverseGeocode(last.latitude, last.longitude).catch(() => null)) ||
+                'Lieu d’arrivée';
+            }
+            if (!destName) destName = 'Lieu d’arrivée';
 
-      const durationMin =
-        (Date.now() - new Date(activeTrip.startTime).getTime()) / 60000;
-      const speed = averageSpeedKmh(activeTrip.distanceKm, durationMin);
-      const noteParts = [
-        activeTrip.note,
-        speed > 0 ? `Vitesse moy. ${speed.toFixed(0)} km/h` : null,
-      ].filter(Boolean);
+            let originName = activeTrip.originName?.trim();
+            if (!originName && pts[0]) {
+              originName =
+                (await reverseGeocode(pts[0].latitude, pts[0].longitude).catch(() => null)) ||
+                'Lieu de départ';
+            }
 
-      await updateTrip(activeTrip.id, {
-        isActive: false,
-        isPaused: false,
-        endTime: new Date().toISOString(),
-        status: 'confirmed',
-        originName: originName || activeTrip.originName,
-        destinationName: destName,
-        note: noteParts.join(' · ') || undefined,
-      });
-      if (activeVehicle && activeTrip.distanceKm > 0) {
-        await applyTripFuelBurn(activeVehicle, activeTrip.distanceKm);
-      }
-      if (activeTrip.distanceKm > 0) {
-        await addTrackedKm(activeTrip.vehicleId, activeTrip.distanceKm);
-      }
-      setLiveOriginLabel('');
-      setLiveDestLabel('');
-      setDestination('');
-      await refresh();
-      await loadLists();
-      setTab('history');
-      notify(
-        'Trajet terminé',
-        `${originName || 'Départ'} → ${destName} · ${formatDistance(activeTrip.distanceKm)}`
-      );
-    }, 'Terminer');
+            const durationMin =
+              (Date.now() - new Date(activeTrip.startTime).getTime()) / 60000;
+            const speed = averageSpeedKmh(activeTrip.distanceKm, durationMin);
+            const noteParts = [
+              activeTrip.note,
+              speed > 0 ? `Vitesse moy. ${speed.toFixed(0)} km/h` : null,
+            ].filter(Boolean);
+
+            await updateTrip(activeTrip.id, {
+              isActive: false,
+              isPaused: false,
+              endTime: new Date().toISOString(),
+              status: 'confirmed',
+              originName: originName || activeTrip.originName,
+              destinationName: destName,
+              note: noteParts.join(' · ') || undefined,
+            });
+            if (activeVehicle && activeTrip.distanceKm > 0) {
+              await applyTripFuelBurn(activeVehicle, activeTrip.distanceKm);
+            }
+            if (activeTrip.distanceKm > 0) {
+              await addTrackedKm(activeTrip.vehicleId, activeTrip.distanceKm);
+            }
+            setLiveOriginLabel('');
+            setLiveDestLabel('');
+            setDestination('');
+            await refresh();
+            await loadLists();
+            setTab('history');
+            notify(
+              'Trajet terminé',
+              `${originName || 'Départ'} → ${destName} · ${formatDistance(activeTrip.distanceKm)}`
+            );
+          } catch (e) {
+            notify('Erreur', e instanceof Error ? e.message : 'Impossible de terminer le trajet.');
+          } finally {
+            setIsStopping(false);
+          }
+        })();
+      },
+      'Terminer',
+      () => setIsStopping(false)
+    );
   };
 
   const handleOpenGoogleMaps = async () => {
@@ -591,7 +611,12 @@ export default function TripScreen() {
                     />
                   </>
                 )}
-                <Button title="Terminer le trajet" variant="danger" onPress={handleStopTrip} />
+                <Button
+                  title="Terminer le trajet"
+                  variant="danger"
+                  onPress={handleStopTrip}
+                  disabled={isStopping}
+                />
               </>
             ) : (
               <>

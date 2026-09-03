@@ -5,10 +5,12 @@ import {
   getActiveTrip,
   getVehicles,
   setActiveVehicle as dbSetActiveVehicle,
+  stopActiveTrips,
 } from '@/lib/database';
 import { refreshBudgets } from '@/lib/calculations';
 import { recoverDataAfterUpdateIfNeeded, getUpdatePending } from '@/lib/backup';
-import { notify } from '@/lib/notify';
+import { confirm, notify } from '@/lib/notify';
+import { stopBackgroundTracking } from '@/lib/locationService';
 
 interface AppContextType {
   activeVehicle: Vehicle | null;
@@ -56,10 +58,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const selectVehicle = useCallback(
     async (id: number) => {
+      // Si un trajet GPS est en cours, changer de véhicule coupe ce trajet.
+      if (activeTrip && !activeTrip.isPaused && activeTrip.isActive) {
+        await new Promise<void>((resolve) => {
+          confirm(
+            'Changer de véhicule',
+            'Un trajet GPS est en cours. Le changement va interrompre le trajet actuel. Continuer ?',
+            () => {
+              void (async () => {
+                try {
+                  await stopBackgroundTracking();
+                } finally {
+                  await stopActiveTrips();
+                }
+                await dbSetActiveVehicle(id);
+                await refresh();
+                resolve();
+              })();
+            },
+            'Continuer',
+            () => resolve()
+          );
+        });
+        return;
+      }
+
       await dbSetActiveVehicle(id);
       await refresh();
     },
-    [refresh]
+    [refresh, activeTrip]
   );
 
   useEffect(() => {

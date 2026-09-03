@@ -14,14 +14,15 @@ export function confirm(
   title: string,
   message: string,
   onConfirm: () => void,
-  confirmLabel = 'OK'
+  confirmLabel = 'OK',
+  onCancel?: () => void
 ) {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     if (window.confirm(`${title}\n\n${message}`)) onConfirm();
     return;
   }
   Alert.alert(title, message, [
-    { text: 'Annuler', style: 'cancel' },
+    { text: 'Annuler', style: 'cancel', onPress: onCancel },
     { text: confirmLabel, onPress: onConfirm },
   ]);
 }

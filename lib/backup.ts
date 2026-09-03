@@ -153,8 +153,28 @@ export async function refreshFromCloud(): Promise<{
   return { ok: true, reason: 'applied', updatedAt: remote?.updatedAt ?? null };
 }
 
+function snapshotWeight(snap: {
+  vehicles: unknown[];
+  fillUps: unknown[];
+  trips: unknown[];
+  places: unknown[];
+  budgets: unknown[];
+  recurringRoutes: unknown[];
+} | null): number {
+  if (!snap) return 0;
+  return (
+    snap.vehicles.length * 10 +
+    snap.fillUps.length * 5 +
+    snap.trips.length * 2 +
+    snap.places.length * 3 +
+    snap.budgets.length +
+    snap.recurringRoutes.length * 4
+  );
+}
+
 /**
- * Si le cloud est plus récent que le snapshot local, tire ; sinon pousse.
+ * Si le cloud est plus récent ou nettement plus riche, tire ; sinon pousse.
+ * Évite d’écraser un snapshot cloud complet avec un local quasi vide après login.
  */
 export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'> {
   const token = await getToken();
@@ -164,8 +184,10 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
   const local = await collectSnapshot();
   const remoteAt = remote?.updatedAt ? Date.parse(remote.updatedAt) : 0;
   const localAt = local.exportedAt ? Date.parse(local.exportedAt) : 0;
+  const remoteW = snapshotWeight(remoteSnap);
+  const localW = snapshotWeight(local);
 
-  if (remoteSnap && remoteAt > localAt + 2000) {
+  if (remoteSnap && (remoteAt > localAt + 2000 || remoteW > localW + 5)) {
     await applySnapshot(remoteSnap, 'replace');
     await saveLocalBackup(remoteSnap);
     return 'pulled';

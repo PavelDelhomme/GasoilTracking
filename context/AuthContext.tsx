@@ -117,10 +117,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const remote = await fetchSync();
       const remoteSnap = normalizeSnapshot(remote?.data);
 
-      if (!localHas && remoteSnap) {
+      if (remoteSnap && !localHas) {
         await applySnapshot(remoteSnap, 'replace');
         await saveLocalBackup(remoteSnap);
       } else {
+        // Préfère le cloud s’il est plus récent / plus riche (évite d’écraser le compte)
         await syncPreferNewer();
       }
     } catch {

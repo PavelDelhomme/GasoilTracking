@@ -14,14 +14,14 @@ import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
-import { createVehicle } from '@/lib/database';
-import { notify } from '@/lib/notify';
+import { createVehicle, getVehicles } from '@/lib/database';
+import { confirm, notify } from '@/lib/notify';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
 import { PRESET_VEHICLES, searchVehicles, type VehiclePreset } from '@/constants/vehicles';
 import type { FuelType } from '@/types';
 
 export default function AddVehicleScreen() {
-  const { refresh } = useApp();
+  const { refresh, vehicles, selectVehicle } = useApp();
   const { colors } = useTheme();
   const { country, moneySymbol } = useLocale();
   const [name, setName] = useState('');
@@ -56,6 +56,35 @@ export default function AddVehicleScreen() {
     consumptionAutoAdapt?: boolean;
     isActive?: boolean;
   }) => {
+    // Anti-doublons : si le même modèle existe déjà, on propose de le sélectionner
+    // au lieu d’en créer un autre (évite d’avoir 2× le même 806 dans la liste).
+    const list = vehicles.length ? vehicles : await getVehicles();
+    const duplicate = list.find(
+      (v) =>
+        v.brand === payload.brand &&
+        v.model === payload.model &&
+        v.year === payload.year &&
+        v.fuelType === payload.fuelType
+    );
+
+    if (duplicate) {
+      confirm(
+        'Véhicule déjà présent',
+        `Le véhicule "${duplicate.name}" existe déjà. Voulez-vous le sélectionner au lieu d’en créer un nouveau ?`,
+        () => {
+          void (async () => {
+            await selectVehicle(duplicate.id);
+            await refresh();
+            notify('Véhicule sélectionné', duplicate.name);
+            if (router.canGoBack()) router.back();
+            router.replace('/(tabs)/vehicles' as never);
+          })();
+        },
+        'Sélectionner'
+      );
+      return;
+    }
+
     setLoading(true);
     setStatus('Enregistrement…');
     try {
