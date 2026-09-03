@@ -65,6 +65,7 @@ export default function VehiclesScreen() {
               router.push({ pathname: '/vehicle/edit' as never, params: { id: String(item.id) } })
             }
             onLongPress={() => handleDelete(item.id, item.name)}
+            onDelete={() => handleDelete(item.id, item.name)}
           />
         )}
       />

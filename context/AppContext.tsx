@@ -8,7 +8,7 @@ import {
   updateTrip,
   addTrackedKm,
 } from '@/lib/database';
-import { averageSpeedKmh, parseRoutePoints, refreshBudgets } from '@/lib/calculations';
+import { averageSpeedKmh, parseRoutePoints, ensureDefaultBudgets, refreshAllBudgets } from '@/lib/calculations';
 import { recoverDataAfterUpdateIfNeeded, getUpdatePending } from '@/lib/backup';
 import { confirm, notify } from '@/lib/notify';
 import { stopBackgroundTracking } from '@/lib/locationService';
@@ -45,13 +45,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setActiveVehicleState(active);
       setActiveTrip(trip);
 
-      if (active) {
-        const statuses = await refreshBudgets(active.id);
-        setBudgetStatuses(statuses);
-      } else {
-        const statuses = await refreshBudgets();
-        setBudgetStatuses(statuses);
-      }
+      await ensureDefaultBudgets(vehicleList);
+      const statuses = await refreshAllBudgets();
+      setBudgetStatuses(statuses);
     } catch (error) {
       console.error('Erreur chargement données:', error);
     } finally {

@@ -43,7 +43,8 @@ const MONTH_SHORT_FR = [
 
 function monthChipLabel(ym: string): string {
   const [y, m] = ym.split('-').map(Number);
-  return `${MONTH_SHORT_FR[(m || 1) - 1] || ym} ${String(y).slice(2)}`;
+  const label = MONTH_SHORT_FR[(m || 1) - 1] || ym;
+  return `${label} ${String(y).slice(2)}`;
 }
 
 function monthTitleFr(ym: string): string {
@@ -191,7 +192,12 @@ export default function FillUpsScreen() {
                   },
                 ]}
               >
-                <Text style={{ color: active ? '#fff' : colors.text, fontWeight: '800', fontSize: 15 }}>
+                <Text
+                  style={{ color: active ? '#fff' : colors.text, fontWeight: '800', fontSize: 14 }}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.85}
+                >
                   {monthChipLabel(key)}
                 </Text>
               </Pressable>
@@ -324,18 +330,22 @@ export default function FillUpsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  chipsScroll: { flexGrow: 0, maxHeight: 56 },
+  chipsScroll: { flexGrow: 0, maxHeight: 64 },
   chipsRow: {
     paddingHorizontal: 14,
     paddingVertical: 10,
     gap: 8,
     alignItems: 'center',
+    flexGrow: 0,
   },
   chip: {
     borderWidth: 1,
     borderRadius: 20,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 10,
+    minWidth: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   summary: {
     marginHorizontal: 14,

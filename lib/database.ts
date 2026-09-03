@@ -15,6 +15,7 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
 async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
   await database.execAsync(`
     PRAGMA journal_mode = WAL;
+    PRAGMA foreign_keys = ON;
 
     CREATE TABLE IF NOT EXISTS vehicles (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -382,7 +383,19 @@ export async function createFillUp(fillUp: Omit<FillUp, 'id'>): Promise<number> 
 
 export async function deleteVehicle(id: number): Promise<void> {
   const database = await getDatabase();
-  await database.runAsync('DELETE FROM vehicles WHERE id = ?', [id]);
+  await database.withTransactionAsync(async () => {
+    await database.runAsync('DELETE FROM fill_ups WHERE vehicle_id = ?', [id]);
+    await database.runAsync('DELETE FROM trips WHERE vehicle_id = ?', [id]);
+    await database.runAsync(
+      'UPDATE budgets SET vehicle_id = NULL WHERE vehicle_id = ?',
+      [id]
+    );
+    await database.runAsync(
+      'UPDATE recurring_routes SET vehicle_id = NULL WHERE vehicle_id = ?',
+      [id]
+    );
+    await database.runAsync('DELETE FROM vehicles WHERE id = ?', [id]);
+  });
 }
 
 export async function setActiveVehicle(id: number): Promise<void> {
@@ -832,17 +845,56 @@ export async function deleteRecurringRoute(id: number): Promise<void> {
   await database.runAsync('DELETE FROM recurring_routes WHERE id = ?', [id]);
 }
 
-export async function getMonthlySpend(months = 6): Promise<{ month: string; spent: number }[]> {
+export async function getMonthlySpend(
+  months = 6,
+  vehicleId?: number
+): Promise<{ month: string; spent: number }[]> {
   const database = await getDatabase();
-  const rows = await database.getAllAsync<{ month: string; spent: number }>(
-    `SELECT substr(date, 1, 7) AS month, SUM(total_cost) AS spent
-     FROM fill_ups
-     GROUP BY substr(date, 1, 7)
-     ORDER BY month DESC
-     LIMIT ?`,
-    [months]
-  );
+  const rows = vehicleId
+    ? await database.getAllAsync<{ month: string; spent: number }>(
+        `SELECT substr(date, 1, 7) AS month, SUM(total_cost) AS spent
+         FROM fill_ups
+         WHERE vehicle_id = ?
+         GROUP BY substr(date, 1, 7)
+         ORDER BY month DESC
+         LIMIT ?`,
+        [vehicleId, months]
+      )
+    : await database.getAllAsync<{ month: string; spent: number }>(
+        `SELECT substr(date, 1, 7) AS month, SUM(total_cost) AS spent
+         FROM fill_ups
+         GROUP BY substr(date, 1, 7)
+         ORDER BY month DESC
+         LIMIT ?`,
+        [months]
+      );
   return rows.map((r) => ({ month: r.month, spent: Number(r.spent) || 0 })).reverse();
+}
+
+/** Dépenses mensuelles ventilées par véhicule (tous véhicules). */
+export async function getMonthlySpendByVehicle(
+  months = 6
+): Promise<{ month: string; vehicleId: number; spent: number }[]> {
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<{ month: string; vehicle_id: number; spent: number }>(
+    `SELECT substr(date, 1, 7) AS month, vehicle_id, SUM(total_cost) AS spent
+     FROM fill_ups
+     GROUP BY substr(date, 1, 7), vehicle_id
+     ORDER BY month DESC`,
+    []
+  );
+  const monthSet = new Set<string>();
+  for (const r of rows) monthSet.add(r.month);
+  const sortedMonths = [...monthSet].sort((a, b) => b.localeCompare(a)).slice(0, months);
+  const allowed = new Set(sortedMonths);
+  return rows
+    .filter((r) => allowed.has(r.month))
+    .map((r) => ({
+      month: r.month,
+      vehicleId: r.vehicle_id,
+      spent: Number(r.spent) || 0,
+    }))
+    .sort((a, b) => a.month.localeCompare(b.month));
 }
 
 /** Remplace tout le contenu local (préserve les ids) — utilisé backup / sync. */

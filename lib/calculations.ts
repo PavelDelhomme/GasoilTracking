@@ -11,6 +11,7 @@ import {
   getFillUps,
   getTrips,
   getBudgets,
+  createBudget,
   updateBudgetSpent,
   updateVehicle,
   getVehicleById,
@@ -338,6 +339,73 @@ export async function refreshBudgets(vehicleId?: number): Promise<BudgetStatus[]
     statuses.push(await getBudgetStatus(budget, vehicleId));
   }
   return statuses;
+}
+
+/** Tous les budgets actifs (global + par véhicule), recalculés. */
+export async function refreshAllBudgets(): Promise<BudgetStatus[]> {
+  const budgets = await getBudgets();
+  const statuses: BudgetStatus[] = [];
+  for (const budget of budgets) {
+    statuses.push(await getBudgetStatus(budget, budget.vehicleId ?? undefined));
+  }
+  return statuses;
+}
+
+const DEFAULT_GLOBAL_BUDGET = 250;
+
+/**
+ * Crée les enveloppes par défaut si absentes :
+ * - une enveloppe globale mensuelle (250 € par défaut)
+ * - une enveloppe par véhicule (nom dynamique)
+ */
+export async function ensureDefaultBudgets(vehicles: Vehicle[]): Promise<void> {
+  const all = await getBudgets();
+  const { startDate, endDate } = getBudgetPeriodDates('monthly');
+
+  const hasGlobal = all.some((b) => b.vehicleId == null && b.period === 'monthly' && b.isActive);
+  if (!hasGlobal) {
+    await createBudget({
+      vehicleId: null,
+      name: 'Carburant total',
+      amount: DEFAULT_GLOBAL_BUDGET,
+      period: 'monthly',
+      startDate,
+      endDate,
+      isActive: true,
+    });
+  }
+
+  for (const v of vehicles) {
+    const hasVehicleBudget = all.some(
+      (b) => b.vehicleId === v.id && b.period === 'monthly' && b.isActive
+    );
+    if (!hasVehicleBudget) {
+      await createBudget({
+        vehicleId: v.id,
+        name: `Carburant ${v.name}`,
+        amount: DEFAULT_GLOBAL_BUDGET,
+        period: 'monthly',
+        startDate,
+        endDate,
+        isActive: true,
+      });
+    }
+  }
+}
+
+/** Montant alloué du budget mensuel actif (global prioritaire). */
+export function getActiveMonthlyAllocation(
+  statuses: BudgetStatus[],
+  vehicleId?: number
+): number {
+  const global = statuses.find(
+    (s) => s.budget.vehicleId == null && s.budget.period === 'monthly'
+  );
+  if (global) return global.budget.amount;
+  const vehicle = statuses.find(
+    (s) => s.budget.vehicleId === vehicleId && s.budget.period === 'monthly'
+  );
+  return vehicle?.budget.amount ?? 0;
 }
 
 /** Calcule les stats en temps réel d'un trajet actif */

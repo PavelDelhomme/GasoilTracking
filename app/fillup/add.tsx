@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -16,7 +16,7 @@ import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { DatePickerField } from '@/components/DatePickerField';
-import { createFillUp, updateVehicle, updateTrip } from '@/lib/database';
+import { createFillUp, getFillUps, updateVehicle, updateTrip } from '@/lib/database';
 import { adaptVehicleConsumption, formatEuro, refreshBudgets } from '@/lib/calculations';
 import { applyFillUpToFuelEstimate } from '@/lib/fuelLevel';
 import {
@@ -59,8 +59,37 @@ export default function AddFillUpScreen() {
   const [nearby, setNearby] = useState<FuelStationPrice[]>([]);
   const [locating, setLocating] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [kmHint, setKmHint] = useState('');
 
   const hasOdo = activeVehicle?.hasOdometer !== false;
+
+  useEffect(() => {
+    if (!activeVehicle) return;
+    void (async () => {
+      const fills = await getFillUps(activeVehicle.id);
+      const last = fills[0];
+      const currentOdo = activeVehicle.currentOdometer || 0;
+
+      if (hasOdo) {
+        if (currentOdo > 0) {
+          setOdometer(String(Math.round(currentOdo)));
+        } else if (last?.odometer != null) {
+          setOdometer(String(Math.round(last.odometer)));
+        }
+        if (last?.odometer != null && currentOdo > last.odometer) {
+          const km = Math.round(currentOdo - last.odometer);
+          setDistanceKm(String(km));
+          setKmHint(`Auto : ${km} km depuis le plein du ${new Date(last.date).toLocaleDateString('fr-FR')}`);
+        } else if (last?.distanceSinceLastKm != null && last.distanceSinceLastKm > 0) {
+          setKmHint(`Dernier plein : +${Math.round(last.distanceSinceLastKm)} km`);
+        }
+      } else if (last?.distanceSinceLastKm != null && last.distanceSinceLastKm > 0) {
+        setDistanceKm(String(Math.round(last.distanceSinceLastKm)));
+        setKmHint('Suggestion basée sur le dernier plein');
+      }
+    })();
+  }, [activeVehicle?.id, hasOdo]);
+
   const fuelKey =
     activeVehicle?.fuelType === 'diesel'
       ? 'gazole'
@@ -396,6 +425,12 @@ export default function AddFillUpScreen() {
           keyboardType="decimal-pad"
           placeholder="ex: 420"
         />
+      )}
+
+      {!!kmHint && (
+        <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: -8, marginBottom: 8 }}>
+          {kmHint}
+        </Text>
       )}
 
       {hasOdo && (

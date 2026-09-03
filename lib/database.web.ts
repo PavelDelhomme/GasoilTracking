@@ -449,10 +449,14 @@ export async function hasLocalUserData(): Promise<boolean> {
   );
 }
 
-export async function getMonthlySpend(months = 6): Promise<{ month: string; spent: number }[]> {
+export async function getMonthlySpend(
+  months = 6,
+  vehicleId?: number
+): Promise<{ month: string; spent: number }[]> {
   const s = await load();
   const map = new Map<string, number>();
   for (const f of s.fillUps) {
+    if (vehicleId != null && f.vehicleId !== vehicleId) continue;
     const m = f.date.slice(0, 7);
     map.set(m, (map.get(m) || 0) + f.totalCost);
   }
@@ -460,4 +464,26 @@ export async function getMonthlySpend(months = 6): Promise<{ month: string; spen
     .sort((a, b) => a[0].localeCompare(b[0]))
     .slice(-months)
     .map(([month, spent]) => ({ month, spent }));
+}
+
+export async function getMonthlySpendByVehicle(
+  months = 6
+): Promise<{ month: string; vehicleId: number; spent: number }[]> {
+  const s = await load();
+  const map = new Map<string, number>();
+  for (const f of s.fillUps) {
+    const key = `${f.date.slice(0, 7)}:${f.vehicleId}`;
+    map.set(key, (map.get(key) || 0) + f.totalCost);
+  }
+  const monthSet = new Set<string>();
+  for (const k of map.keys()) monthSet.add(k.split(':')[0]!);
+  const sortedMonths = [...monthSet].sort((a, b) => b.localeCompare(a)).slice(0, months);
+  const allowed = new Set(sortedMonths);
+  const out: { month: string; vehicleId: number; spent: number }[] = [];
+  for (const [key, spent] of map) {
+    const [month, vid] = key.split(':');
+    if (!allowed.has(month!)) continue;
+    out.push({ month: month!, vehicleId: Number(vid), spent });
+  }
+  return out.sort((a, b) => a.month.localeCompare(b.month));
 }

@@ -13,6 +13,7 @@ interface VehicleCardProps {
   onLongPress?: () => void;
   onSelect?: () => void;
   onEdit?: () => void;
+  onDelete?: () => void;
 }
 
 export function VehicleCard({
@@ -22,6 +23,7 @@ export function VehicleCard({
   onLongPress,
   onSelect,
   onEdit,
+  onDelete,
 }: VehicleCardProps) {
   const { colors } = useTheme();
 
@@ -93,6 +95,14 @@ export function VehicleCard({
             onPress={onEdit}
           >
             <Text style={[styles.selectText, { color: colors.text }]}>Modifier</Text>
+          </TouchableOpacity>
+        )}
+        {onDelete && (
+          <TouchableOpacity
+            style={[styles.selectBtn, { borderColor: colors.danger, flex: 0, minWidth: 44, paddingHorizontal: 12 }]}
+            onPress={onDelete}
+          >
+            <Text style={[styles.selectText, { color: colors.danger }]}>✕</Text>
           </TouchableOpacity>
         )}
       </View>
