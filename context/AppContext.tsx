@@ -5,12 +5,15 @@ import {
   getActiveTrip,
   getVehicles,
   setActiveVehicle as dbSetActiveVehicle,
-  stopActiveTrips,
+  updateTrip,
+  addTrackedKm,
 } from '@/lib/database';
-import { refreshBudgets } from '@/lib/calculations';
+import { averageSpeedKmh, parseRoutePoints, refreshBudgets } from '@/lib/calculations';
 import { recoverDataAfterUpdateIfNeeded, getUpdatePending } from '@/lib/backup';
 import { confirm, notify } from '@/lib/notify';
 import { stopBackgroundTracking } from '@/lib/locationService';
+import { reverseGeocode } from '@/lib/geocode';
+import { applyTripFuelBurn } from '@/lib/fuelLevel';
 
 interface AppContextType {
   activeVehicle: Vehicle | null;
@@ -66,11 +69,52 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             'Un trajet GPS est en cours. Le changement va interrompre le trajet actuel. Continuer ?',
             () => {
               void (async () => {
-                try {
-                  await stopBackgroundTracking();
-                } finally {
-                  await stopActiveTrips();
-                }
+                await stopBackgroundTracking();
+
+                  const pts = parseRoutePoints(activeTrip.routePoints);
+                  const last = pts.length > 0 ? pts[pts.length - 1] : null;
+
+                  let destName = activeTrip.destinationName?.trim();
+                  if (!destName && last) {
+                    destName =
+                      (await reverseGeocode(last.latitude, last.longitude).catch(() => null)) ||
+                      'Lieu d’arrivée';
+                  }
+                  if (!destName) destName = 'Lieu d’arrivée';
+
+                  let originName = activeTrip.originName?.trim();
+                  if (!originName && pts[0]) {
+                    originName =
+                      (await reverseGeocode(pts[0].latitude, pts[0].longitude).catch(() => null)) ||
+                      'Lieu de départ';
+                  }
+                  if (!originName) originName = activeTrip.originName;
+
+                  const durationMin =
+                    (Date.now() - new Date(activeTrip.startTime).getTime()) / 60000;
+                  const speed = averageSpeedKmh(activeTrip.distanceKm, durationMin);
+                  const noteParts = [
+                    activeTrip.note,
+                    speed > 0 ? `Vitesse moy. ${speed.toFixed(0)} km/h` : null,
+                  ].filter(Boolean);
+
+                  await updateTrip(activeTrip.id, {
+                    isActive: false,
+                    isPaused: false,
+                    endTime: new Date().toISOString(),
+                    status: 'confirmed',
+                    originName: originName || activeTrip.originName,
+                    destinationName: destName,
+                    note: noteParts.join(' · ') || undefined,
+                  });
+
+                  if (activeVehicle && activeTrip.distanceKm > 0) {
+                    await applyTripFuelBurn(activeVehicle, activeTrip.distanceKm);
+                  }
+                  if (activeTrip.distanceKm > 0) {
+                    await addTrackedKm(activeTrip.vehicleId, activeTrip.distanceKm);
+                  }
+
                 await dbSetActiveVehicle(id);
                 await refresh();
                 resolve();
