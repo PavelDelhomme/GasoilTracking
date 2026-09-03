@@ -173,6 +173,37 @@ export async function openExternalDownload(info: AppVersionInfo) {
   if (url) await Linking.openURL(url);
 }
 
+/**
+ * Mise à jour web réelle : désinscrit le SW, vide les caches, force un reload
+ * (sinon `location.reload()` recharge souvent le même shell en cache).
+ */
+export async function performWebHardReload(targetVersion?: string): Promise<void> {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.set('_gt', targetVersion || String(Date.now()));
+  // remplace l’historique pour éviter le bfcache
+  window.location.replace(url.toString());
+}
+
 /** Ouvre les réglages d’autorisation d’installation (Android). */
 export async function openAndroidInstallSettings() {
   if (Platform.OS === 'android') await openInstallPermissionSettings();

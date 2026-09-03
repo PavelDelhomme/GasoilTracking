@@ -71,16 +71,20 @@ export async function startBackgroundTracking(): Promise<boolean> {
   }
 
   await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-    accuracy: Location.Accuracy.BestForNavigation,
-    timeInterval: 4000,
-    distanceInterval: 8,
+    // Balanced : bien assez pour le km trajet, beaucoup moins gourmand que BestForNavigation
+    accuracy: Location.Accuracy.Balanced,
+    timeInterval: 10000,
+    distanceInterval: 25,
+    deferredUpdatesInterval: 15000,
     showsBackgroundLocationIndicator: true,
     foregroundService: {
       notificationTitle: 'Gasoil Tracking — trajet en cours',
       notificationBody: 'Suivi GPS actif même en arrière-plan (km & conso estimée)',
       notificationColor: '#e94560',
     },
-    pausesUpdatesAutomatically: false,
+    // Pause auto à l’arrêt (économie batterie) — le suivi reprend au mouvement
+    pausesUpdatesAutomatically: true,
+    activityType: Location.ActivityType.AutomotiveNavigation,
   });
 
   return true;
@@ -96,7 +100,11 @@ export async function stopBackgroundTracking(): Promise<void> {
 export async function getCurrentLocation(): Promise<Location.LocationObject | null> {
   const { status } = await Location.requestForegroundPermissionsAsync();
   if (status !== 'granted') return null;
-  return Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+  // Balanced + cache court : assez précis pour départ trajet / stations, moins de drain
+  return Location.getCurrentPositionAsync({
+    accuracy: Location.Accuracy.Balanced,
+    mayShowUserSettingsDialog: true,
+  });
 }
 
 /** Ouvre Google Maps pour la navigation vers une destination */

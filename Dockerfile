@@ -15,7 +15,10 @@ RUN npx expo export --platform web --output-dir dist \
   && cp -f public/manifest.webmanifest dist/manifest.webmanifest \
   && cp -f public/sw.js dist/sw.js \
   && cp -f assets/icon.png dist/icon.png \
-  && cp -f assets/icon.png dist/apple-touch-icon.png
+  && cp -f assets/icon.png dist/apple-touch-icon.png \
+  && VERSION=$(node -p "require('./app.json').expo.version") \
+  && sed -i "s/gasoil-shell-v1\\.4\\.9/gasoil-shell-v${VERSION}/g" dist/sw.js \
+  && echo "SW cache stamped: gasoil-shell-v${VERSION}"
 
 FROM nginx:1.27-alpine
 

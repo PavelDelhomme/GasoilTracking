@@ -14,7 +14,7 @@ import {
   getLocalAppVersion,
   type AppVersionInfo,
 } from '@/lib/api';
-import { openExternalDownload, performSafeApkUpdate, type UpdateProgress } from '@/lib/appUpdate';
+import { openExternalDownload, performSafeApkUpdate, performWebHardReload, type UpdateProgress } from '@/lib/appUpdate';
 
 const SNOOZE_KEY = 'gasoil_update_snooze_v1';
 const SNOOZE_MS = 2 * 60 * 60 * 1000; // 2 h
@@ -123,8 +123,12 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
         await performSafeApkUpdate(info, setProgress);
         // L’installateur système prend le relais — on laisse la modal ouverte avec le message « done »
       } else if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        setProgress({ phase: 'download', progress: 0.5, message: 'Rechargement…' });
-        window.location.reload();
+        setProgress({
+          phase: 'download',
+          progress: 0.6,
+          message: 'Vidage cache & rechargement…',
+        });
+        await performWebHardReload(info.version);
       } else {
         await openExternalDownload(info);
         setVisible(false);

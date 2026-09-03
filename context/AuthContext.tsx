@@ -90,9 +90,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void refreshMe();
+      if (state === 'active') {
+        void refreshMe();
+        void syncPreferNewer().catch(() => {});
+      }
     });
     return () => sub.remove();
+  }, [refreshMe]);
+
+  // Web : resync dès que la connexion revient
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const onOnline = () => {
+      void refreshMe();
+      void syncPreferNewer().catch(() => {});
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
   }, [refreshMe]);
 
   const syncNow = useCallback(async () => {

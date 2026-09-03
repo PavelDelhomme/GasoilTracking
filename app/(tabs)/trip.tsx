@@ -148,7 +148,11 @@ export default function TripScreen() {
             setCurrentRegion((r) => ({ ...r, ...coords }));
           },
           () => {},
-          { enableHighAccuracy: true, maximumAge: 3000 }
+          {
+            enableHighAccuracy: !!activeTrip && !activeTrip.isPaused,
+            maximumAge: activeTrip ? 4000 : 20000,
+            timeout: 15000,
+          }
         );
         return;
       }
@@ -156,8 +160,13 @@ export default function TripScreen() {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted' || cancelled) return;
+        const trackingLive = !!activeTrip && !activeTrip.isPaused;
         nativeSub = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 8 },
+          {
+            accuracy: trackingLive ? Location.Accuracy.High : Location.Accuracy.Balanced,
+            timeInterval: trackingLive ? 5000 : 15000,
+            distanceInterval: trackingLive ? 12 : 40,
+          },
           (pos) => {
             const coords = {
               latitude: pos.coords.latitude,
@@ -179,7 +188,7 @@ export default function TripScreen() {
         navigator.geolocation.clearWatch(webWatch);
       }
     };
-  }, [isWeb]);
+  }, [isWeb, activeTrip?.id, activeTrip?.isPaused]);
 
   useEffect(() => {
     if (activeTrip) {
