@@ -9,7 +9,7 @@ import {
   Pressable,
   Platform,
 } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useApp } from '@/context/AppContext';
@@ -55,12 +55,21 @@ type StartMode = 'free' | 'nav';
 type GeoCoords = { latitude: number; longitude: number };
 
 export default function TripScreen() {
+  const params = useLocalSearchParams<{
+    mode?: string;
+    dest?: string;
+    destLat?: string;
+    destLon?: string;
+    autoStart?: string;
+  }>();
   const { activeVehicle, activeTrip, refresh } = useApp();
   const { colors } = useTheme();
   const mapRef = useRef<TripMapRef>(null);
+  const autoStartDone = useRef(false);
   const [tab, setTab] = useState<TripTab>('live');
   const [startMode, setStartMode] = useState<StartMode>('free');
   const [destination, setDestination] = useState('');
+  const [destCoords, setDestCoords] = useState<GeoCoords | null>(null);
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [history, setHistory] = useState<Trip[]>([]);
@@ -96,7 +105,19 @@ export default function TripScreen() {
       if (activeTrip && !activeTrip.isPaused) {
         void startBackgroundTracking();
       }
-    }, [loadLists, activeTrip?.id, activeTrip?.isPaused])
+      const dest = typeof params.dest === 'string' ? params.dest.trim() : '';
+      if (dest) {
+        setDestination(dest);
+        setStartMode('nav');
+        setTab('live');
+        const lat = params.destLat ? Number(params.destLat) : NaN;
+        const lon = params.destLon ? Number(params.destLon) : NaN;
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          setDestCoords({ latitude: lat, longitude: lon });
+        }
+      }
+      if (params.mode === 'nav') setStartMode('nav');
+    }, [loadLists, activeTrip?.id, activeTrip?.isPaused, params.dest, params.mode, params.destLat, params.destLon])
   );
 
   useEffect(() => {
@@ -276,7 +297,13 @@ export default function TripScreen() {
 
       if (startMode === 'nav' && destName) {
         try {
-          await Linking.openURL(openGoogleMapsSearch(destName));
+          if (destCoords) {
+            await Linking.openURL(
+              openGoogleMapsNavigation(destCoords.latitude, destCoords.longitude, destName)
+            );
+          } else {
+            await Linking.openURL(openGoogleMapsSearch(destName));
+          }
         } catch {
           /* ignore */
         }
@@ -290,6 +317,14 @@ export default function TripScreen() {
       setIsStarting(false);
     }
   };
+
+  useEffect(() => {
+    if (params.autoStart !== '1' || autoStartDone.current) return;
+    if (!activeVehicle || activeTrip) return;
+    if (!destination.trim()) return;
+    autoStartDone.current = true;
+    void handleStartTrip();
+  }, [params.autoStart, destination, activeVehicle?.id, activeTrip?.id]);
 
   const handlePause = async (withFillUp: boolean) => {
     if (!activeTrip) return;

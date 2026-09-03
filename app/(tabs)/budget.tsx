@@ -494,23 +494,25 @@ export default function BudgetScreen() {
             </Text>
           ) : (
             places.map((p) => (
-              <Pressable
+              <View
                 key={p.id}
-                onPress={() =>
-                  router.push({
-                    pathname: '/place/edit' as never,
-                    params: { id: String(p.id) },
-                  } as never)
-                }
-                onLongPress={() =>
-                  confirm('Supprimer', `Supprimer « ${p.name} » ?`, async () => {
-                    await deletePlace(p.id);
-                    await loadExtra();
-                  }, 'Supprimer')
-                }
                 style={[styles.placeRow, { borderBottomColor: colors.border }]}
               >
-                <View style={{ flex: 1 }}>
+                <Pressable
+                  onPress={() =>
+                    router.push({
+                      pathname: '/place/edit' as never,
+                      params: { id: String(p.id) },
+                    } as never)
+                  }
+                  onLongPress={() =>
+                    confirm('Supprimer', `Supprimer « ${p.name} » ?`, async () => {
+                      await deletePlace(p.id);
+                      await loadExtra();
+                    }, 'Supprimer')
+                  }
+                  style={{ flex: 1 }}
+                >
                   <Text style={{ color: colors.text, fontWeight: '600' }}>
                     {KIND_LABEL[p.kind] || p.kind} — {p.name}
                   </Text>
@@ -521,13 +523,38 @@ export default function BudgetScreen() {
                         ? `${p.latitude.toFixed(5)}, ${p.longitude?.toFixed(5)}`
                         : 'Aucune adresse — taper pour modifier'}
                   </Text>
-                </View>
-                <Text style={{ color: colors.accent, fontWeight: '700' }}>Édit.</Text>
-              </Pressable>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    const dest = p.address?.trim() || p.name;
+                    router.push({
+                      pathname: '/(tabs)/trip' as never,
+                      params: {
+                        mode: 'nav',
+                        dest,
+                        destLat: p.latitude != null ? String(p.latitude) : '',
+                        destLon: p.longitude != null ? String(p.longitude) : '',
+                        autoStart: '1',
+                      },
+                    } as never);
+                  }}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: colors.accent,
+                    marginRight: 6,
+                  }}
+                >
+                  <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 12 }}>Trajet</Text>
+                </Pressable>
+                <Text style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 12 }}>Édit.</Text>
+              </View>
             ))
           )}
           <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
-            Tap = modifier (adresse exacte). Appui long = supprimer.
+            Trajet = navigation depuis ta position. Tap le nom = modifier. Appui long = supprimer.
           </Text>
         </Card>
 

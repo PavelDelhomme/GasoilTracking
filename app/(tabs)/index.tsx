@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, Pressable } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '@/context/AppContext';
@@ -23,7 +23,8 @@ import {
 import { seedDemoData } from '@/lib/seedDemo';
 import { seedTodayCommuteAndFillUp } from '@/lib/seedToday';
 import { notify } from '@/lib/notify';
-import type { ConsumptionStats, SinceLastFillStats } from '@/types';
+import { getPlaces } from '@/lib/database';
+import type { ConsumptionStats, Place, SinceLastFillStats } from '@/types';
 
 export default function HomeScreen() {
   const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles } = useApp();
@@ -37,6 +38,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [seedingToday, setSeedingToday] = useState(false);
+  const [places, setPlaces] = useState<Place[]>([]);
 
   const reloadStats = async (vehicleId: number) => {
     const [s, since] = await Promise.all([
@@ -48,6 +50,7 @@ export default function HomeScreen() {
   };
 
   useEffect(() => {
+    void getPlaces().then(setPlaces).catch(() => setPlaces([]));
     if (activeVehicle) {
       void reloadStats(activeVehicle.id);
     } else {
@@ -71,6 +74,8 @@ export default function HomeScreen() {
       /* ignore */
     }
     if (activeVehicle) await reloadStats(activeVehicle.id);
+    const p = await getPlaces().catch(() => [] as Place[]);
+    setPlaces(p);
     setRefreshing(false);
   };
 
@@ -113,7 +118,24 @@ export default function HomeScreen() {
     }
   };
 
-  const mainBudget = budgetStatuses[0];
+  const startNavToPlace = (p: Place) => {
+    const dest = p.address?.trim() || p.name;
+    router.push({
+      pathname: '/(tabs)/trip' as never,
+      params: {
+        mode: 'nav',
+        dest,
+        destLat: p.latitude != null ? String(p.latitude) : '',
+        destLon: p.longitude != null ? String(p.longitude) : '',
+        autoStart: '1',
+      },
+    } as never);
+  };
+
+  const mainBudget = budgetStatuses.find((s) => s.budget.vehicleId == null) || budgetStatuses[0];
+  const homePlace = places.find((p) => p.kind === 'home');
+  const workPlace = places.find((p) => p.kind === 'work');
+  const favoritePlaces = places.filter((p) => p.kind === 'other' || p.kind === 'station');
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -262,6 +284,42 @@ export default function HomeScreen() {
               </Card>
             )}
 
+            {(homePlace || workPlace || favoritePlaces.length > 0) && (
+              <Card style={{ marginBottom: 16 }}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>Trajets rapides</Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 10 }}>
+                  Depuis ta position actuelle vers un lieu enregistré.
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  {homePlace && (
+                    <Pressable
+                      onPress={() => startNavToPlace(homePlace)}
+                      style={[styles.quickChip, { borderColor: colors.accent, backgroundColor: colors.card }]}
+                    >
+                      <Text style={{ color: colors.accent, fontWeight: '800' }}>Maison</Text>
+                    </Pressable>
+                  )}
+                  {workPlace && (
+                    <Pressable
+                      onPress={() => startNavToPlace(workPlace)}
+                      style={[styles.quickChip, { borderColor: colors.accent, backgroundColor: colors.card }]}
+                    >
+                      <Text style={{ color: colors.accent, fontWeight: '800' }}>Travail</Text>
+                    </Pressable>
+                  )}
+                  {favoritePlaces.map((p) => (
+                    <Pressable
+                      key={p.id}
+                      onPress={() => startNavToPlace(p)}
+                      style={[styles.quickChip, { borderColor: colors.border, backgroundColor: colors.card }]}
+                    >
+                      <Text style={{ color: colors.text, fontWeight: '700' }}>{p.name}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </Card>
+            )}
+
             <Button
               title="Ajouter journée type (aujourd’hui)"
               variant="outline"
@@ -322,4 +380,10 @@ const styles = StyleSheet.create({
   },
   budgetAmount: { fontSize: 15, fontWeight: '600' },
   budgetRemaining: { fontSize: 13, marginTop: 8 },
+  quickChip: {
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
 });
