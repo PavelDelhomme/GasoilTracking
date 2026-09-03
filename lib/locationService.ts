@@ -100,7 +100,17 @@ export async function stopBackgroundTracking(): Promise<void> {
 export async function getCurrentLocation(): Promise<Location.LocationObject | null> {
   const { status } = await Location.requestForegroundPermissionsAsync();
   if (status !== 'granted') return null;
-  // Balanced + cache court : assez précis pour départ trajet / stations, moins de drain
+  // Dernière position connue (< 2 min) : affichage stations / départ plus rapide
+  try {
+    const last = await Location.getLastKnownPositionAsync({
+      maxAge: 120_000,
+      requiredAccuracy: 500,
+    });
+    if (last) return last;
+  } catch {
+    /* ignore */
+  }
+  // Balanced : assez précis pour départ trajet / stations, moins de drain
   return Location.getCurrentPositionAsync({
     accuracy: Location.Accuracy.Balanced,
     mayShowUserSettingsDialog: true,

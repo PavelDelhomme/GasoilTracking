@@ -117,7 +117,7 @@ export async function getCurrentLocation(): Promise<Location.LocationObject | nu
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve(toLocationObject(pos)),
       () => resolve(null),
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 5000 }
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 120_000 }
     );
   });
 }

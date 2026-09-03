@@ -1,20 +1,50 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Linking, Switch } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Linking,
+  Switch,
+  AppState,
+  type AppStateStatus,
+} from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp } from '@/context/AppContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
-import { adaptVehicleConsumption, refreshBudgets } from '@/lib/calculations';
+import { Card, ProgressBar } from '@/components/Card';
+import {
+  adaptVehicleConsumption,
+  formatDistance,
+  formatEuro,
+  refreshBudgets,
+} from '@/lib/calculations';
 import { notify } from '@/lib/notify';
-import { openGoogleMapsNavigation } from '@/lib/locationService';
+import {
+  getCurrentLocation,
+  openGoogleMapsNavigation,
+  startBackgroundTracking,
+  stopBackgroundTracking,
+} from '@/lib/locationService';
 import { fuelLabel, isSaneFuelPricePerLiter } from '@/lib/fuelPrices';
 import { applyFillUpToFuelEstimate } from '@/lib/fuelLevel';
-import { createFillUp, createTrip, addTrackedKm, updateVehicle } from '@/lib/database';
+import {
+  createFillUp,
+  createTrip,
+  stopActiveTrips,
+  updateTrip,
+  addTrackedKm,
+  updateVehicle,
+} from '@/lib/database';
+import { reverseGeocode } from '@/lib/geocode';
+
+type Phase = 'go' | 'fill' | 'done';
 
 /**
- * Trajet vers une station : navigation Maps + option enregistrer un plein (ou pas).
+ * Trajet station : Maps + suivi GPS → km réels → plein → budget.
  */
 export default function StationTripScreen() {
   const params = useLocalSearchParams<{
@@ -25,27 +55,161 @@ export default function StationTripScreen() {
     price?: string;
     fuelKey?: string;
   }>();
-  const { activeVehicle, refresh } = useApp();
+  const { activeVehicle, activeTrip, budgetStatuses, refresh } = useApp();
   const { colors } = useTheme();
   const { moneySymbol, formatPerLiter, countryCode } = useLocale();
+
+  const [phase, setPhase] = useState<Phase>('go');
   const [doFillUp, setDoFillUp] = useState(true);
   const [isFull, setIsFull] = useState(true);
   const [liters, setLiters] = useState('');
-  const [price, setPrice] = useState(params.price || activeVehicle?.defaultFuelPrice.toString() || '1.75');
-  const [distanceKm, setDistanceKm] = useState('5');
+  const [price, setPrice] = useState(
+    params.price || activeVehicle?.defaultFuelPrice.toString() || '1.75'
+  );
+  /** Km réels GPS (ou saisie de secours si GPS = 0). */
+  const [distanceKm, setDistanceKm] = useState('');
+  const [tripId, setTripId] = useState<number | null>(null);
+  const [starting, setStarting] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [saveSummary, setSaveSummary] = useState('');
 
   const lat = parseFloat(params.lat || '');
   const lon = parseFloat(params.lon || '');
   const stationName = params.name || 'Station';
 
-  const openMaps = async () => {
+  const linkedTrip =
+    activeTrip &&
+    (tripId != null
+      ? activeTrip.id === tripId
+      : (activeTrip.destinationName || '').includes(stationName))
+      ? activeTrip
+      : null;
+
+  const liveKm = linkedTrip?.distanceKm ?? 0;
+
+  useEffect(() => {
+    if (phase !== 'go' || !linkedTrip) return;
+    if (linkedTrip.distanceKm > 0) {
+      setDistanceKm(linkedTrip.distanceKm.toFixed(1));
+    }
+  }, [linkedTrip?.distanceKm, phase, linkedTrip]);
+
+  useEffect(() => {
+    if (activeTrip?.isActive && !tripId) {
+      const dest = activeTrip.destinationName || '';
+      if (dest === stationName || dest.includes(stationName)) {
+        setTripId(activeTrip.id);
+      }
+    }
+  }, [activeTrip, stationName, tripId]);
+
+  const syncDistanceFromTrip = useCallback(async () => {
+    await refresh();
+    const km = linkedTrip?.distanceKm ?? activeTrip?.distanceKm ?? 0;
+    if (km > 0) setDistanceKm(km.toFixed(1));
+  }, [refresh, linkedTrip?.distanceKm, activeTrip?.distanceKm]);
+
+  useEffect(() => {
+    const onChange = (state: AppStateStatus) => {
+      if (state === 'active' && (tripId || linkedTrip)) {
+        void syncDistanceFromTrip();
+      }
+    };
+    const sub = AppState.addEventListener('change', onChange);
+    return () => sub.remove();
+  }, [tripId, linkedTrip, syncDistanceFromTrip]);
+
+  const startTripAndOpenMaps = async () => {
+    if (!activeVehicle) {
+      notify('Erreur', 'Sélectionnez un véhicule.');
+      return;
+    }
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
       notify('Erreur', 'Coordonnées station manquantes.');
       return;
     }
-    const url = openGoogleMapsNavigation(lat, lon, stationName);
-    await Linking.openURL(url);
+    setStarting(true);
+    try {
+      await stopActiveTrips();
+      await stopBackgroundTracking();
+
+      const loc = await getCurrentLocation();
+      const startPoint = loc
+        ? [
+            {
+              latitude: loc.coords.latitude,
+              longitude: loc.coords.longitude,
+              timestamp: Date.now(),
+            },
+          ]
+        : [];
+
+      const id = await createTrip({
+        vehicleId: activeVehicle.id,
+        startTime: new Date().toISOString(),
+        endTime: null,
+        distanceKm: 0,
+        estimatedFuelUsed: 0,
+        estimatedCost: 0,
+        routePoints: JSON.stringify(startPoint),
+        originName: 'Position de départ',
+        destinationName: stationName,
+        isActive: true,
+        isPaused: false,
+        status: 'confirmed',
+        source: 'gps',
+        fillUpId: null,
+        note: `Station ${params.address || ''}`.trim(),
+      });
+      setTripId(id);
+      setDistanceKm('0');
+
+      const trackingPromise = startBackgroundTracking();
+      const url = openGoogleMapsNavigation(lat, lon, stationName);
+      await Linking.openURL(url);
+
+      const trackingStarted = await trackingPromise;
+      if (loc) {
+        void reverseGeocode(loc.coords.latitude, loc.coords.longitude)
+          .then((name) => {
+            if (name) return updateTrip(id, { originName: name });
+          })
+          .catch(() => undefined);
+      }
+      await refresh();
+
+      notify(
+        'Trajet démarré',
+        trackingStarted
+          ? 'GPS actif — les km vers la station sont enregistrés. Revenez ici à l’arrivée.'
+          : 'Maps ouvert. Autorisez la localisation pour tracer les km.'
+      );
+    } catch (e) {
+      notify('Erreur', e instanceof Error ? e.message : 'Impossible de démarrer.');
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  /** Arrêt du suivi → passage au formulaire plein avec km réels. */
+  const arriveAtStation = async () => {
+    setLoading(true);
+    try {
+      await stopBackgroundTracking();
+      await refresh();
+      const km = linkedTrip?.distanceKm ?? activeTrip?.distanceKm ?? 0;
+      setDistanceKm(km > 0 ? km.toFixed(1) : distanceKm || '');
+      if (tripId || linkedTrip?.id) {
+        const id = tripId ?? linkedTrip!.id;
+        await updateTrip(id, { isPaused: true });
+        await refresh();
+      }
+      setPhase('fill');
+    } catch (e) {
+      notify('Erreur', e instanceof Error ? e.message : 'Échec');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const save = async () => {
@@ -57,23 +221,40 @@ export default function StationTripScreen() {
     try {
       const km = parseFloat(distanceKm.replace(',', '.')) || 0;
       const fuelEst = (km * activeVehicle.consumptionPer100) / 100;
-      const tripId = await createTrip({
-        vehicleId: activeVehicle.id,
-        startTime: new Date().toISOString(),
-        endTime: new Date().toISOString(),
-        distanceKm: km,
-        estimatedFuelUsed: Math.round(fuelEst * 100) / 100,
-        estimatedCost: Math.round(fuelEst * activeVehicle.defaultFuelPrice * 100) / 100,
-        routePoints: '[]',
-        originName: 'Position',
-        destinationName: stationName,
-        isActive: false,
-        status: 'confirmed',
-        source: 'manual',
-        fillUpId: null,
-        note: `Station ${params.address || ''}`.trim(),
-      });
-      if (km > 0) await addTrackedKm(activeVehicle.id, km);
+      let id = tripId ?? linkedTrip?.id ?? null;
+
+      if (id) {
+        await stopBackgroundTracking();
+        await updateTrip(id, {
+          isActive: false,
+          isPaused: false,
+          endTime: new Date().toISOString(),
+          distanceKm: km,
+          estimatedFuelUsed: Math.round(fuelEst * 100) / 100,
+          estimatedCost: Math.round(fuelEst * activeVehicle.defaultFuelPrice * 100) / 100,
+          destinationName: stationName,
+          status: 'confirmed',
+        });
+        if (km > 0) await addTrackedKm(activeVehicle.id, km);
+      } else {
+        id = await createTrip({
+          vehicleId: activeVehicle.id,
+          startTime: new Date().toISOString(),
+          endTime: new Date().toISOString(),
+          distanceKm: km,
+          estimatedFuelUsed: Math.round(fuelEst * 100) / 100,
+          estimatedCost: Math.round(fuelEst * activeVehicle.defaultFuelPrice * 100) / 100,
+          routePoints: '[]',
+          originName: 'Position',
+          destinationName: stationName,
+          isActive: false,
+          status: 'confirmed',
+          source: 'manual',
+          fillUpId: null,
+          note: `Station ${params.address || ''}`.trim(),
+        });
+        if (km > 0) await addTrackedKm(activeVehicle.id, km);
+      }
 
       if (doFillUp) {
         const L = parseFloat(liters.replace(',', '.'));
@@ -91,7 +272,7 @@ export default function StationTripScreen() {
           setLoading(false);
           return;
         }
-        await createFillUp({
+        const fillId = await createFillUp({
           vehicleId: activeVehicle.id,
           date: new Date().toISOString(),
           liters: L,
@@ -101,29 +282,27 @@ export default function StationTripScreen() {
           distanceSinceLastKm: km || null,
           isFull,
           note: `${stationName} · ${fuelLabel(params.fuelKey || 'gazole')}`,
-          tripId,
+          tripId: id,
         });
+        if (id) await updateTrip(id, { fillUpId: fillId });
         await applyFillUpToFuelEstimate(activeVehicle, { liters: L, isFull });
         if (ppl > 0) await updateVehicle(activeVehicle.id, { defaultFuelPrice: ppl });
         const adapted = await adaptVehicleConsumption(activeVehicle.id);
         await refreshBudgets(activeVehicle.id);
         await refresh();
-        let msg = 'Trajet station + plein.';
+        let msg = `Trajet ${formatDistance(km)} + plein ${L.toFixed(1)} L.`;
         if (adapted && adapted.next !== adapted.previous) {
           msg += ` Conso ${adapted.previous.toFixed(1)} → ${adapted.next.toFixed(1)} L/100.`;
         }
-        notify('Enregistré', msg);
-        router.back();
+        setSaveSummary(msg);
+        setPhase('done');
         return;
       }
 
+      await refreshBudgets(activeVehicle.id);
       await refresh();
-      notify(
-        'Enregistré',
-        'Trajet station sans plein.'
-      );
-      router.back();
-      return;
+      setSaveSummary(`Trajet station ${formatDistance(km)} (sans plein).`);
+      setPhase('done');
     } catch (e) {
       notify('Erreur', e instanceof Error ? e.message : 'Échec');
     } finally {
@@ -131,10 +310,14 @@ export default function StationTripScreen() {
     }
   };
 
+  const goBudget = () => {
+    router.replace('/(tabs)/budget' as never);
+  };
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 16 }}
+      contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
       keyboardShouldPersistTaps="handled"
     >
       <Text style={[styles.title, { color: colors.text }]}>{stationName}</Text>
@@ -149,56 +332,150 @@ export default function StationTripScreen() {
         </Text>
       )}
 
-      <Button title="Ouvrir dans Google Maps" variant="secondary" onPress={openMaps} />
-
-      <Input
-        label="Distance estimée aller (km)"
-        value={distanceKm}
-        onChangeText={setDistanceKm}
-        keyboardType="numeric"
-      />
-
-      <View style={styles.switchRow}>
-        <Text style={{ color: colors.text, fontWeight: '600', flex: 1 }}>Faire un plein</Text>
-        <Switch
-          value={doFillUp}
-          onValueChange={setDoFillUp}
-          trackColor={{ false: colors.border, true: colors.accent }}
-        />
-      </View>
-
-      {doFillUp && (
+      {phase === 'go' && (
         <>
-          <Input
-            label="Litres"
-            value={liters}
-            onChangeText={setLiters}
-            keyboardType="numeric"
-            placeholder="45"
+          <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 12, lineHeight: 18 }}>
+            1. Démarre le suivi GPS et ouvre Maps.{'\n'}
+            2. À l’arrivée, revenez ici — les km parcourus remplacent l’estimation.{'\n'}
+            3. Saisissez litres / prix, puis voyez le budget.
+          </Text>
+
+          <Button
+            title="Y aller (Maps + suivi GPS)"
+            onPress={startTripAndOpenMaps}
+            loading={starting}
           />
-          <Input
-            label={`Prix au litre (${moneySymbol})`}
-            value={price}
-            onChangeText={setPrice}
-            keyboardType="numeric"
-          />
-          <View style={styles.switchRow}>
-            <Text style={{ color: colors.text, fontWeight: '600', flex: 1 }}>Plein complet</Text>
-            <Switch
-              value={isFull}
-              onValueChange={setIsFull}
-              trackColor={{ false: colors.border, true: colors.accent }}
+
+          {(tripId || linkedTrip) && (
+            <Card style={{ marginTop: 16 }}>
+              <Text style={{ color: colors.text, fontWeight: '700', marginBottom: 4 }}>
+                Trajet en cours
+              </Text>
+              <Text style={{ color: colors.accent, fontSize: 28, fontWeight: '800' }}>
+                {formatDistance(liveKm)}
+              </Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 12 }}>
+                Distance GPS enregistrée (mise à jour au retour dans l’app)
+              </Text>
+              <Button
+                title="Je suis à la station"
+                onPress={arriveAtStation}
+                loading={loading}
+              />
+            </Card>
+          )}
+
+          {!tripId && !linkedTrip && (
+            <Button
+              title="Saisir le plein sans trajet GPS"
+              variant="secondary"
+              onPress={() => setPhase('fill')}
+              style={{ marginTop: 12 }}
             />
-          </View>
+          )}
         </>
       )}
 
-      <Button
-        title={doFillUp ? 'Enregistrer trajet + plein' : 'Enregistrer trajet sans plein'}
-        onPress={save}
-        loading={loading}
-        style={{ marginTop: 8 }}
-      />
+      {phase === 'fill' && (
+        <>
+          <Input
+            label="Distance parcourue (km GPS)"
+            value={distanceKm}
+            onChangeText={setDistanceKm}
+            keyboardType="numeric"
+            placeholder="Ex. 4.2"
+          />
+          <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: -8, marginBottom: 12 }}>
+            Remplie par le GPS. Corrigez seulement si besoin.
+          </Text>
+
+          <View style={styles.switchRow}>
+            <Text style={{ color: colors.text, fontWeight: '600', flex: 1 }}>Faire un plein</Text>
+            <Switch
+              value={doFillUp}
+              onValueChange={setDoFillUp}
+              trackColor={{ false: colors.border, true: colors.accent }}
+            />
+          </View>
+
+          {doFillUp && (
+            <>
+              <Input
+                label="Litres"
+                value={liters}
+                onChangeText={setLiters}
+                keyboardType="numeric"
+                placeholder="45"
+              />
+              <Input
+                label={`Prix au litre (${moneySymbol})`}
+                value={price}
+                onChangeText={setPrice}
+                keyboardType="numeric"
+              />
+              <View style={styles.switchRow}>
+                <Text style={{ color: colors.text, fontWeight: '600', flex: 1 }}>Plein complet</Text>
+                <Switch
+                  value={isFull}
+                  onValueChange={setIsFull}
+                  trackColor={{ false: colors.border, true: colors.accent }}
+                />
+              </View>
+            </>
+          )}
+
+          <Button
+            title={doFillUp ? 'Enregistrer trajet + plein' : 'Enregistrer trajet sans plein'}
+            onPress={save}
+            loading={loading}
+            style={{ marginTop: 8 }}
+          />
+          <Button
+            title="Retour (continuer le suivi)"
+            variant="secondary"
+            onPress={() => setPhase('go')}
+            style={{ marginTop: 8 }}
+          />
+        </>
+      )}
+
+      {phase === 'done' && (
+        <>
+          <Card>
+            <Text style={{ color: colors.text, fontWeight: '700', marginBottom: 6 }}>Enregistré</Text>
+            <Text style={{ color: colors.textSecondary, marginBottom: 12 }}>{saveSummary}</Text>
+            {budgetStatuses.length > 0 ? (
+              budgetStatuses.slice(0, 4).map((b) => (
+                <View key={b.budget.id} style={{ marginBottom: 12 }}>
+                  <View style={styles.budgetRow}>
+                    <Text style={{ color: colors.text, fontWeight: '600', flex: 1 }} numberOfLines={1}>
+                      {b.budget.name}
+                    </Text>
+                    <Text style={{ color: colors.accent, fontWeight: '700' }}>
+                      {formatEuro(Math.max(0, b.remaining))} restants
+                    </Text>
+                  </View>
+                  <ProgressBar percent={b.percentUsed} color={colors.accent} />
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                    {formatEuro(b.spent)} / {formatEuro(b.budget.amount)}
+                  </Text>
+                </View>
+              ))
+            ) : (
+              <Text style={{ color: colors.textSecondary, marginBottom: 8 }}>
+                Aucun budget configuré.
+              </Text>
+            )}
+          </Card>
+          <Button title="Retour → Budget" onPress={goBudget} style={{ marginTop: 12 }} />
+          <Button
+            title="Fermer"
+            variant="secondary"
+            onPress={() => router.back()}
+            style={{ marginTop: 8 }}
+          />
+        </>
+      )}
     </ScrollView>
   );
 }
@@ -209,5 +486,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 16,
+  },
+  budgetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    gap: 8,
   },
 });

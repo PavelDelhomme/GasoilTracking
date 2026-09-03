@@ -37,6 +37,16 @@ import { confirm } from '@/lib/notify';
 import type { BudgetStatus, FillUp, Place, RecurringRoute } from '@/types';
 
 const FUEL_ZONE_KEY = 'gasoil_fuel_zone';
+const STATIONS_CACHE_TTL_MS = 4 * 60 * 1000;
+
+type StationsCache = {
+  key: string;
+  at: number;
+  list: FuelStationPrice[];
+  hint: string;
+};
+
+let stationsMemoryCache: StationsCache | null = null;
 
 type FuelZoneMode = 'gps' | 'custom';
 type FuelZone = {
@@ -141,21 +151,22 @@ export default function BudgetScreen() {
           if (raw) {
             const parsed = JSON.parse(raw) as FuelZone;
             if (parsed?.mode === 'gps' || parsed?.mode === 'custom') {
-              setFuelZone({
+              const zone: FuelZone = {
                 mode: parsed.mode,
                 latitude: parsed.latitude,
                 longitude: parsed.longitude,
                 label: parsed.label,
                 radiusKm: parsed.radiusKm ?? 12,
-              });
-              await loadFuelPrices(parsed);
+              };
+              setFuelZone(zone);
+              await loadFuelPrices(zone, { allowCache: true });
               return;
             }
           }
         } catch {
           /* ignore */
         }
-        await loadFuelPrices({ mode: 'gps', radiusKm: 12 });
+        await loadFuelPrices({ mode: 'gps', radiusKm: 12 }, { allowCache: true });
       })();
     }, [loadExtra])
   );
@@ -164,7 +175,7 @@ export default function BudgetScreen() {
     setRefreshing(true);
     await refresh();
     await loadExtra();
-    await loadFuelPrices(fuelZone);
+    await loadFuelPrices(fuelZone, { allowCache: false });
     setRefreshing(false);
   };
 
@@ -184,11 +195,13 @@ export default function BudgetScreen() {
     return liters * activeVehicle.defaultFuelPrice;
   };
 
-  const loadFuelPrices = async (zoneOverride?: FuelZone) => {
+  const loadFuelPrices = async (
+    zoneOverride?: FuelZone,
+    opts?: { allowCache?: boolean }
+  ) => {
     const zone = zoneOverride ?? fuelZone;
-    setFuelLoading(true);
+    const allowCache = opts?.allowCache !== false;
     setFuelError('');
-    setStations([]);
     if (!isFrenchFuelOpenDataAvailable(countryCode)) {
       setFuelError(
         'Prix stations open data : France uniquement. Ailleurs en Europe, saisissez vos pleins manuellement (devise du pays).'
@@ -196,6 +209,7 @@ export default function BudgetScreen() {
       setFuelLoading(false);
       return;
     }
+    setFuelLoading(true);
     try {
       let lat: number | null = null;
       let lon: number | null = null;
@@ -217,27 +231,50 @@ export default function BudgetScreen() {
         }
         lat = loc.coords.latitude;
         lon = loc.coords.longitude;
-        const placeName = await reverseGeocode(lat, lon);
-        hint = placeName
-          ? `Autour de vous · ${placeName}`
-          : `Autour de vous · GPS ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-        // garde le mode GPS mémorisé (sans coords figées)
+        hint = `Autour de vous · GPS ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+        setZoneHint(hint);
+        // Nom de lieu en parallèle (ne bloque pas les prix)
+        void reverseGeocode(lat, lon)
+          .then((placeName) => {
+            if (placeName) setZoneHint(`Autour de vous · ${placeName}`);
+          })
+          .catch(() => undefined);
         if (zone.mode !== 'gps') {
           await persistFuelZone({ mode: 'gps', radiusKm: zone.radiusKm ?? 12 });
         }
       }
 
-      setZoneHint(hint);
       const radiusKm = zone.radiusKm ?? 12;
+      const fuel = activeVehicle?.fuelType || 'diesel';
+      const cacheKey = `${zone.mode}:${lat.toFixed(3)},${lon.toFixed(3)}:${radiusKm}:${fuel}`;
+      if (
+        allowCache &&
+        stationsMemoryCache &&
+        stationsMemoryCache.key === cacheKey &&
+        Date.now() - stationsMemoryCache.at < STATIONS_CACHE_TTL_MS
+      ) {
+        setStations(stationsMemoryCache.list);
+        setZoneHint(stationsMemoryCache.hint || hint);
+        setFuelLoading(false);
+        return;
+      }
+
+      setZoneHint(hint);
       const list = await fetchCheapestStations({
         latitude: lat,
         longitude: lon,
         radiusKm,
-        fuel: activeVehicle?.fuelType || 'diesel',
+        fuel,
         limit: 8,
         countryCode,
       });
       setStations(list);
+      stationsMemoryCache = {
+        key: cacheKey,
+        at: Date.now(),
+        list,
+        hint,
+      };
       if (!list.length) {
         setFuelError(`Aucune station dans un rayon de ${radiusKm} km autour de cette zone.`);
       }
@@ -252,7 +289,7 @@ export default function BudgetScreen() {
     const next: FuelZone = { mode: 'gps', radiusKm: fuelZone.radiusKm ?? 12 };
     await persistFuelZone(next);
     setShowZonePicker(false);
-    await loadFuelPrices(next);
+    await loadFuelPrices(next, { allowCache: false });
   };
 
   const useCustomCoords = async (lat: number, lon: number, label: string) => {
@@ -266,7 +303,7 @@ export default function BudgetScreen() {
     await persistFuelZone(next);
     setShowZonePicker(false);
     setZoneQuery('');
-    await loadFuelPrices(next);
+    await loadFuelPrices(next, { allowCache: false });
   };
 
   const searchCustomZone = async () => {
@@ -294,7 +331,7 @@ export default function BudgetScreen() {
   const setRadius = async (km: number) => {
     const next = { ...fuelZone, radiusKm: km };
     await persistFuelZone(next);
-    await loadFuelPrices(next);
+    await loadFuelPrices(next, { allowCache: false });
   };
 
   const maxMonth = Math.max(...monthly.map((m) => m.spent), 1);
@@ -874,7 +911,7 @@ export default function BudgetScreen() {
           })}
           {stations.length > 0 && (
             <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
-              Tap = trajet vers la station (plein optionnel). Tri par{' '}
+              Tap = Maps + suivi GPS des km, puis plein. Tri par{' '}
               {fuelLabel(
                 activeVehicle?.fuelType === 'diesel'
                   ? 'gazole'
