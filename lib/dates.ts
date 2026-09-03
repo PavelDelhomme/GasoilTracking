@@ -62,3 +62,28 @@ export function formatMonthLabel(ym: string): string {
   const label = d.toLocaleDateString(appLocale, { month: 'long', year: 'numeric' });
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
+
+/** Mois calendaire local `AAAA-MM` (évite le décalage UTC de toISOString). */
+export function currentMonthKey(d = new Date()): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+}
+
+const MONTH_SHORT_FR = [
+  'Janv.',
+  'Févr.',
+  'Mars',
+  'Avr.',
+  'Mai',
+  'Juin',
+  'Juil.',
+  'Août',
+  'Sept.',
+  'Oct.',
+  'Nov.',
+  'Déc.',
+];
+
+export function formatMonthChip(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  return `${MONTH_SHORT_FR[(m || 1) - 1] || ym} ${String(y).slice(2)}`;
+}

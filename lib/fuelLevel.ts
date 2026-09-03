@@ -43,6 +43,12 @@ export async function setFuelFraction(vehicle: Vehicle, fraction: number): Promi
 
 export function fuelLevelLabel(vehicle: Vehicle): string {
   if (vehicle.estimatedFuelLiters == null) return 'Niveau inconnu';
-  const pct = vehicle.tankCapacity > 0 ? (vehicle.estimatedFuelLiters / vehicle.tankCapacity) * 100 : 0;
+  const pct = fuelLevelPercent(vehicle);
   return `${vehicle.estimatedFuelLiters.toFixed(1)} L (~${pct.toFixed(0)} %)`;
+}
+
+/** 0–100, ou 0 si inconnu. */
+export function fuelLevelPercent(vehicle: Vehicle): number {
+  if (vehicle.estimatedFuelLiters == null || vehicle.tankCapacity <= 0) return 0;
+  return Math.min(100, Math.max(0, (vehicle.estimatedFuelLiters / vehicle.tankCapacity) * 100));
 }

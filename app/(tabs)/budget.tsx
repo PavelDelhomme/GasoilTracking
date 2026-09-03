@@ -16,16 +16,14 @@ import { Card, ProgressBar } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { formatEuro, getActiveMonthlyAllocation } from '@/lib/calculations';
+import { currentMonthKey, formatMonthChip, formatMonthLabel, monthKeyFromDate } from '@/lib/dates';
 import {
   deleteBudget,
   deletePlace,
   deleteRecurringRoute,
   getFillUps,
-  getMonthlySpend,
-  getMonthlySpendByVehicle,
   getPlaces,
   getRecurringRoutes,
-  updateRecurringRoute,
 } from '@/lib/database';
 import {
   fetchCheapestStations,
@@ -83,35 +81,54 @@ export default function BudgetScreen() {
   };
 
   const loadExtra = useCallback(async () => {
-    const [p, r, m, mv] = await Promise.all([
+    const [p, r, allFills] = await Promise.all([
       getPlaces(),
       getRecurringRoutes(activeVehicle?.id),
-      getMonthlySpend(12),
-      getMonthlySpendByVehicle(12),
+      getFillUps(),
     ]);
     setPlaces(p);
     setRoutes(r);
+
+    const monthMap = new Map<string, number>();
+    const byVehicle: { month: string; vehicleId: number; spent: number }[] = [];
+    const vehMap = new Map<string, number>();
+    for (const f of allFills) {
+      const month = monthKeyFromDate(f.date);
+      monthMap.set(month, (monthMap.get(month) || 0) + f.totalCost);
+      const vk = `${month}:${f.vehicleId}`;
+      vehMap.set(vk, (vehMap.get(vk) || 0) + f.totalCost);
+    }
+    const m = [...monthMap.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .slice(-12)
+      .map(([month, spent]) => ({ month, spent }));
+    const mv = [...vehMap.entries()].map(([k, spent]) => {
+      const [month, vid] = k.split(':');
+      return { month, vehicleId: Number(vid), spent };
+    });
     setMonthly(m);
     setMonthlyByVehicle(mv);
-    const current = new Date().toISOString().slice(0, 7);
+
+    const current = currentMonthKey();
     setSelectedMonth((prev) => {
       if (prev && m.some((x) => x.month === prev)) return prev;
-      return m.find((x) => x.month === current)?.month || m[m.length - 1]?.month || null;
+      if (m.some((x) => x.month === current)) return current;
+      return m[m.length - 1]?.month || current;
     });
     const pick =
       (selectedMonth && m.some((x) => x.month === selectedMonth) && selectedMonth) ||
-      m.find((x) => x.month === current)?.month ||
+      (m.some((x) => x.month === current) ? current : null) ||
       m[m.length - 1]?.month;
     if (pick) {
       const fills = await getFillUps(activeVehicle?.id);
-      setMonthFillUps(fills.filter((f) => f.date.slice(0, 7) === pick));
+      setMonthFillUps(fills.filter((f) => monthKeyFromDate(f.date) === pick));
     }
-  }, [activeVehicle?.id]); // eslint-ok: selectedMonth lu au moment du load
+  }, [activeVehicle?.id]);
 
   const selectMonth = async (month: string) => {
     setSelectedMonth(month);
     const fills = await getFillUps(activeVehicle?.id);
-    setMonthFillUps(fills.filter((f) => f.date.slice(0, 7) === month));
+    setMonthFillUps(fills.filter((f) => monthKeyFromDate(f.date) === month));
   };
 
   useFocusEffect(
@@ -284,9 +301,17 @@ export default function BudgetScreen() {
   const projected = estimateMonthlyFromRoutes();
   const monthlyAllocation = getActiveMonthlyAllocation(budgetStatuses, activeVehicle?.id);
   const globalStatus = budgetStatuses.find((s) => s.budget.vehicleId == null);
-  const currentMonth = new Date().toISOString().slice(0, 7);
-  const currentMonthSpent = monthly.find((m) => m.month === currentMonth)?.spent ?? 0;
+  const calendarMonth = currentMonthKey();
+  const currentMonthSpent = monthly.find((m) => m.month === calendarMonth)?.spent ?? 0;
+  const lastSpendMonth =
+    [...monthly].reverse().find((m) => m.spent > 0)?.month || calendarMonth;
   const currentRemaining = Math.max(0, monthlyAllocation - currentMonthSpent);
+  const overBudget = monthlyAllocation > 0 && currentMonthSpent > monthlyAllocation;
+  const statusColor = overBudget
+    ? colors.danger
+    : currentMonthSpent > monthlyAllocation * 0.8 && monthlyAllocation > 0
+      ? colors.warning
+      : colors.success;
 
   const vehicleName = (id: number) => vehicles.find((v) => v.id === id)?.name || `Véhicule #${id}`;
 
@@ -310,33 +335,39 @@ export default function BudgetScreen() {
         <Text style={[styles.section, { color: colors.text }]}>Dépenses par mois</Text>
         {monthlyAllocation > 0 && (
           <Card style={{ marginBottom: 8 }}>
-            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 16 }}>
-              Ce mois — {formatEuro(currentMonthSpent)} / {formatEuro(monthlyAllocation)}
+            <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '600' }}>
+              {formatMonthLabel(calendarMonth)}
+              {globalStatus ? ` · ${globalStatus.budget.name}` : ''}
+            </Text>
+            <Text style={{ color: statusColor, fontWeight: '800', fontSize: 28, marginTop: 4, letterSpacing: -0.5 }}>
+              {overBudget
+                ? `Dépassé de ${formatEuro(currentMonthSpent - monthlyAllocation)}`
+                : `Il reste ${formatEuro(currentRemaining)}`}
+            </Text>
+            <Text style={{ color: colors.text, marginTop: 4, fontSize: 14 }}>
+              {formatEuro(currentMonthSpent)} dépensés sur {formatEuro(monthlyAllocation)}
             </Text>
             <ProgressBar
               percent={monthlyAllocation > 0 ? (currentMonthSpent / monthlyAllocation) * 100 : 0}
-              color={
-                currentMonthSpent > monthlyAllocation
-                  ? colors.danger
-                  : currentMonthSpent > monthlyAllocation * 0.8
-                    ? colors.warning
-                    : colors.success
-              }
+              color={statusColor}
               height={12}
             />
-            <Text style={{ color: colors.textSecondary, marginTop: 8, fontSize: 13 }}>
-              Reste {formatEuro(currentRemaining)} sur l&apos;enveloppe
-              {globalStatus ? ` « ${globalStatus.budget.name} »` : ''}
-            </Text>
+            {currentMonthSpent <= 0 && lastSpendMonth !== calendarMonth && (
+              <Text style={{ color: colors.textSecondary, marginTop: 8, fontSize: 13 }}>
+                Pas encore de plein en {formatMonthLabel(calendarMonth).toLowerCase()}. Dernier mois
+                actif : {formatMonthLabel(lastSpendMonth)} (
+                {formatEuro(monthly.find((x) => x.month === lastSpendMonth)?.spent || 0)}).
+              </Text>
+            )}
             {vehicles.length > 0 && (
-              <View style={{ marginTop: 10, gap: 6 }}>
+              <View style={{ marginTop: 12, gap: 6 }}>
                 <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>
-                  Par véhicule ce mois :
+                  Répartition ce mois
                 </Text>
                 {vehicles.map((v) => {
                   const vSpent =
                     monthlyByVehicle.find(
-                      (x) => x.month === currentMonth && x.vehicleId === v.id
+                      (x) => x.month === calendarMonth && x.vehicleId === v.id
                     )?.spent ?? 0;
                   const share =
                     currentMonthSpent > 0 ? Math.round((vSpent / currentMonthSpent) * 100) : 0;
@@ -355,7 +386,7 @@ export default function BudgetScreen() {
                           }}
                         />
                       </View>
-                      <Text style={{ color: colors.text, width: 72, textAlign: 'right', fontSize: 11 }}>
+                      <Text style={{ color: colors.text, width: 88, textAlign: 'right', fontSize: 11 }}>
                         {formatEuro(vSpent)}
                         {share > 0 ? ` (${share}%)` : ''}
                       </Text>
@@ -376,28 +407,21 @@ export default function BudgetScreen() {
               const alloc = monthlyAllocation || maxMonth;
               const pct = alloc > 0 ? Math.min(100, (m.spent / alloc) * 100) : 0;
               const over = m.spent > alloc && alloc > 0;
+              const left = Math.max(0, alloc - m.spent);
               return (
                 <Pressable key={m.month} onPress={() => selectMonth(m.month)} style={styles.barRow}>
                   <Text
                     style={{
                       color: selectedMonth === m.month ? colors.accent : colors.textSecondary,
-                      width: 52,
+                      width: 64,
                       fontSize: 11,
                       fontWeight: selectedMonth === m.month ? '700' : '400',
                     }}
                     numberOfLines={1}
                   >
-                    {m.month.slice(5)}/{m.month.slice(2, 4)}
+                    {formatMonthChip(m.month)}
                   </Text>
                   <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
-                    {monthlyAllocation > 0 && (
-                      <View
-                        style={[
-                          styles.quotaMarker,
-                          { left: `${Math.min(100, 100)}%`, borderColor: colors.textSecondary },
-                        ]}
-                      />
-                    )}
                     <View
                       style={[
                         styles.barFill,
@@ -412,11 +436,10 @@ export default function BudgetScreen() {
                       ]}
                     />
                   </View>
-                  <Text style={{ color: colors.text, width: 88, textAlign: 'right', fontSize: 11 }}>
-                    {formatEuro(m.spent)}
-                    {monthlyAllocation > 0 ? (
-                      <Text style={{ color: colors.textSecondary }}> / {formatEuro(alloc)}</Text>
-                    ) : null}
+                  <Text style={{ color: colors.text, width: 92, textAlign: 'right', fontSize: 11 }}>
+                    {monthlyAllocation > 0
+                      ? `reste ${formatEuro(left)}`
+                      : formatEuro(m.spent)}
                   </Text>
                 </Pressable>
               );
@@ -425,11 +448,17 @@ export default function BudgetScreen() {
           {selectedMonth && (
             <View style={{ marginTop: 12 }}>
               <Text style={{ color: colors.text, fontWeight: '700', marginBottom: 6 }}>
-                Détail {selectedMonth} — {formatEuro(
-                  monthly.find((x) => x.month === selectedMonth)?.spent || 0
-                )}
+                {formatMonthLabel(selectedMonth)} —{' '}
+                {formatEuro(monthly.find((x) => x.month === selectedMonth)?.spent || 0)}{' '}
+                dépensés
                 {monthlyAllocation > 0
-                  ? ` / ${formatEuro(monthlyAllocation)} alloués`
+                  ? ` · reste ${formatEuro(
+                      Math.max(
+                        0,
+                        monthlyAllocation -
+                          (monthly.find((x) => x.month === selectedMonth)?.spent || 0)
+                      )
+                    )}`
                   : ''}
               </Text>
               {vehicles.length > 1 && (
@@ -513,10 +542,24 @@ export default function BudgetScreen() {
                   }
                   style={{ flex: 1 }}
                 >
-                  <Text style={{ color: colors.text, fontWeight: '600' }}>
-                    {KIND_LABEL[p.kind] || p.kind} — {p.name}
-                  </Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                    <View
+                      style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 2,
+                        borderRadius: 8,
+                        backgroundColor: colors.accent + '22',
+                      }}
+                    >
+                      <Text style={{ color: colors.accent, fontSize: 11, fontWeight: '700' }}>
+                        {KIND_LABEL[p.kind] || p.kind}
+                      </Text>
+                    </View>
+                    <Text style={{ color: colors.text, fontWeight: '700', flex: 1 }} numberOfLines={1}>
+                      {p.name}
+                    </Text>
+                  </View>
+                  <Text style={{ color: colors.textSecondary, fontSize: 12 }} numberOfLines={2}>
                     {p.address?.trim()
                       ? p.address
                       : p.latitude != null
@@ -768,7 +811,7 @@ export default function BudgetScreen() {
               Chargement des stations les moins chères autour de la zone…
             </Text>
           )}
-          {stations.map((s) => {
+          {stations.map((s, idx) => {
             const fuelKey =
               activeVehicle?.fuelType === 'diesel'
                 ? 'gazole'
@@ -776,10 +819,17 @@ export default function BudgetScreen() {
                   ? 'gplc'
                   : 'e10';
             const price = s.prices[fuelKey];
+            const cheapest = idx === 0;
             return (
               <Pressable
                 key={s.id}
-                style={[styles.placeRow, { borderBottomColor: colors.border }]}
+                style={[
+                  styles.stationRow,
+                  {
+                    borderColor: cheapest ? colors.accent : colors.border,
+                    backgroundColor: cheapest ? colors.accent + '14' : colors.background,
+                  },
+                ]}
                 onPress={() =>
                   router.push({
                     pathname: '/fillup/station' as never,
@@ -794,15 +844,31 @@ export default function BudgetScreen() {
                   } as never)
                 }
               >
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: colors.text, fontWeight: '600' }}>{s.name}</Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                    {s.address} {s.city} · {s.distanceKm} km
+                <View
+                  style={[
+                    styles.rankBadge,
+                    { backgroundColor: cheapest ? colors.accent : colors.border },
+                  ]}
+                >
+                  <Text style={{ color: cheapest ? '#fff' : colors.text, fontWeight: '800', fontSize: 12 }}>
+                    {idx + 1}
                   </Text>
                 </View>
-                <Text style={{ color: colors.accent, fontWeight: '700' }}>
-                  {price != null ? formatPerLiter(price) : '—'}
-                </Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: colors.text, fontWeight: '700' }} numberOfLines={1}>
+                    {s.name}
+                    {cheapest ? ' · moins chère' : ''}
+                  </Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 12 }} numberOfLines={1}>
+                    {s.city || s.address} · {s.distanceKm != null ? `${s.distanceKm.toFixed(1)} km` : '—'}
+                  </Text>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 16 }}>
+                    {price != null ? formatPerLiter(price) : '—'}
+                  </Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Y aller ›</Text>
+                </View>
               </Pressable>
             );
           })}
@@ -851,14 +917,16 @@ export default function BudgetScreen() {
                       {vehicleLabel} · {item.budget.period === 'monthly' ? 'Mensuel' : item.budget.period}
                     </Text>
                   </View>
-                  <Text style={{ color: statusColor, fontWeight: '700', fontSize: 20 }}>
-                    {item.percentUsed.toFixed(0)}%
-                  </Text>
                 </View>
+                <Text style={{ color: statusColor, fontWeight: '800', fontSize: 24, marginBottom: 4 }}>
+                  {item.percentUsed > 100
+                    ? `Dépassé de ${formatEuro(item.spent - item.budget.amount)}`
+                    : `Il reste ${formatEuro(item.remaining)}`}
+                </Text>
                 <ProgressBar percent={item.percentUsed} color={statusColor} height={10} />
-                <Text style={{ color: colors.textSecondary, marginTop: 8 }}>
-                  {formatEuro(item.spent)} / {formatEuro(item.budget.amount)} — reste{' '}
-                  {formatEuro(item.remaining)}
+                <Text style={{ color: colors.textSecondary, marginTop: 8, fontSize: 13 }}>
+                  {formatEuro(item.spent)} dépensés sur {formatEuro(item.budget.amount)} (
+                  {item.percentUsed.toFixed(0)} %)
                 </Text>
                 <Button
                   title="Supprimer"
@@ -923,6 +991,23 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 8,
+  },
+  stationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 8,
+    gap: 10,
+  },
+  rankBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   budgetHeader: {
     flexDirection: 'row',

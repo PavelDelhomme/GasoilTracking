@@ -257,30 +257,79 @@ export default function HomeScreen() {
             {mainBudget && (
               <Card style={styles.budgetCard}>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  Budget : {mainBudget.budget.name}
+                  {mainBudget.budget.name}
                 </Text>
-                <View style={styles.budgetRow}>
-                  <Text style={[styles.budgetAmount, { color: colors.text }]}>
-                    {formatEuro(mainBudget.spent)} / {formatEuro(mainBudget.budget.amount)}
-                  </Text>
-                  <Text
-                    style={{
-                      color:
-                        mainBudget.percentUsed > 90
-                          ? colors.danger
-                          : mainBudget.percentUsed > 70
-                            ? colors.warning
-                            : colors.success,
-                      fontWeight: '600',
-                    }}
-                  >
-                    {mainBudget.percentUsed.toFixed(0)}%
-                  </Text>
-                </View>
+                <Text
+                  style={{
+                    color:
+                      mainBudget.percentUsed > 100
+                        ? colors.danger
+                        : mainBudget.percentUsed > 80
+                          ? colors.warning
+                          : colors.success,
+                    fontWeight: '800',
+                    fontSize: 26,
+                    letterSpacing: -0.4,
+                  }}
+                >
+                  {mainBudget.percentUsed > 100
+                    ? `Dépassé de ${formatEuro(mainBudget.spent - mainBudget.budget.amount)}`
+                    : `Il reste ${formatEuro(mainBudget.remaining)}`}
+                </Text>
+                <Text style={[styles.budgetRemaining, { color: colors.textSecondary, marginTop: 4 }]}>
+                  {formatEuro(mainBudget.spent)} dépensés sur {formatEuro(mainBudget.budget.amount)}
+                </Text>
                 <ProgressBar percent={mainBudget.percentUsed} />
-                <Text style={[styles.budgetRemaining, { color: colors.textSecondary }]}>
-                  Reste : {formatEuro(mainBudget.remaining)}
-                </Text>
+              </Card>
+            )}
+
+            {activeVehicle && (
+              <Card style={{ marginBottom: 16 }}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>Carburant réservoir</Text>
+                {activeVehicle.estimatedFuelLiters == null ? (
+                  <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
+                    Niveau inconnu — saisissez un plein pour initialiser la jauge.
+                  </Text>
+                ) : (
+                  <>
+                    <Text
+                      style={{
+                        color: colors.text,
+                        fontWeight: '800',
+                        fontSize: 22,
+                        marginBottom: 6,
+                      }}
+                    >
+                      {activeVehicle.estimatedFuelLiters.toFixed(1)} L restants
+                    </Text>
+                    <ProgressBar
+                      percent={
+                        activeVehicle.tankCapacity > 0
+                          ? (activeVehicle.estimatedFuelLiters / activeVehicle.tankCapacity) * 100
+                          : 0
+                      }
+                      color={
+                        (activeVehicle.estimatedFuelLiters / Math.max(activeVehicle.tankCapacity, 1)) *
+                          100 <
+                        20
+                          ? colors.danger
+                          : (activeVehicle.estimatedFuelLiters /
+                                Math.max(activeVehicle.tankCapacity, 1)) *
+                                100 <
+                              40
+                            ? colors.warning
+                            : colors.success
+                      }
+                      height={12}
+                    />
+                    <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 8 }}>
+                      Sur {activeVehicle.tankCapacity} L
+                      {sinceFill && sinceFill.rangeKm > 0
+                        ? ` · ~${formatDistance(sinceFill.rangeKm)} d’autonomie`
+                        : ''}
+                    </Text>
+                  </>
+                )}
               </Card>
             )}
 
