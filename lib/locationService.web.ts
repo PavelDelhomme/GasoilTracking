@@ -11,6 +11,7 @@ import {
 import {
   appendRoutePoint,
   calculateRouteDistance,
+  compactRoutePointsJson,
   estimateCost,
   estimateFuelUsed,
 } from '@/lib/calculations';
@@ -57,6 +58,7 @@ async function flushPending() {
         });
       }
 
+      routePoints = compactRoutePointsJson(routePoints);
       const distanceKm = calculateRouteDistance(routePoints);
       const fuelUsed = estimateFuelUsed(distanceKm, vehicle.consumptionPer100);
       const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);

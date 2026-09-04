@@ -2,7 +2,7 @@
   "expo": {
     "name": "Gasoil Tracking",
     "slug": "gasoil-tracking",
-    "version": "1.4.21",
+    "version": "1.4.22",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "gasoiltracking",
@@ -49,7 +49,7 @@
           "apiKey": "VOTRE_CLE_GOOGLE_MAPS_ANDROID"
         }
       },
-      "versionCode": 47
+      "versionCode": 48
     },
     "web": {
       "bundler": "metro",

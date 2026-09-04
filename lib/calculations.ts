@@ -563,14 +563,37 @@ export function appendRoutePoint(
   if (!verdict.accept) return routePoints;
 
   const use = verdict.sample || point;
+  // Ne pas stocker accuracy sur chaque point (JSON trop gros → OOM sur longs trajets)
   points.push({
-    latitude: use.latitude,
-    longitude: use.longitude,
+    latitude: Math.round(use.latitude * 1e6) / 1e6,
+    longitude: Math.round(use.longitude * 1e6) / 1e6,
     timestamp: use.timestamp,
-    ...(use.accuracy != null && Number.isFinite(use.accuracy)
-      ? { accuracy: use.accuracy }
-      : {}),
   });
+  return JSON.stringify(points);
+}
+
+/** Plafond de points GPS stockés (évite OOM / ANR). Conserve début + fin. */
+export const MAX_STORED_ROUTE_POINTS = 600;
+
+export function compactRoutePoints(points: RoutePoint[]): RoutePoint[] {
+  if (points.length <= MAX_STORED_ROUTE_POINTS) return points;
+  const keepEnds = 40;
+  const budget = MAX_STORED_ROUTE_POINTS - keepEnds * 2;
+  const mid = points.slice(keepEnds, points.length - keepEnds);
+  const step = Math.ceil(mid.length / Math.max(1, budget));
+  const sampled: RoutePoint[] = [];
+  for (let i = 0; i < mid.length; i += step) {
+    sampled.push(mid[i]);
+  }
+  return [
+    ...points.slice(0, keepEnds),
+    ...sampled.slice(0, budget),
+    ...points.slice(points.length - keepEnds),
+  ];
+}
+
+export function compactRoutePointsJson(routePoints: string): string {
+  const points = compactRoutePoints(parseRoutePoints(routePoints));
   return JSON.stringify(points);
 }
 

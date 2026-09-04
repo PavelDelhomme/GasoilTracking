@@ -154,13 +154,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     })();
   }, [refresh]);
 
-  // Polling léger pendant un trajet actif (ne pas dépendre de l’objet trip entier)
+  // Pendant un trajet : ne recharge QUE le trajet actif (léger).
+  // Un refresh() complet toutes les 3 s + GPS bg = OOM / ANR observés sur Nothing.
   useEffect(() => {
     const live = !!activeTrip?.isActive && !activeTrip?.isPaused;
-    const interval = setInterval(() => {
+    if (!live) {
+      const interval = setInterval(() => {
+        void refresh();
+      }, 30000);
+      return () => clearInterval(interval);
+    }
+
+    const light = setInterval(() => {
+      void (async () => {
+        try {
+          const trip = await getActiveTrip();
+          setActiveTrip(trip);
+        } catch {
+          /* ignore */
+        }
+      })();
+    }, 8000);
+
+    const full = setInterval(() => {
       void refresh();
-    }, live ? 3000 : 30000);
-    return () => clearInterval(interval);
+    }, 45000);
+
+    return () => {
+      clearInterval(light);
+      clearInterval(full);
+    };
   }, [refresh, activeTrip?.id, activeTrip?.isActive, activeTrip?.isPaused]);
 
   return (
