@@ -17,13 +17,14 @@ import {
   formatEuro,
   formatConsumption,
   formatDistance,
+  displayOdometerKm,
   getConsumptionStats,
   getSinceLastFillStats,
 } from '@/lib/calculations';
 import { seedDemoData } from '@/lib/seedDemo';
 import { seedTodayCommuteAndFillUp } from '@/lib/seedToday';
 import { notify } from '@/lib/notify';
-import { getPlaces } from '@/lib/database';
+import { getPlaces, reconcileTrackedKmFromTrips } from '@/lib/database';
 import type { ConsumptionStats, Place, SinceLastFillStats } from '@/types';
 
 export default function HomeScreen() {
@@ -52,12 +53,20 @@ export default function HomeScreen() {
   useEffect(() => {
     void getPlaces().then(setPlaces).catch(() => setPlaces([]));
     if (activeVehicle) {
-      void reloadStats(activeVehicle.id);
+      void (async () => {
+        try {
+          await reconcileTrackedKmFromTrips(activeVehicle.id);
+          await refresh();
+        } catch {
+          /* ignore */
+        }
+        await reloadStats(activeVehicle.id);
+      })();
     } else {
       setStats(null);
       setSinceFill(null);
     }
-  }, [activeVehicle]);
+  }, [activeVehicle?.id]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -183,8 +192,12 @@ export default function HomeScreen() {
                   </Text>
                 </View>
               </View>
-              <Text style={[styles.odometer, { color: colors.textSecondary }]}>
-                {activeVehicle.currentOdometer.toLocaleString(locale)} km
+              <Text style={[styles.odometer, { color: colors.text }]}>
+                {displayOdometerKm(activeVehicle).toLocaleString(locale)} km
+              </Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                Base {(activeVehicle.currentOdometer || 0).toLocaleString(locale)} +{' '}
+                {Math.round(activeVehicle.trackedKm || 0).toLocaleString(locale)} km de trajets
               </Text>
             </Card>
 

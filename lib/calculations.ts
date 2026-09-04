@@ -464,6 +464,19 @@ export function formatDistance(km: number): string {
   return km < 1 ? `${(km * 1000).toFixed(0)} m` : `${km.toFixed(1)} km`;
 }
 
+/**
+ * Compteur affiché = kilométrage de base (saisi) + km des trajets suivis.
+ * Multi-voitures : indiquer le compteur à la prise en main, puis le GPS s’ajoute.
+ */
+export function displayOdometerKm(vehicle: {
+  currentOdometer?: number | null;
+  trackedKm?: number | null;
+}): number {
+  const base = Number(vehicle.currentOdometer) || 0;
+  const tracked = Number(vehicle.trackedKm) || 0;
+  return Math.round(base + tracked);
+}
+
 /** Dates de début/fin pour un budget mensuel ou annuel */
 export function getBudgetPeriodDates(period: Budget['period']): { startDate: string; endDate: string } {
   const now = new Date();

@@ -168,7 +168,7 @@ export default function AddVehicleScreen() {
       consumptionPer100: parseFloat(consumption.replace(',', '.')) || 6,
       tankCapacity: parseFloat(tankCapacity.replace(',', '.')) || 50,
       defaultFuelPrice: parseFloat(fuelPrice.replace(',', '.')) || country.defaultFuelPrice,
-      currentOdometer: hasOdometer ? parseFloat(odometer.replace(',', '.')) || 0 : 0,
+      currentOdometer: parseFloat(odometer.replace(',', '.')) || 0,
       hasOdometer,
       trackedKm: 0,
       estimatedFuelLiters: null,
@@ -315,7 +315,8 @@ export default function AddVehicleScreen() {
         <View style={{ flex: 1, paddingRight: 12 }}>
           <Text style={[styles.switchLabel, { color: colors.text }]}>Utiliser le compteur</Text>
           <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-            Sinon les kilomètres viennent du GPS ou d’une saisie manuelle.
+            Saisissez le km déjà au compteur (ex. avant de récupérer la 206). Les trajets GPS
+            s’ajoutent ensuite.
           </Text>
         </View>
         <Switch
@@ -325,14 +326,13 @@ export default function AddVehicleScreen() {
         />
       </View>
 
-      {hasOdometer && (
-        <Input
-          label="Kilométrage actuel"
-          value={odometer}
-          onChangeText={setOdometer}
-          keyboardType="numeric"
-        />
-      )}
+      <Input
+        label="Kilométrage de base (compteur)"
+        value={odometer}
+        onChangeText={setOdometer}
+        keyboardType="numeric"
+        placeholder="Ex. 185420"
+      />
 
       <Button title="Enregistrer le véhicule" onPress={handleSave} loading={loading} />
       <Text style={[styles.hint, { color: colors.textSecondary, marginTop: 12 }]}>

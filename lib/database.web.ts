@@ -158,6 +158,20 @@ export async function addTrackedKm(vehicleId: number, km: number): Promise<void>
   await save(s);
 }
 
+/** Aligne trackedKm sur la somme des trajets confirmés. */
+export async function reconcileTrackedKmFromTrips(vehicleId: number): Promise<number> {
+  const s = await load();
+  const sum = s.trips
+    .filter((t) => t.vehicleId === vehicleId && !t.isActive && t.status !== 'rejected')
+    .reduce((acc, t) => acc + (Number(t.distanceKm) || 0), 0);
+  const rounded = Math.round(sum * 10) / 10;
+  s.vehicles = s.vehicles.map((v) =>
+    v.id === vehicleId ? { ...v, trackedKm: rounded } : v
+  );
+  await save(s);
+  return rounded;
+}
+
 export async function deleteVehicle(id: number): Promise<void> {
   const s = await load();
   s.vehicles = s.vehicles.filter((v) => v.id !== id);

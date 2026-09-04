@@ -348,6 +348,18 @@ export async function addTrackedKm(vehicleId: number, km: number): Promise<void>
   );
 }
 
+/** Aligne tracked_km sur la somme des trajets confirmés (corrige les vieux 0 km). */
+export async function reconcileTrackedKmFromTrips(vehicleId: number): Promise<number> {
+  const trips = await getTrips(vehicleId);
+  const sum = trips
+    .filter((t) => !t.isActive && t.status !== 'rejected')
+    .reduce((acc, t) => acc + (Number(t.distanceKm) || 0), 0);
+  const rounded = Math.round(sum * 10) / 10;
+  const database = await getDatabase();
+  await database.runAsync('UPDATE vehicles SET tracked_km = ? WHERE id = ?', [rounded, vehicleId]);
+  return rounded;
+}
+
 export async function createFillUp(fillUp: Omit<FillUp, 'id'>): Promise<number> {
   const database = await getDatabase();
   const result = await database.runAsync(

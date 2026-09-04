@@ -1,10 +1,12 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
 import type { Vehicle } from '@/types';
-import { formatConsumption } from '@/lib/calculations';
-import { fuelLevelLabel } from '@/lib/fuelLevel';
+import { displayOdometerKm, formatConsumption } from '@/lib/calculations';
+import { fuelLevelLabel, fuelLevelPercent, setFuelFraction } from '@/lib/fuelLevel';
+import { ProgressBar } from '@/components/Card';
+import { notify } from '@/lib/notify';
 
 interface VehicleCardProps {
   vehicle: Vehicle;
@@ -14,7 +16,17 @@ interface VehicleCardProps {
   onSelect?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  /** Après changement rapide de jauge. */
+  onFuelUpdated?: () => void;
 }
+
+const FUEL_PRESETS = [
+  { f: 0.125, label: '~1/8' },
+  { f: 0.25, label: '1/4' },
+  { f: 0.5, label: '1/2' },
+  { f: 0.75, label: '3/4' },
+  { f: 1, label: 'Plein' },
+] as const;
 
 export function VehicleCard({
   vehicle,
@@ -24,8 +36,17 @@ export function VehicleCard({
   onSelect,
   onEdit,
   onDelete,
+  onFuelUpdated,
 }: VehicleCardProps) {
   const { colors } = useTheme();
+  const odo = displayOdometerKm(vehicle);
+  const fuelPct = fuelLevelPercent(vehicle);
+
+  const setFuel = async (fraction: number, label: string) => {
+    const next = await setFuelFraction(vehicle, fraction);
+    notify('Réservoir', `${vehicle.name} · ${label} (~${next.toFixed(0)} L)`);
+    onFuelUpdated?.();
+  };
 
   return (
     <TouchableOpacity
@@ -63,10 +84,8 @@ export function VehicleCard({
           <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Conso.</Text>
         </View>
         <View style={styles.stat}>
-          <Text style={[styles.statValue, { color: colors.text }]}>
-            {vehicle.tankCapacity} L
-          </Text>
-          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Réservoir</Text>
+          <Text style={[styles.statValue, { color: colors.text }]}>{odo.toLocaleString('fr-FR')}</Text>
+          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>km</Text>
         </View>
         <View style={styles.stat}>
           <Text style={[styles.statValue, { color: colors.text }]}>
@@ -75,10 +94,56 @@ export function VehicleCard({
           <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Carburant</Text>
         </View>
       </View>
-      <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 10 }}>
-        {fuelLevelLabel(vehicle)}
-        {isActive ? ' · véhicule par défaut' : ''}
-      </Text>
+
+      <View style={styles.fuelBlock}>
+        <View style={styles.fuelHeader}>
+          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>
+            Réservoir · {fuelLevelLabel(vehicle)}
+          </Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
+            {vehicle.tankCapacity} L
+          </Text>
+        </View>
+        <ProgressBar
+          percent={fuelPct}
+          color={fuelPct < 20 ? colors.danger : fuelPct < 40 ? colors.warning : colors.success}
+          height={10}
+        />
+        <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 6 }}>
+          Jauge approx. (ce que vous voyez sur le tableau de bord)
+        </Text>
+        <View style={styles.fuelChips}>
+          {FUEL_PRESETS.map((opt) => (
+            <Pressable
+              key={opt.label}
+              onPress={(e) => {
+                e.stopPropagation?.();
+                void setFuel(opt.f, opt.label);
+              }}
+              style={[
+                styles.fuelChip,
+                {
+                  borderColor: colors.border,
+                  backgroundColor:
+                    vehicle.estimatedFuelLiters != null &&
+                    Math.abs(fuelPct / 100 - opt.f) < 0.08
+                      ? colors.accent + '22'
+                      : colors.background,
+                },
+              ]}
+            >
+              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 12 }}>{opt.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        {(vehicle.currentOdometer > 0 || (vehicle.trackedKm ?? 0) > 0) && (
+          <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
+                        Compteur {odo.toLocaleString('fr-FR')} km · base{' '}
+            {(vehicle.currentOdometer || 0).toLocaleString('fr-FR')} +{' '}
+            {(vehicle.trackedKm || 0).toFixed(0)} suivis
+          </Text>
+        )}
+      </View>
 
       <View style={styles.actions}>
         {!isActive && onSelect && (
@@ -99,7 +164,10 @@ export function VehicleCard({
         )}
         {onDelete && (
           <TouchableOpacity
-            style={[styles.selectBtn, { borderColor: colors.danger, flex: 0, minWidth: 44, paddingHorizontal: 12 }]}
+            style={[
+              styles.selectBtn,
+              { borderColor: colors.danger, flex: 0, minWidth: 44, paddingHorizontal: 12 },
+            ]}
             onPress={onDelete}
           >
             <Text style={[styles.selectText, { color: colors.danger }]}>✕</Text>
@@ -138,6 +206,25 @@ const styles = StyleSheet.create({
   stat: { alignItems: 'center', flex: 1 },
   statValue: { fontSize: 14, fontWeight: '600' },
   statLabel: { fontSize: 11, marginTop: 2 },
+  fuelBlock: { marginTop: 14 },
+  fuelHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  fuelChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  fuelChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
   selectBtn: {
     marginTop: 12,
     paddingVertical: 8,

@@ -118,9 +118,7 @@ export default function EditVehicleScreen() {
         defaultFuelPrice:
           parseFloat(fuelPrice.replace(',', '.')) || country.defaultFuelPrice,
         hasOdometer,
-        currentOdometer: hasOdometer
-          ? parseFloat(odometer.replace(',', '.')) || 0
-          : 0,
+        currentOdometer: parseFloat(odometer.replace(',', '.')) || 0,
         consumptionAutoAdapt: autoAdapt,
       });
       await refresh();
@@ -263,6 +261,10 @@ export default function EditVehicleScreen() {
       <View style={styles.switchRow}>
         <View style={{ flex: 1, paddingRight: 12 }}>
           <Text style={[styles.switchLabel, { color: colors.text }]}>Utiliser le compteur</Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+            Indiquez le km déjà au compteur (ex. avant de reprendre la 206). Les trajets GPS
+            s’ajoutent ensuite.
+          </Text>
         </View>
         <Switch
           value={hasOdometer}
@@ -270,13 +272,18 @@ export default function EditVehicleScreen() {
           trackColor={{ false: colors.border, true: colors.accent }}
         />
       </View>
-      {hasOdometer && (
-        <Input
-          label="Kilométrage actuel"
-          value={odometer}
-          onChangeText={setOdometer}
-          keyboardType="numeric"
-        />
+      <Input
+        label="Kilométrage de base (compteur)"
+        value={odometer}
+        onChangeText={setOdometer}
+        keyboardType="numeric"
+        placeholder="Ex. 185420"
+      />
+      {vehicle && (
+        <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 12, marginTop: -4 }}>
+          Affiché : {(Number(odometer.replace(',', '.')) || 0) + (vehicle.trackedKm || 0)} km
+          {' '}(base + {Math.round(vehicle.trackedKm || 0)} km suivis)
+        </Text>
       )}
 
       <Text style={[styles.sectionTitle, { color: colors.text }]}>Niveau carburant estimé</Text>

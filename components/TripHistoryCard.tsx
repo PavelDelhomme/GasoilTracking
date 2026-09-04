@@ -43,7 +43,7 @@ export function TripHistoryCard({ trip, onPress, onDelete }: Props) {
           originName={origin}
           destinationName={dest}
           accentColor={colors.accent}
-          height={128}
+          height={118}
         />
 
         <View style={styles.ends}>

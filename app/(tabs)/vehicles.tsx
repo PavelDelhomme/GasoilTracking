@@ -66,6 +66,7 @@ export default function VehiclesScreen() {
             }
             onLongPress={() => handleDelete(item.id, item.name)}
             onDelete={() => handleDelete(item.id, item.name)}
+            onFuelUpdated={() => void refresh()}
           />
         )}
       />

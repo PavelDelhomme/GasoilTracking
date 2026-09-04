@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
-import { WebView } from 'react-native-webview';
+import MapView, { Marker, Polyline } from 'react-native-maps';
 import type { RouteCoord } from '@/components/TripMap.types';
 
 type Props = {
@@ -11,48 +11,52 @@ type Props = {
   height?: number;
 };
 
+function regionFromPoints(pts: RouteCoord[]) {
+  const lats = pts.map((p) => p.latitude);
+  const lons = pts.map((p) => p.longitude);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLon = Math.min(...lons);
+  const maxLon = Math.max(...lons);
+  const latDelta = Math.max((maxLat - minLat) * 1.6, 0.012);
+  const lonDelta = Math.max((maxLon - minLon) * 1.6, 0.012);
+  return {
+    latitude: (minLat + maxLat) / 2,
+    longitude: (minLon + maxLon) / 2,
+    latitudeDelta: latDelta,
+    longitudeDelta: lonDelta,
+  };
+}
+
+/** Réduit les points pour rester léger dans une liste. */
+function downsample(pts: RouteCoord[], max = 48): RouteCoord[] {
+  if (pts.length <= max) return pts;
+  const out: RouteCoord[] = [pts[0]];
+  const step = (pts.length - 1) / (max - 1);
+  for (let i = 1; i < max - 1; i++) {
+    out.push(pts[Math.round(i * step)]);
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
 /**
- * Mini-carte départ (vert) → arrivée (rouge) pour l’historique.
- * Si pas de GPS : schéma texte avec pastilles.
+ * Mini-carte trajet (départ vert → arrivée rouge) pour les cartes d’historique.
+ * MapView native (lite sur Android) — taille fixe, non interactive.
  */
 export function TripMiniMap({
   routePoints,
   originName,
   destinationName,
   accentColor = '#e94560',
-  height = 132,
+  height = 118,
 }: Props) {
-  const html = useMemo(() => {
-    if (routePoints.length < 1) return null;
-    const pts = routePoints;
-    const start = pts[0];
-    const end = pts[pts.length - 1];
-    const mid = pts[Math.floor(pts.length / 2)] || start;
-    const routeJson = JSON.stringify(pts.map((p) => [p.latitude, p.longitude]));
-    const accent = String(accentColor).replace(/[^#a-fA-F0-9]/g, '');
+  const pts = useMemo(() => downsample(routePoints), [routePoints]);
+  const start = pts[0];
+  const end = pts.length > 1 ? pts[pts.length - 1] : start;
+  const region = useMemo(() => (pts.length ? regionFromPoints(pts) : null), [pts]);
 
-    return `<!DOCTYPE html><html><head>
-<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<style>html,body,#m{margin:0;height:100%;width:100%;background:#1a1a2e}
-.leaflet-control-attribution{display:none!important}</style>
-</head><body><div id="m"></div><script>
-var map=L.map('m',{zoomControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,boxZoom:false,keyboard:false,tap:false}).setView([${mid.latitude},${mid.longitude}],12);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18}).addTo(map);
-var pts=${routeJson};
-if(pts.length>1){
-  L.polyline(pts,{color:'${accent}',weight:4,opacity:0.95}).addTo(map);
-  map.fitBounds(pts,{padding:[18,18]});
-} else {
-  map.setView(pts[0],13);
-}
-L.circleMarker(pts[0],{radius:7,color:'#fff',weight:2,fillColor:'#22c55e',fillOpacity:1}).addTo(map);
-L.circleMarker(pts[pts.length-1],{radius:7,color:'#fff',weight:2,fillColor:'#ef4444',fillOpacity:1}).addTo(map);
-</script></body></html>`;
-  }, [routePoints, accentColor]);
-
-  if (!html) {
+  if (!pts.length || !region || !start) {
     return (
       <View style={[styles.schema, { height: Math.min(height, 72) }]}>
         <View style={styles.schemaRow}>
@@ -73,22 +77,41 @@ L.circleMarker(pts[pts.length-1],{radius:7,color:'#fff',weight:2,fillColor:'#ef4
   }
 
   return (
-    <View style={[styles.wrap, { height }]}>
-      <WebView
-        source={{ html }}
-        style={styles.web}
+    <View style={[styles.wrap, { height }]} pointerEvents="none">
+      <MapView
+        style={styles.map}
+        initialRegion={region}
         scrollEnabled={false}
-        pointerEvents="none"
-        originWhitelist={['*']}
-        javaScriptEnabled
-        domStorageEnabled
-        mixedContentMode="always"
-        setSupportMultipleWindows={false}
-        {...(Platform.OS === 'android' ? { androidLayerType: 'hardware' as const } : {})}
-      />
+        zoomEnabled={false}
+        rotateEnabled={false}
+        pitchEnabled={false}
+        toolbarEnabled={false}
+        moveOnMarkerPress={false}
+        liteMode={Platform.OS === 'android'}
+      >
+        {pts.length > 1 && (
+          <Polyline coordinates={pts} strokeColor={accentColor} strokeWidth={4} />
+        )}
+        <Marker
+          coordinate={start}
+          pinColor="green"
+          title="Départ"
+          description={originName}
+          tracksViewChanges={false}
+        />
+        {end && (
+          <Marker
+            coordinate={end}
+            pinColor="red"
+            title="Arrivée"
+            description={destinationName}
+            tracksViewChanges={false}
+          />
+        )}
+      </MapView>
       <View style={styles.legend} pointerEvents="none">
-        <Text style={styles.legendText}>● Départ</Text>
-        <Text style={[styles.legendText, { color: '#fecaca' }]}>● Arrivée</Text>
+        <Text style={styles.legendStart}>Départ</Text>
+        <Text style={styles.legendEnd}>Arrivée</Text>
       </View>
     </View>
   );
@@ -99,24 +122,26 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: 12,
     overflow: 'hidden',
-    marginTop: 10,
+    marginBottom: 8,
     position: 'relative',
+    backgroundColor: '#1a1a2e',
   },
-  web: { flex: 1, backgroundColor: '#1a1a2e' },
+  map: { ...StyleSheet.absoluteFillObject },
   legend: {
     position: 'absolute',
     left: 8,
     bottom: 8,
     flexDirection: 'row',
     gap: 10,
-    backgroundColor: 'rgba(15,23,42,0.72)',
+    backgroundColor: 'rgba(15,23,42,0.75)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
   },
-  legendText: { color: '#bbf7d0', fontSize: 10, fontWeight: '700' },
+  legendStart: { color: '#bbf7d0', fontSize: 10, fontWeight: '700' },
+  legendEnd: { color: '#fecaca', fontSize: 10, fontWeight: '700' },
   schema: {
-    marginTop: 10,
+    marginBottom: 8,
     borderRadius: 12,
     backgroundColor: 'rgba(148,163,184,0.12)',
     paddingHorizontal: 12,
