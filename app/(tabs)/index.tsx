@@ -515,7 +515,7 @@ export default function HomeScreen() {
               <Card style={{ marginBottom: 16 }}>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Trajets rapides</Text>
                 <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 10 }}>
-                  Depuis ta position actuelle vers un lieu enregistré.
+                  Depuis votre position actuelle vers un lieu enregistré.
                 </Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                   {homePlace && (

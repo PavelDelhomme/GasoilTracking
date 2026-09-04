@@ -181,7 +181,7 @@ export default function StationTripScreen() {
       notify(
         'Trajet démarré',
         trackingStarted
-          ? 'GPS actif — les km vers la station sont enregistrés. Revenez ici à l’arrivée.'
+          ? 'Suivi GPS actif — les km vers la station sont enregistrés. Revenez ici à l’arrivée.'
           : 'Maps ouvert. Autorisez la localisation pour tracer les km.'
       );
     } catch (e) {

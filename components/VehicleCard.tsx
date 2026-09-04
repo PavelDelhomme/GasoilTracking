@@ -143,7 +143,7 @@ export function VehicleCard({
           <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
             Compteur {odo.toLocaleString('fr-FR')} km · base{' '}
             {(vehicle.currentOdometer || 0).toLocaleString('fr-FR')} +{' '}
-            {(vehicle.trackedKm || 0).toFixed(0)} suivis
+            {(vehicle.trackedKm || 0).toFixed(0)} km de trajets
           </Text>
         )}
       </View>

@@ -48,7 +48,7 @@ export default function FillUpDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const fillId = Number(id);
   const { colors } = useTheme();
-  const { formatPerLiter, countryCode } = useLocale();
+  const { formatPerLiter, countryCode, moneySymbol } = useLocale();
   const { refresh } = useApp();
 
   const [fill, setFill] = useState<FillUp | null>(null);
@@ -332,7 +332,7 @@ export default function FillUpDetailScreen() {
                 keyboardType="numeric"
               />
               <Input
-                label="Prix au litre (€)"
+                label={`Prix au litre (${moneySymbol})`}
                 value={pplDraft}
                 onChangeText={(v) => {
                   setPplDraft(v);
@@ -343,7 +343,7 @@ export default function FillUpDetailScreen() {
                 keyboardType="numeric"
               />
               <Input
-                label="Montant ticket (€)"
+                label={`Montant ticket (${moneySymbol})`}
                 value={totalDraft}
                 onChangeText={(v) => {
                   setTotalDraft(v);

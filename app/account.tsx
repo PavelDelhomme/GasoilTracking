@@ -64,6 +64,21 @@ export default function AccountScreen() {
       </Card>
 
       <Card style={{ marginBottom: 12 }}>
+        <Text style={[styles.section, { color: colors.text }]}>Session</Text>
+        <Button
+          title="Déconnexion"
+          variant="secondary"
+          onPress={() => {
+            confirm('Déconnexion', 'Quitter le compte sur cet appareil ?', async () => {
+              await logout();
+              notify('Déconnecté', 'À bientôt.');
+              router.replace('/' as never);
+            });
+          }}
+        />
+      </Card>
+
+      <Card style={{ marginBottom: 12 }}>
         <Text style={[styles.section, { color: colors.text }]}>Mise à jour</Text>
         <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 10, lineHeight: 18 }}>
           {updateAvailable

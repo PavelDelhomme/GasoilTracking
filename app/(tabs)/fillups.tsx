@@ -250,10 +250,32 @@ export default function FillUpsScreen() {
           <View style={styles.empty}>
             <Ionicons name="water-outline" size={40} color={colors.textSecondary} />
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              {activeVehicle
-                ? 'Aucun plein pour cette période'
-                : 'Sélectionnez un véhicule pour voir les pleins'}
+              {!activeVehicle
+                ? 'Sélectionnez un véhicule pour voir les pleins'
+                : allFillUps.length === 0
+                  ? 'Aucun plein enregistré'
+                  : 'Aucun plein pour cette période'}
             </Text>
+            {activeVehicle && allFillUps.length === 0 && (
+              <Pressable
+                onPress={() => router.push('/fillup/add' as never)}
+                style={{
+                  marginTop: 8,
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: colors.accent,
+                }}
+              >
+                <Text style={{ color: colors.accent, fontWeight: '700' }}>Nouveau plein</Text>
+              </Pressable>
+            )}
+            {activeVehicle && allFillUps.length > 0 && selectedMonth !== 'all' && (
+              <Pressable onPress={() => pickMonth('all')} style={{ marginTop: 8 }}>
+                <Text style={{ color: colors.accent, fontWeight: '700' }}>Voir tous les pleins</Text>
+              </Pressable>
+            )}
           </View>
         }
         renderItem={({ item: fill }) => (

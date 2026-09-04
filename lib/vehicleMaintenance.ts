@@ -14,6 +14,13 @@ export const MAINTENANCE_KIND_LABELS: Record<MaintenanceKind, string> = {
   autre: 'Autre',
 };
 
+export const MAINTENANCE_STATUS_LABELS: Record<MaintenanceStatus, string> = {
+  done: 'Fait',
+  pending: 'À faire',
+  overdue: 'En retard',
+  cancelled: 'Annulé',
+};
+
 /** Ajoute N mois calendaires (AAAA-MM-JJ). */
 export function addMonthsIso(isoDate: string, months: number): string {
   const d = new Date(isoDate.includes('T') ? isoDate : `${isoDate}T12:00:00`);

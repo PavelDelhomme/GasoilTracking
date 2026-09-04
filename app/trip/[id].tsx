@@ -14,7 +14,7 @@ import {
   parseRoutePoints,
 } from '@/lib/calculations';
 import { formatDateSlash } from '@/lib/dates';
-import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
+import { reverseGeocode, tripPlaceLabel, tripSourceLabel } from '@/lib/geocode';
 import { notify, confirm } from '@/lib/notify';
 import { useApp } from '@/context/AppContext';
 import type { Trip } from '@/types';
@@ -163,14 +163,28 @@ export default function TripDetailScreen() {
             <Text style={[styles.place, { color: colors.text }]}>{destLabel}</Text>
             <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 12 }}>
               {formatDateSlash(trip.startTime)}
-              {trip.endTime
-                ? ` → ${new Date(trip.endTime).toLocaleTimeString('fr-FR', {
+              {(() => {
+                try {
+                  const startHm = new Date(trip.startTime).toLocaleTimeString('fr-FR', {
                     hour: '2-digit',
                     minute: '2-digit',
-                  })}`
-                : ''}
+                  });
+                  if (!trip.endTime) return ` · ${startHm}`;
+                  const endHm = new Date(trip.endTime).toLocaleTimeString('fr-FR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  });
+                  const endDay = formatDateSlash(trip.endTime);
+                  const startDay = formatDateSlash(trip.startTime);
+                  return endDay === startDay
+                    ? ` · ${startHm} → ${endHm}`
+                    : ` · ${startHm} → ${endDay} ${endHm}`;
+                } catch {
+                  return '';
+                }
+              })()}
               {' · '}
-              {trip.source}
+              {tripSourceLabel(trip.source) || trip.source}
               {trip.status === 'pending' ? ' · à valider' : ''}
             </Text>
           </Card>

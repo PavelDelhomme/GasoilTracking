@@ -19,6 +19,7 @@ import { refreshVehicleReminders } from '@/lib/reminders';
 import {
   contreVisiteDueFromCt,
   MAINTENANCE_KIND_LABELS,
+  MAINTENANCE_STATUS_LABELS,
   maintenanceIsUrgent,
 } from '@/lib/vehicleMaintenance';
 import type { MaintenanceKind, VehicleMaintenance } from '@/types';
@@ -169,7 +170,9 @@ export default function VehicleMaintenanceScreen() {
 
       <Text style={[styles.section, { color: colors.text }]}>À faire / historique</Text>
       {items.length === 0 ? (
-        <Text style={{ color: colors.textSecondary, marginBottom: 12 }}>Aucun événement.</Text>
+        <Text style={{ color: colors.textSecondary, marginBottom: 12 }}>
+          Aucun événement. Ajoutez un CT, une assurance ou un rappel ci-dessous.
+        </Text>
       ) : (
         items.map((m) => {
           const urgent = maintenanceIsUrgent(m);
@@ -184,7 +187,7 @@ export default function VehicleMaintenanceScreen() {
             >
               <Text style={{ color: colors.text, fontWeight: '700' }}>{m.title}</Text>
               <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-                {MAINTENANCE_KIND_LABELS[m.kind]} · {m.status}
+                {MAINTENANCE_KIND_LABELS[m.kind]} · {MAINTENANCE_STATUS_LABELS[m.status]}
                 {m.amount != null ? ` · ${formatEuro(m.amount)}` : ''}
               </Text>
               {m.doneAt ? (
