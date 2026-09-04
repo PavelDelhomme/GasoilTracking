@@ -20,6 +20,7 @@ import { notify } from '@/lib/notify';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
 import { searchVehicles, type VehiclePreset } from '@/constants/vehicles';
 import { fuelLevelLabel, setFuelFraction } from '@/lib/fuelLevel';
+import { refreshVehicleReminders } from '@/lib/reminders';
 import type { FuelType, Vehicle } from '@/types';
 
 /**
@@ -44,6 +45,9 @@ export default function EditVehicleScreen() {
   const [odometer, setOdometer] = useState('0');
   const [hasOdometer, setHasOdometer] = useState(true);
   const [autoAdapt, setAutoAdapt] = useState(true);
+  const [notifyMaint, setNotifyMaint] = useState(true);
+  const [notifyFuel, setNotifyFuel] = useState(false);
+  const [fuelThreshold, setFuelThreshold] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
@@ -74,6 +78,11 @@ export default function EditVehicleScreen() {
       setOdometer(String(v.currentOdometer));
       setHasOdometer(v.hasOdometer);
       setAutoAdapt(v.consumptionAutoAdapt !== false);
+      setNotifyMaint(v.notifyMaintenance !== false);
+      setNotifyFuel(!!v.notifyLowFuel);
+      setFuelThreshold(
+        v.lowFuelThresholdLiters != null ? String(v.lowFuelThresholdLiters) : ''
+      );
       setVehicle(v);
       setReady(true);
       void getConsumptionStats(v.id).then((s) => {
@@ -120,8 +129,14 @@ export default function EditVehicleScreen() {
         hasOdometer,
         currentOdometer: parseFloat(odometer.replace(',', '.')) || 0,
         consumptionAutoAdapt: autoAdapt,
+        notifyMaintenance: notifyMaint,
+        notifyLowFuel: notifyFuel,
+        lowFuelThresholdLiters: fuelThreshold.trim()
+          ? parseFloat(fuelThreshold.replace(',', '.')) || null
+          : null,
       });
       await refresh();
+      void refreshVehicleReminders();
       notify(
         'Véhicule mis à jour',
         autoAdapt
@@ -285,6 +300,52 @@ export default function EditVehicleScreen() {
           {' '}(base + {Math.round(vehicle.trackedKm || 0)} km suivis)
         </Text>
       )}
+
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>Notifications</Text>
+      <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 8, lineHeight: 18 }}>
+        Rappels locaux (sur cet appareil). Activez pour CT / contre-visite et pour l’alerte « bientôt
+        plein ».
+      </Text>
+      <View style={styles.switchRow}>
+        <View style={{ flex: 1, paddingRight: 12 }}>
+          <Text style={[styles.switchLabel, { color: colors.text }]}>Rappels CT / entretien</Text>
+        </View>
+        <Switch
+          value={notifyMaint}
+          onValueChange={setNotifyMaint}
+          trackColor={{ false: colors.border, true: colors.accent }}
+        />
+      </View>
+      <View style={styles.switchRow}>
+        <View style={{ flex: 1, paddingRight: 12 }}>
+          <Text style={[styles.switchLabel, { color: colors.text }]}>Alerte bas de réservoir</Text>
+        </View>
+        <Switch
+          value={notifyFuel}
+          onValueChange={setNotifyFuel}
+          trackColor={{ false: colors.border, true: colors.accent }}
+        />
+      </View>
+      {notifyFuel && (
+        <Input
+          label="Seuil litres restants (vide = ~20 %)"
+          value={fuelThreshold}
+          onChangeText={setFuelThreshold}
+          keyboardType="numeric"
+          placeholder="12"
+        />
+      )}
+      <Button
+        title="Gérer CT / entretien / rappels"
+        variant="secondary"
+        onPress={() =>
+          router.push({
+            pathname: '/vehicle/maintenance' as never,
+            params: { id: String(vehicleId) },
+          })
+        }
+        style={{ marginBottom: 12 }}
+      />
 
       <Text style={[styles.sectionTitle, { color: colors.text }]}>Niveau carburant estimé</Text>
       <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 8, lineHeight: 18 }}>

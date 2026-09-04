@@ -35,6 +35,7 @@ export default function RouteScreen() {
   const [name, setName] = useState('');
   const [distanceKm, setDistanceKm] = useState('');
   const [workDays, setWorkDays] = useState('5');
+  const [roundTrip, setRoundTrip] = useState(true);
   const [onVacation, setOnVacation] = useState(false);
   const [vacationUntil, setVacationUntil] = useState(toLocalYmd(new Date()));
   const [loading, setLoading] = useState(false);
@@ -194,7 +195,7 @@ export default function RouteScreen() {
     }
     const days = parseFloat(workDays.replace(',', '.'));
     if (!km || km <= 0 || !days || days <= 0 || days > 7) {
-      notify('Erreur', 'Distance aller (km) et jours travaillés / semaine (1–7) requis.');
+      notify('Erreur', 'Distance aller (km) et fréquence / semaine (0.1–7) requis.');
       return;
     }
     setLoading(true);
@@ -213,14 +214,33 @@ export default function RouteScreen() {
       };
       if (isEdit && editId) {
         await updateRecurringRoute(editId, payload);
-        notify('Trajet régulier', `Modifié · aller ${km} km.`);
+        notify('Trajet régulier', `Modifié · aller ${km} km · ${days}×/sem.`);
       } else {
         await createRecurringRoute({
           ...payload,
           vehicleId: activeVehicle?.id ?? null,
           isActive: true,
         });
-        notify('Trajet régulier', `Ajouté · aller ${km} km.`);
+        if (roundTrip) {
+          await createRecurringRoute({
+            name: `${to?.name} → ${from?.name}`,
+            fromPlaceId: toId,
+            toPlaceId: fromId,
+            distanceKm: km,
+            timesPerWeek: days,
+            workDaysPerWeek: days,
+            isOnVacation: onVacation,
+            vacationUntil: onVacation ? vacationUntil : null,
+            vehicleId: activeVehicle?.id ?? null,
+            isActive: true,
+          });
+        }
+        notify(
+          'Trajet régulier',
+          roundTrip
+            ? `Aller-retour ajouté · ${km} km × ${days}/sem.`
+            : `Aller ajouté · ${km} km × ${days}/sem.`
+        );
       }
       router.back();
     } catch (e) {
@@ -363,13 +383,61 @@ export default function RouteScreen() {
         </View>
       )}
 
+      <Text style={{ color: colors.text, fontWeight: '600', marginBottom: 6 }}>
+        Fréquence (aller par semaine)
+      </Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+        {[
+          { v: '5', label: '5 j/sem (travail)' },
+          { v: '4', label: '4 j/sem' },
+          { v: '2', label: '2× / sem' },
+          { v: '1', label: '1× / sem' },
+          { v: '0.25', label: '~1× / mois' },
+        ].map((opt) => (
+          <Pressable
+            key={opt.v}
+            onPress={() => setWorkDays(opt.v)}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: 16,
+              borderWidth: 1,
+              borderColor: colors.border,
+              backgroundColor: workDays === opt.v ? colors.accent : colors.card,
+            }}
+          >
+            <Text style={{ color: workDays === opt.v ? '#fff' : colors.text, fontSize: 13 }}>
+              {opt.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
       <Input
-        label="Jours travaillés / semaine"
+        label="Ou valeur libre (ex. 1.5)"
         value={workDays}
         onChangeText={setWorkDays}
         keyboardType="numeric"
-        placeholder="5 = lun–ven"
+        placeholder="5"
       />
+      <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: -8, marginBottom: 12 }}>
+        Ex. Nantes 1×/semaine : choisir lieux Domicile + Nantes, fréquence 1×, aller-retour.
+      </Text>
+
+      {!isEdit && (
+        <View style={styles.switchRow}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={{ color: colors.text, fontWeight: '600' }}>Créer aussi le retour</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+              Ajoute automatiquement l’itinéraire inverse (même fréquence).
+            </Text>
+          </View>
+          <Switch
+            value={roundTrip}
+            onValueChange={setRoundTrip}
+            trackColor={{ false: colors.border, true: colors.accent }}
+          />
+        </View>
+      )}
 
       <View style={styles.switchRow}>
         <View style={{ flex: 1, paddingRight: 12 }}>

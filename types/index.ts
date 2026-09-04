@@ -26,6 +26,12 @@ export interface Vehicle {
    * Si false : valeur figée (saisie manuelle).
    */
   consumptionAutoAdapt?: boolean;
+  /** Rappels CT / contre-visite / échéances (notifications locales). */
+  notifyMaintenance?: boolean;
+  /** Alerte « bientôt plein » selon le niveau réservoir. */
+  notifyLowFuel?: boolean;
+  /** Seuil litres restants pour l’alerte plein (défaut ~20 % du réservoir). */
+  lowFuelThresholdLiters?: number | null;
   isActive: boolean;
   createdAt: string;
 }

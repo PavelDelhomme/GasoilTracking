@@ -1,5 +1,14 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Platform } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Linking,
+  Platform,
+  Pressable,
+} from 'react-native';
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
@@ -11,28 +20,62 @@ import { Card } from '@/components/Card';
 import { createTrip, addTrackedKm } from '@/lib/database';
 import {
   parseGoogleMapsUrl,
-  parseGoogleTimelineJson,
   type ImportedTripDraft,
 } from '@/lib/mapsImport';
+import {
+  base64ToBytes,
+  filterDraftsByDateRange,
+  parseTimelineFromJsonText,
+  parseTimelineFromZipBytes,
+  suggestVehicleHint,
+} from '@/lib/takeoutImport';
 import { notify } from '@/lib/notify';
 import { formatDistance, formatEuro } from '@/lib/calculations';
+import type { Vehicle } from '@/types';
+
+type DraftRow = ImportedTripDraft & { vehicleId: number };
 
 export default function ImportTripsScreen() {
-  const { activeVehicle, refresh } = useApp();
+  const { activeVehicle, vehicles, refresh } = useApp();
   const { colors } = useTheme();
   const [mapsUrl, setMapsUrl] = useState('');
-  const [drafts, setDrafts] = useState<ImportedTripDraft[]>([]);
+  const [drafts, setDrafts] = useState<DraftRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [fromDay, setFromDay] = useState('');
+  const [toDay, setToDay] = useState('');
+  const [defaultVehicleId, setDefaultVehicleId] = useState<number | null>(
+    activeVehicle?.id ?? null
+  );
 
-  const estimate = (km: number) => {
-    if (!activeVehicle) return { fuel: 0, cost: 0 };
-    const fuel = (km * activeVehicle.consumptionPer100) / 100;
-    return { fuel, cost: fuel * activeVehicle.defaultFuelPrice };
+  const vehicleById = useMemo(() => {
+    const m = new Map<number, Vehicle>();
+    for (const v of vehicles) m.set(v.id, v);
+    return m;
+  }, [vehicles]);
+
+  const estimateFor = (vehicleId: number, km: number) => {
+    const v = vehicleById.get(vehicleId);
+    if (!v) return { fuel: 0, cost: 0 };
+    const fuel = (km * v.consumptionPer100) / 100;
+    return { fuel, cost: fuel * v.defaultFuelPrice };
   };
 
-  const mergeDrafts = (list: ImportedTripDraft[]) => {
-    setDrafts((prev) => [...list, ...prev]);
+  const mergeDrafts = (list: ImportedTripDraft[], vehicleId?: number) => {
+    const vid = vehicleId ?? defaultVehicleId ?? activeVehicle?.id;
+    if (!vid) {
+      notify('Véhicule', 'Sélectionnez un véhicule cible.');
+      return;
+    }
+    const filtered = filterDraftsByDateRange(
+      list,
+      fromDay.trim() || null,
+      toDay.trim() || null
+    );
+    setDrafts((prev) => [
+      ...filtered.map((d) => ({ ...d, vehicleId: vid })),
+      ...prev,
+    ]);
   };
 
   const parseUrl = () => {
@@ -48,42 +91,84 @@ export default function ImportTripsScreen() {
     setMapsUrl('');
   };
 
-  const ingestJsonText = (raw: string) => {
-    const list = parseGoogleTimelineJson(raw);
+  const ingestPayload = async (uri: string, name: string, mime?: string | null) => {
+    const lower = name.toLowerCase();
+    const isZip =
+      lower.endsWith('.zip') ||
+      mime === 'application/zip' ||
+      mime === 'application/x-zip-compressed';
+
+    if (isZip) {
+      let b64: string;
+      if (Platform.OS === 'web') {
+        const res = await fetch(uri);
+        const buf = await res.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        const { drafts: list, filesRead, errors } = parseTimelineFromZipBytes(bytes);
+        if (!list.length) {
+          notify(
+            'Import ZIP',
+            errors[0] || 'Aucun trajet Timeline trouvé dans le ZIP.'
+          );
+          return;
+        }
+        mergeDrafts(list);
+        notify(
+          'Takeout ZIP',
+          `${list.length} trajet(s) · fichiers : ${filesRead.slice(0, 4).join(', ')}`
+        );
+        return;
+      }
+      b64 = await FileSystem.readAsStringAsync(uri, {
+                  encoding: 'base64' as const,
+      });
+      const bytes = base64ToBytes(b64);
+      const { drafts: list, filesRead, errors } = parseTimelineFromZipBytes(bytes);
+      if (!list.length) {
+        notify('Import ZIP', errors[0] || 'Aucun trajet trouvé dans le ZIP.');
+        return;
+      }
+      mergeDrafts(list);
+      notify(
+        'Takeout ZIP',
+        `${list.length} trajet(s) · ${filesRead.length} fichier(s) JSON lus`
+      );
+      return;
+    }
+
+    let raw = '';
+    if (Platform.OS === 'web') {
+      const res = await fetch(uri);
+      raw = await res.text();
+    } else {
+      raw = await FileSystem.readAsStringAsync(uri);
+    }
+    const list = parseTimelineFromJsonText(raw);
     if (!list.length) {
-      notify('Import', 'Aucun trajet trouvé dans ce fichier Timeline.');
+      notify('Import', 'Aucun trajet trouvé dans ce JSON Timeline.');
       return;
     }
     mergeDrafts(list);
-    notify(
-      'Import',
-      `${list.length} trajet(s) détectés. Validez ceux en voiture, ignorez les autres.`
-    );
+    notify('Import', `${list.length} trajet(s) détectés — validez / changez de véhicule.`);
   };
 
-  /** Google n’offre plus d’API OAuth Timeline — export fichier depuis Maps. */
   const pickTimelineFile = async () => {
     setPicking(true);
     try {
       const res = await DocumentPicker.getDocumentAsync({
-        type: ['application/json', 'text/plain', '*/*'],
+        type: [
+          'application/json',
+          'application/zip',
+          'application/x-zip-compressed',
+          'text/plain',
+          '*/*',
+        ],
         copyToCacheDirectory: true,
         multiple: false,
       });
       if (res.canceled || !res.assets?.[0]) return;
       const asset = res.assets[0];
-      let raw = '';
-      if (Platform.OS === 'web') {
-        const file = (asset as { file?: File }).file;
-        if (file) raw = await file.text();
-        else {
-          notify('Import', 'Impossible de lire le fichier sur le web.');
-          return;
-        }
-      } else {
-        raw = await FileSystem.readAsStringAsync(asset.uri);
-      }
-      ingestJsonText(raw);
+      await ingestPayload(asset.uri, asset.name || 'export.json', asset.mimeType);
     } catch (e) {
       notify('Erreur', e instanceof Error ? e.message : 'Lecture fichier impossible');
     } finally {
@@ -92,7 +177,6 @@ export default function ImportTripsScreen() {
   };
 
   const openMapsTimelineHelp = async () => {
-    // Guide utilisateur : export depuis l’app Maps (données sur l’appareil)
     await Linking.openURL('https://support.google.com/maps/answer/6258979');
   };
 
@@ -112,11 +196,11 @@ export default function ImportTripsScreen() {
     );
   };
 
+  const setRowVehicle = (index: number, vehicleId: number) => {
+    setDrafts((prev) => prev.map((d, i) => (i === index ? { ...d, vehicleId } : d)));
+  };
+
   const saveAll = async () => {
-    if (!activeVehicle) {
-      notify('Erreur', 'Véhicule actif requis.');
-      return;
-    }
     const toSave = drafts.filter((d) => d.status !== 'rejected');
     if (!toSave.length) {
       notify('Rien à sauver', 'Tous les trajets sont ignorés.');
@@ -125,10 +209,12 @@ export default function ImportTripsScreen() {
     setLoading(true);
     try {
       for (const d of toSave) {
+        const v = vehicleById.get(d.vehicleId);
+        if (!v) continue;
         const km = d.distanceKm || 0;
-        const { fuel, cost } = estimate(km);
+        const { fuel, cost } = estimateFor(d.vehicleId, km);
         await createTrip({
-          vehicleId: activeVehicle.id,
+          vehicleId: d.vehicleId,
           startTime: d.startTime,
           endTime: d.endTime,
           distanceKm: km,
@@ -144,11 +230,11 @@ export default function ImportTripsScreen() {
           note: d.note,
         });
         if (d.status === 'confirmed' && km > 0) {
-          await addTrackedKm(activeVehicle.id, km);
+          await addTrackedKm(d.vehicleId, km);
         }
       }
       await refresh();
-      notify('OK', `${toSave.length} trajet(s) enregistrés (certains en attente de validation).`);
+      notify('OK', `${toSave.length} trajet(s) enregistrés.`);
       router.back();
     } catch (e) {
       notify('Erreur', e instanceof Error ? e.message : 'Échec import');
@@ -157,11 +243,11 @@ export default function ImportTripsScreen() {
     }
   };
 
-  if (!activeVehicle) {
+  if (!vehicles.length) {
     return (
       <View style={[styles.wrap, { backgroundColor: colors.background }]}>
         <Text style={{ color: colors.danger, textAlign: 'center' }}>
-          Sélectionnez un véhicule avant d’importer.
+          Ajoutez un véhicule avant d’importer.
         </Text>
       </View>
     );
@@ -173,28 +259,65 @@ export default function ImportTripsScreen() {
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={[styles.title, { color: colors.text }]}>Importer depuis Google Maps</Text>
+      <Text style={[styles.title, { color: colors.text }]}>Importer Timeline / Takeout</Text>
 
       <Card style={{ marginBottom: 14 }}>
         <Text style={{ color: colors.text, fontWeight: '700', marginBottom: 6 }}>
-          Timeline (votre compte Google)
+          Google Maps → fichier
         </Text>
-        <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 10 }}>
-          Google ne laisse plus les apps se connecter en OAuth pour lire Timeline (données sur
-          l’appareil uniquement). Le flux propre : exportez Timeline depuis Maps, puis choisissez
-          le fichier ici pour sélectionner / valider les trajets.
+        <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 8 }}>
+          Pas d’API Google pour lire ta Timeline perso (données sur le téléphone depuis 2024/25).
+          Export : Maps → Timeline → Exporter (.json) ou ancien Takeout (.zip).
         </Text>
-        <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginBottom: 12 }}>
-          Sur Android : Maps → votre photo → Votre Timeline → ⋮ → Paramètres → Exporter les données
-          Timeline → enregistrez le JSON → ouvrez-le ci-dessous.
+        <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginBottom: 10 }}>
+          Astuce attribution : filtre les dates (cette semaine / semaine dernière = 806), puis
+          change le véhicule ligne par ligne (Touran pour les 1ères semaines travail).
         </Text>
+
+        <Text style={{ color: colors.text, fontWeight: '600', marginBottom: 6 }}>
+          Véhicule par défaut à l’import
+        </Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+          {vehicles.map((v) => (
+            <Pressable
+              key={v.id}
+              onPress={() => setDefaultVehicleId(v.id)}
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: colors.border,
+                backgroundColor: defaultVehicleId === v.id ? colors.accent : colors.card,
+              }}
+            >
+              <Text style={{ color: defaultVehicleId === v.id ? '#fff' : colors.text, fontSize: 13 }}>
+                {v.name}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <Input
+          label="Filtrer depuis (AAAA-MM-JJ) — optionnel"
+          value={fromDay}
+          onChangeText={setFromDay}
+          placeholder="2026-08-25"
+        />
+        <Input
+          label="Filtrer jusqu’à (AAAA-MM-JJ) — optionnel"
+          value={toDay}
+          onChangeText={setToDay}
+          placeholder="2026-09-04"
+        />
+
         <Button
-          title={picking ? 'Ouverture…' : 'Choisir mon fichier Timeline (.json)'}
+          title={picking ? 'Ouverture…' : 'Choisir JSON ou ZIP Takeout'}
           onPress={pickTimelineFile}
           loading={picking}
         />
         <Button
-          title="Aide Google Maps (Timeline)"
+          title="Aide export Timeline Maps"
           variant="outline"
           onPress={openMapsTimelineHelp}
           style={{ marginTop: 10 }}
@@ -202,73 +325,79 @@ export default function ImportTripsScreen() {
       </Card>
 
       <Text style={[styles.section, { color: colors.text }]}>Ou coller un lien Maps</Text>
-      <Text style={[styles.hint, { color: colors.textSecondary }]}>
-        Lien d’itinéraire Directions, ou texte « Départ → Arrivée ».
-      </Text>
-
       <Input
         label="URL Maps / Départ → Arrivée"
         value={mapsUrl}
         onChangeText={setMapsUrl}
         autoCapitalize="none"
-        placeholder="https://www.google.com/maps/dir/Lille/Paris/"
+        placeholder="https://www.google.com/maps/dir/…"
       />
       <Button title="Ajouter depuis l’URL" variant="secondary" onPress={parseUrl} />
 
-      {drafts.map((d, i) => {
-        const rejected = d.status === 'rejected';
-        const tag =
-          d.activityType === 'driving'
-            ? 'Voiture'
-            : d.activityType === 'other'
-              ? 'Autre'
-              : 'Indéfini';
-        return (
-          <Card
-            key={`${d.startTime}-${i}`}
-            style={{
-              marginBottom: 10,
-              opacity: rejected ? 0.45 : 1,
-              borderWidth: 1,
-              borderColor: d.status === 'confirmed' ? colors.success : colors.border,
-            }}
-          >
-            <Text style={{ color: colors.text, fontWeight: '700' }}>
-              {d.originName} → {d.destinationName}
-            </Text>
-            <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
-              {new Date(d.startTime).toLocaleString('fr-FR')} · {formatDistance(d.distanceKm)} ·{' '}
-              {tag} · {d.source}
-            </Text>
-            {!!d.note && (
-              <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>{d.note}</Text>
-            )}
-            <View style={styles.row}>
-              <TouchableOpacity onPress={() => confirmOne(i)}>
-                <Text style={{ color: colors.success, fontWeight: '600' }}>Valider voiture</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => toggleReject(i)}>
-                <Text style={{ color: colors.danger, fontWeight: '600' }}>
-                  {rejected ? 'Remettre' : 'Ignorer'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            {d.distanceKm > 0 && activeVehicle && (
-              <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 6 }}>
-                Est. {estimate(d.distanceKm).fuel.toFixed(2)} L ·{' '}
-                {formatEuro(estimate(d.distanceKm).cost)}
-              </Text>
-            )}
-          </Card>
-        );
-      })}
-
       {drafts.length > 0 && (
-        <Button
-          title={`Enregistrer (${drafts.filter((d) => d.status !== 'rejected').length})`}
-          onPress={saveAll}
-          loading={loading}
-        />
+        <>
+          <Text style={[styles.section, { color: colors.text, marginTop: 16 }]}>
+            Trajets détectés ({drafts.length})
+          </Text>
+          {drafts.map((d, index) => {
+            const { cost } = estimateFor(d.vehicleId, d.distanceKm || 0);
+            const hint = suggestVehicleHint(d);
+            const rejected = d.status === 'rejected';
+            return (
+              <Card
+                key={`${d.startTime}-${index}`}
+                style={{
+                  marginBottom: 10,
+                  opacity: rejected ? 0.55 : 1,
+                  borderColor: rejected ? colors.border : colors.accent,
+                  borderWidth: 1,
+                }}
+              >
+                <Text style={{ color: colors.text, fontWeight: '700' }}>
+                  {d.originName} → {d.destinationName}
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
+                  {d.startTime.slice(0, 16).replace('T', ' ')} · {formatDistance(d.distanceKm || 0)} ·{' '}
+                  {formatEuro(cost)}
+                </Text>
+                {!!hint && (
+                  <Text style={{ color: colors.accent, fontSize: 12, marginTop: 4 }}>{hint}</Text>
+                )}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                  {vehicles.map((v) => (
+                    <Pressable
+                      key={v.id}
+                      onPress={() => setRowVehicle(index, v.id)}
+                      style={{
+                        paddingHorizontal: 10,
+                        paddingVertical: 5,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        backgroundColor: d.vehicleId === v.id ? colors.accent + '33' : colors.background,
+                      }}
+                    >
+                      <Text style={{ color: colors.text, fontSize: 11, fontWeight: '600' }}>
+                        {v.name}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                  <TouchableOpacity onPress={() => confirmOne(index)}>
+                    <Text style={{ color: colors.success, fontWeight: '700' }}>Valider</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => toggleReject(index)}>
+                    <Text style={{ color: colors.danger, fontWeight: '700' }}>
+                      {rejected ? 'Réintégrer' : 'Ignorer'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </Card>
+            );
+          })}
+          <Button title="Enregistrer la sélection" onPress={saveAll} loading={loading} />
+        </>
       )}
     </ScrollView>
   );
@@ -278,7 +407,6 @@ const styles = StyleSheet.create({
   wrap: { flex: 1 },
   content: { padding: 16, paddingBottom: 40 },
   title: { fontSize: 20, fontWeight: '700', marginBottom: 12 },
-  section: { fontSize: 16, fontWeight: '700', marginTop: 8, marginBottom: 4 },
-  hint: { fontSize: 13, lineHeight: 18, marginBottom: 12 },
-  row: { flexDirection: 'row', gap: 20, marginTop: 10 },
+  section: { fontSize: 15, fontWeight: '700', marginBottom: 8 },
+  hint: { fontSize: 13, marginBottom: 8, lineHeight: 18 },
 });

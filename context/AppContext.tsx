@@ -14,6 +14,7 @@ import { confirm, notify } from '@/lib/notify';
 import { stopBackgroundTracking } from '@/lib/locationService';
 import { reverseGeocode } from '@/lib/geocode';
 import { applyTripFuelBurn } from '@/lib/fuelLevel';
+import { refreshVehicleReminders } from '@/lib/reminders';
 
 interface AppContextType {
   activeVehicle: Vehicle | null;
@@ -48,6 +49,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await ensureDefaultBudgets(vehicleList);
       const statuses = await refreshAllBudgets();
       setBudgetStatuses(statuses);
+      void refreshVehicleReminders();
     } catch (error) {
       console.error('Erreur chargement données:', error);
     } finally {

@@ -65,6 +65,9 @@ async function load(): Promise<Store> {
         ...v,
         estimatedFuelLiters:
           v.estimatedFuelLiters === undefined ? null : v.estimatedFuelLiters,
+        notifyMaintenance: v.notifyMaintenance !== false,
+        notifyLowFuel: !!v.notifyLowFuel,
+        lowFuelThresholdLiters: v.lowFuelThresholdLiters ?? null,
       }));
       cache = parsed;
       return cache;
@@ -139,6 +142,9 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
     trackedKm: vehicle.trackedKm ?? 0,
     estimatedFuelLiters: vehicle.estimatedFuelLiters ?? null,
     consumptionAutoAdapt: vehicle.consumptionAutoAdapt !== false,
+    notifyMaintenance: vehicle.notifyMaintenance !== false,
+    notifyLowFuel: !!vehicle.notifyLowFuel,
+    lowFuelThresholdLiters: vehicle.lowFuelThresholdLiters ?? null,
     createdAt: nowIso(),
   });
   await save(s);

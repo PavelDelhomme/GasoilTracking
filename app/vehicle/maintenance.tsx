@@ -15,6 +15,7 @@ import {
 import { formatEuro } from '@/lib/calculations';
 import { formatDateSlash } from '@/lib/dates';
 import { confirm, notify } from '@/lib/notify';
+import { refreshVehicleReminders } from '@/lib/reminders';
 import {
   contreVisiteDueFromCt,
   MAINTENANCE_KIND_LABELS,
@@ -95,6 +96,7 @@ export default function VehicleMaintenanceScreen() {
       });
       await refresh();
       await reload();
+      void refreshVehicleReminders();
       setAmount('');
       setNote('');
       notify('Enregistré', title.trim());
@@ -133,6 +135,7 @@ export default function VehicleMaintenanceScreen() {
       });
       await refresh();
       await reload();
+      void refreshVehicleReminders();
       notify('CT + rappel', `Contre-visite à faire avant le ${cvDue}`);
     } catch (e) {
       notify('Erreur', e instanceof Error ? e.message : 'Échec');
@@ -147,6 +150,7 @@ export default function VehicleMaintenanceScreen() {
       doneAt: new Date().toISOString().slice(0, 10),
     });
     await reload();
+    void refreshVehicleReminders();
     notify('Fait', m.title);
   };
 

@@ -97,6 +97,7 @@ export const VEHICLE_CATALOG: VehiclePreset[] = [
   { brand: "Volkswagen", model: "Tiguan", year: 2023, consumption: 5.6, fuel: 'diesel', tank: 58 },
   { brand: "Volkswagen", model: "Passat", year: 2021, consumption: 4.6, fuel: 'diesel', tank: 66 },
   { brand: "Volkswagen", model: "Arteon", year: 2022, consumption: 5, fuel: 'diesel', tank: 66 },
+  { brand: "Volkswagen", model: "Touran", year: 2016, consumption: 5.6, fuel: 'diesel', tank: 58 },
   { brand: "Volkswagen", model: "Touran", year: 2020, consumption: 5.3, fuel: 'diesel', tank: 58 },
   { brand: "Volkswagen", model: "Caddy", year: 2022, consumption: 5.4, fuel: 'diesel', tank: 50 },
   { brand: "Volkswagen", model: "Transporter", year: 2021, consumption: 7.5, fuel: 'diesel', tank: 80 },

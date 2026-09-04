@@ -11,6 +11,7 @@ import {
   getFillUps,
   getTrips,
   getBudgets,
+  getMaintenances,
   createBudget,
   updateBudgetSpent,
   updateVehicle,
@@ -301,11 +302,31 @@ export async function getBudgetStatus(
     spent += fillUps
       .filter((f) => f.date >= budget.startDate && f.date <= budget.endDate)
       .reduce((sum, f) => sum + f.totalCost, 0);
+    const mains = await getMaintenances(targetVehicleId);
+    spent += mains
+      .filter((m) => {
+        const d = (m.doneAt || '').slice(0, 10);
+        if (!d) return false;
+        const start = budget.startDate.slice(0, 10);
+        const end = budget.endDate.slice(0, 10);
+        return d >= start && d <= end;
+      })
+      .reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
   } else {
     const fillUps = await getFillUps();
     spent += fillUps
       .filter((f) => f.date >= budget.startDate && f.date <= budget.endDate)
       .reduce((sum, f) => sum + f.totalCost, 0);
+    const mains = await getMaintenances();
+    spent += mains
+      .filter((m) => {
+        const d = (m.doneAt || '').slice(0, 10);
+        if (!d) return false;
+        const start = budget.startDate.slice(0, 10);
+        const end = budget.endDate.slice(0, 10);
+        return d >= start && d <= end;
+      })
+      .reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
   }
 
   await updateBudgetSpent(budget.id, spent);
