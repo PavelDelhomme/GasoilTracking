@@ -25,6 +25,7 @@ import { seedDemoData } from '@/lib/seedDemo';
 import { seedTodayCommuteAndFillUp } from '@/lib/seedToday';
 import { notify } from '@/lib/notify';
 import { getPlaces, getMaintenances, reconcileTrackedKmFromTrips } from '@/lib/database';
+import { fuelRemainingTone, fuelToneColor } from '@/lib/fuelLevel';
 import type { ConsumptionStats, Place, SinceLastFillStats, VehicleMaintenance } from '@/types';
 import { MAINTENANCE_KIND_LABELS, maintenanceIsUrgent } from '@/lib/vehicleMaintenance';
 import { formatDateSlash } from '@/lib/dates';
@@ -163,6 +164,17 @@ export default function HomeScreen() {
   const homePlace = places.find((p) => p.kind === 'home');
   const workPlace = places.find((p) => p.kind === 'work');
   const favoritePlaces = places.filter((p) => p.kind === 'other' || p.kind === 'station');
+
+  const fuelTone = activeVehicle
+    ? fuelRemainingTone({
+        litersRemaining:
+          activeVehicle.estimatedFuelLiters ?? sinceFill?.fuelRemainingEst ?? null,
+        tankCapacity: activeVehicle.tankCapacity,
+        lowLitersThreshold: activeVehicle.lowFuelThresholdLiters,
+        rangeKm: sinceFill?.rangeKm,
+      })
+    : 'unknown';
+  const fuelColor = fuelToneColor(fuelTone, colors);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -303,6 +315,7 @@ export default function HomeScreen() {
               <StatCard
                 label="Autonomie rest."
                 value={formatDistance(sinceFill?.rangeKm ?? 0)}
+                color={fuelColor}
                 subtitle={
                   sinceFill?.lastFill
                     ? `~${sinceFill.fuelRemainingEst.toFixed(1)} L restants`
@@ -312,13 +325,19 @@ export default function HomeScreen() {
             </View>
 
             {sinceFill?.lastFill && (
-              <Card style={{ marginBottom: 16 }}>
+              <Card
+                style={{
+                  marginBottom: 16,
+                  borderColor: fuelTone === 'ok' || fuelTone === 'unknown' ? colors.border : fuelColor,
+                  borderWidth: fuelTone === 'ok' || fuelTone === 'unknown' ? 1 : 1.5,
+                }}
+              >
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
                   Depuis le dernier plein
                 </Text>
                 <Text
                   style={{
-                    color: colors.accent,
+                    color: colors.text,
                     fontWeight: '800',
                     fontSize: 22,
                     marginBottom: 6,
@@ -333,6 +352,15 @@ export default function HomeScreen() {
                   Plein du {formatDateSlash(sinceFill.lastFill.date)} (
                   {formatEuro(sinceFill.lastFill.totalCost)})
                 </Text>
+                {fuelTone !== 'unknown' && (
+                  <Text style={{ color: fuelColor, fontWeight: '700', fontSize: 13, marginTop: 8 }}>
+                    {fuelTone === 'ok'
+                      ? `Autonomie OK · ~${formatDistance(sinceFill.rangeKm)}`
+                      : fuelTone === 'warn'
+                        ? `Autonomie basse · ~${formatDistance(sinceFill.rangeKm)} restants`
+                        : `Réservoir critique · ~${formatDistance(sinceFill.rangeKm)} restants`}
+                  </Text>
+                )}
               </Card>
             )}
 
@@ -472,7 +500,7 @@ export default function HomeScreen() {
                   <>
                     <Text
                       style={{
-                        color: colors.text,
+                        color: fuelColor,
                         fontWeight: '800',
                         fontSize: 22,
                         marginBottom: 6,
@@ -486,18 +514,7 @@ export default function HomeScreen() {
                           ? (activeVehicle.estimatedFuelLiters / activeVehicle.tankCapacity) * 100
                           : 0
                       }
-                      color={
-                        (activeVehicle.estimatedFuelLiters / Math.max(activeVehicle.tankCapacity, 1)) *
-                          100 <
-                        20
-                          ? colors.danger
-                          : (activeVehicle.estimatedFuelLiters /
-                                Math.max(activeVehicle.tankCapacity, 1)) *
-                                100 <
-                              40
-                            ? colors.warning
-                            : colors.success
-                      }
+                      color={fuelColor}
                       height={12}
                     />
                     <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 8 }}>

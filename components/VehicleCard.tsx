@@ -5,7 +5,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
 import type { Vehicle } from '@/types';
 import { displayOdometerKm, formatConsumption } from '@/lib/calculations';
-import { fuelLevelLabel, fuelLevelPercent, setFuelFraction } from '@/lib/fuelLevel';
+import { fuelLevelLabel, fuelLevelPercent, fuelRemainingTone, fuelToneColor, setFuelFraction } from '@/lib/fuelLevel';
 import { ProgressBar } from '@/components/Card';
 import { notify } from '@/lib/notify';
 
@@ -44,6 +44,12 @@ export function VehicleCard({
   const { colors } = useTheme();
   const odo = displayOdometerKm(vehicle);
   const fuelPct = fuelLevelPercent(vehicle);
+  const fuelTone = fuelRemainingTone({
+    litersRemaining: vehicle.estimatedFuelLiters,
+    tankCapacity: vehicle.tankCapacity,
+    lowLitersThreshold: vehicle.lowFuelThresholdLiters,
+  });
+  const fuelColor = fuelToneColor(fuelTone, colors);
 
   const setFuel = async (fraction: number, label: string) => {
     const next = await setFuelFraction(vehicle, fraction);
@@ -100,7 +106,7 @@ export function VehicleCard({
 
       <View style={styles.fuelBlock}>
         <View style={styles.fuelHeader}>
-          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>
+          <Text style={{ color: fuelColor, fontWeight: '700', fontSize: 13 }}>
             Réservoir · {fuelLevelLabel(vehicle)}
           </Text>
           <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
@@ -109,7 +115,7 @@ export function VehicleCard({
         </View>
         <ProgressBar
           percent={fuelPct}
-          color={fuelPct < 20 ? colors.danger : fuelPct < 40 ? colors.warning : colors.success}
+          color={fuelColor}
           height={10}
         />
         <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 6 }}>

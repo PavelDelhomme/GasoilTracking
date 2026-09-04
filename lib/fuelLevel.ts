@@ -52,3 +52,54 @@ export function fuelLevelPercent(vehicle: Vehicle): number {
   if (vehicle.estimatedFuelLiters == null || vehicle.tankCapacity <= 0) return 0;
   return Math.min(100, Math.max(0, (vehicle.estimatedFuelLiters / vehicle.tankCapacity) * 100));
 }
+
+/** Niveau d’alerte carburant / autonomie (pas décoratif). */
+export type FuelTone = 'ok' | 'warn' | 'critical' | 'unknown';
+
+/**
+ * Rouge/orange seulement si on approche de la panne.
+ * Vert sinon. Inconnu → neutre (unknown).
+ */
+export function fuelRemainingTone(opts: {
+  litersRemaining: number | null | undefined;
+  tankCapacity: number;
+  /** Seuil perso (ex. notif low fuel), sinon ~12 % du réservoir (min 8 L). */
+  lowLitersThreshold?: number | null;
+  /** Autonomie estimée en km (optionnel, renforce l’alerte). */
+  rangeKm?: number | null;
+}): FuelTone {
+  const { litersRemaining, tankCapacity, lowLitersThreshold, rangeKm } = opts;
+  if (litersRemaining == null || !Number.isFinite(litersRemaining) || tankCapacity <= 0) {
+    return 'unknown';
+  }
+  const pct = (litersRemaining / tankCapacity) * 100;
+  const lowAbs =
+    lowLitersThreshold != null && lowLitersThreshold > 0
+      ? lowLitersThreshold
+      : Math.max(8, tankCapacity * 0.12);
+
+  if (litersRemaining <= lowAbs * 0.55 || pct < 12 || (rangeKm != null && rangeKm > 0 && rangeKm < 60)) {
+    return 'critical';
+  }
+  if (litersRemaining <= lowAbs || pct < 28 || (rangeKm != null && rangeKm > 0 && rangeKm < 140)) {
+    return 'warn';
+  }
+  return 'ok';
+}
+
+/** Mappe le ton vers les couleurs du thème. */
+export function fuelToneColor(
+  tone: FuelTone,
+  colors: { success: string; warning: string; danger: string; text: string }
+): string {
+  switch (tone) {
+    case 'critical':
+      return colors.danger;
+    case 'warn':
+      return colors.warning;
+    case 'ok':
+      return colors.success;
+    default:
+      return colors.text;
+  }
+}

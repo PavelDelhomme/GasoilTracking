@@ -887,7 +887,13 @@ export default function TripScreen() {
               )}
 
               {sinceFill?.lastFill && (
-                <Card style={{ marginBottom: 14, borderColor: colors.accent, borderWidth: 1 }}>
+                <Card
+                  style={{
+                    marginBottom: 14,
+                    borderColor: colors.border,
+                    borderWidth: 1,
+                  }}
+                >
                   <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 4 }]}>
                     Depuis le dernier plein
                   </Text>
@@ -903,7 +909,7 @@ export default function TripScreen() {
                     <Text style={{ color: colors.textSecondary }}>
                       {sinceFill.tripCount} trajet{sinceFill.tripCount > 1 ? 's' : ''}
                     </Text>
-                    <Text style={{ color: colors.accent, fontWeight: '800' }}>
+                    <Text style={{ color: colors.text, fontWeight: '700' }}>
                       ~{formatEuro(sinceFill.costEst)}
                     </Text>
                     <Text style={{ color: colors.textSecondary }}>
