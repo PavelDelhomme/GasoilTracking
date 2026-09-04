@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '@/context/AppContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
@@ -373,8 +374,7 @@ export default function BudgetScreen() {
         <Card style={styles.infoCard}>
           <Text style={[styles.infoTitle, { color: colors.text }]}>Budget & planification</Text>
           <Text style={[styles.infoText, { color: colors.textSecondary }]}>
-            Budgets, lieux réguliers (domicile / travail), estimation mensuelle et stations les moins
-            chères autour de vous.
+            Budgets, lieux, trajets réguliers et stations à proximité.
             {activeVehicle ? ` Véhicule : ${activeVehicle.name}` : ''}
           </Text>
         </Card>
@@ -456,6 +456,7 @@ export default function BudgetScreen() {
               const pct = alloc > 0 ? Math.min(100, (m.spent / alloc) * 100) : 0;
               const over = m.spent > alloc && alloc > 0;
               const left = Math.max(0, alloc - m.spent);
+              const isPast = m.month < calendarMonth;
               return (
                 <Pressable key={m.month} onPress={() => selectMonth(m.month)} style={styles.barRow}>
                   <Text
@@ -485,7 +486,7 @@ export default function BudgetScreen() {
                     />
                   </View>
                   <Text style={{ color: colors.text, width: 92, textAlign: 'right', fontSize: 11 }}>
-                    {monthlyAllocation > 0
+                    {monthlyAllocation > 0 && !isPast
                       ? `reste ${formatEuro(left)}`
                       : formatEuro(m.spent)}
                   </Text>
@@ -640,12 +641,15 @@ export default function BudgetScreen() {
                 >
                   <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 12 }}>Trajet</Text>
                 </Pressable>
-                <Text style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 12 }}>Édit.</Text>
+                <Text style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 12 }}>
+                  <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                </Text>
               </View>
             ))
           )}
           <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
-            Trajet = navigation depuis ta position. Tap le nom = modifier. Appui long = supprimer.
+            Trajet = navigation depuis votre position. Touchez le nom pour modifier, appui long pour
+            supprimer.
           </Text>
         </Card>
 
@@ -664,7 +668,7 @@ export default function BudgetScreen() {
         <Card>
           {routes.length === 0 ? (
             <Text style={{ color: colors.textSecondary }}>
-              Ex. Domicile → Travail. Tap = modifier. Long = supprimer.
+              Ex. Domicile → Travail. Touchez pour modifier, appui long pour supprimer.
             </Text>
           ) : (
             routes.map((r) => {
@@ -708,7 +712,7 @@ export default function BudgetScreen() {
                       </Text>
                     )}
                   </View>
-                  <Text style={{ color: colors.accent, fontWeight: '700' }}>Édit.</Text>
+                  <Ionicons name="create-outline" size={18} color={colors.accent} />
                 </Pressable>
               );
             })
@@ -933,7 +937,7 @@ export default function BudgetScreen() {
           })}
           {stations.length > 0 && (
             <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
-              Tap = Maps + suivi GPS des km, puis plein. Tri par{' '}
+              Touchez = Maps + suivi GPS des km, puis plein. Tri par{' '}
               {fuelLabel(
                 activeVehicle?.fuelType === 'diesel'
                   ? 'gazole'

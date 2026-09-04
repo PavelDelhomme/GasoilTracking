@@ -6,7 +6,7 @@ import { TripMiniMap } from '@/components/TripMiniMap';
 import { useTheme } from '@/hooks/useTheme';
 import { formatDistance, formatEuro, parseRoutePoints } from '@/lib/calculations';
 import { formatDateSlash } from '@/lib/dates';
-import { tripPlaceLabel } from '@/lib/geocode';
+import { tripPlaceLabel, tripSourceLabel } from '@/lib/geocode';
 import type { Trip } from '@/types';
 
 type Props = {
@@ -34,6 +34,8 @@ export function TripHistoryCard({ trip, onPress, onDelete }: Props) {
       return formatDateSlash(trip.startTime);
     }
   })();
+
+  const sourceFr = tripSourceLabel(trip.source);
 
   return (
     <Pressable onPress={() => onPress(trip)}>
@@ -67,12 +69,10 @@ export function TripHistoryCard({ trip, onPress, onDelete }: Props) {
           </View>
         </View>
 
-        <View style={styles.meta}>
-          <Text style={{ color: colors.textSecondary, fontSize: 12, flex: 1 }}>
+        <View style={styles.metaRow}>
+          <Text style={{ color: colors.textSecondary, fontSize: 12, flex: 1 }} numberOfLines={1}>
             {timeLabel}
-            {'\n'}
-            {formatDistance(trip.distanceKm)} · {formatEuro(trip.estimatedCost)}
-            {trip.source ? ` · ${trip.source}` : ''}
+            {sourceFr ? ` · ${sourceFr}` : ''}
             {trip.status === 'pending' ? ' · en attente' : ''}
           </Text>
           <Pressable
@@ -87,6 +87,26 @@ export function TripHistoryCard({ trip, onPress, onDelete }: Props) {
             <Ionicons name="trash-outline" size={18} color={colors.danger} />
           </Pressable>
           <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+        </View>
+
+        <View style={styles.chips}>
+          <View style={[styles.chip, { backgroundColor: colors.background, borderColor: colors.border }]}>
+            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>
+              {formatDistance(trip.distanceKm)}
+            </Text>
+          </View>
+          <View style={[styles.chip, { backgroundColor: colors.accent + '18', borderColor: colors.accent }]}>
+            <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 13 }}>
+              {formatEuro(trip.estimatedCost)}
+            </Text>
+          </View>
+          {trip.estimatedFuelUsed > 0 && (
+            <View style={[styles.chip, { backgroundColor: colors.background, borderColor: colors.border }]}>
+              <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 12 }}>
+                {trip.estimatedFuelUsed.toFixed(1)} L
+              </Text>
+            </View>
+          )}
         </View>
       </Card>
     </Pressable>
@@ -104,11 +124,23 @@ const styles = StyleSheet.create({
   endCol: { flex: 1 },
   endLabel: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase', marginBottom: 2 },
   endValue: { fontSize: 13, fontWeight: '600', lineHeight: 18 },
-  meta: {
+  metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 10,
     gap: 8,
+  },
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  chip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
   },
   deleteBtn: {
     borderWidth: 1,

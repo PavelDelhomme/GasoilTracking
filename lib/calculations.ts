@@ -183,6 +183,7 @@ export async function getSinceLastFillStats(vehicleId: number): Promise<SinceLas
     tripKm: 0,
     tripCount: 0,
     fuelUsedEst: 0,
+    costEst: 0,
     fuelRemainingEst: 0,
     rangeKm: 0,
   };
@@ -200,6 +201,15 @@ export async function getSinceLastFillStats(vehicleId: number): Promise<SinceLas
   const conso =
     vehicle.consumptionPer100 > 0 ? vehicle.consumptionPer100 : 7;
   const fuelUsedEst = Math.round(estimateFuelUsed(tripKm, conso) * 100) / 100;
+  const price =
+    lastFill.pricePerLiter > 0
+      ? lastFill.pricePerLiter
+      : vehicle.defaultFuelPrice > 0
+        ? vehicle.defaultFuelPrice
+        : 0;
+  const costFromTrips = since.reduce((s, t) => s + (t.estimatedCost || 0), 0);
+  const costEst =
+    Math.round((costFromTrips > 0 ? costFromTrips : fuelUsedEst * price) * 100) / 100;
   const startFuel = lastFill.isFull
     ? vehicle.tankCapacity
     : vehicle.estimatedFuelLiters != null
@@ -217,6 +227,7 @@ export async function getSinceLastFillStats(vehicleId: number): Promise<SinceLas
     tripKm,
     tripCount: since.length,
     fuelUsedEst,
+    costEst,
     fuelRemainingEst,
     rangeKm,
   };

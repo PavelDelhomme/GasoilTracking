@@ -144,6 +144,7 @@ export interface SinceLastFillStats {
   tripKm: number;
   tripCount: number;
   fuelUsedEst: number;
+  costEst: number;
   fuelRemainingEst: number;
   rangeKm: number;
 }

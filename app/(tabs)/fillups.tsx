@@ -308,7 +308,7 @@ export default function FillUpsScreen() {
                 {fill.odometer != null
                   ? `Compteur ${Math.round(fill.odometer).toLocaleString(locale)} km`
                   : fill.distanceSinceLastKm != null
-                    ? `+${fill.distanceSinceLastKm.toFixed(0)} km depuis dernier`
+                    ? `+${fill.distanceSinceLastKm.toFixed(0)} km depuis le dernier plein`
                     : fill.note || ' '}
                 {fill.note && fill.odometer != null ? ` · ${fill.note}` : ''}
               </Text>

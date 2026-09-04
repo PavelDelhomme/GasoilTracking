@@ -266,7 +266,7 @@ export default function ImportTripsScreen() {
           Méthode recommandée (sans Takeout)
         </Text>
         <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 10 }}>
-          Google ne propose plus d’API pour récupérer ta Timeline personnelle. Le plus fiable :
+          Google ne propose plus d’API pour récupérer votre Timeline personnelle. Le plus fiable :
           démarrer un trajet GPS dans l’app (onglet Trajet) avant de partir, ou saisir un trajet
           manuel / coller un lien Google Maps Directions plus bas.
         </Text>

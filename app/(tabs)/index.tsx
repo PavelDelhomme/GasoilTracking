@@ -53,15 +53,22 @@ export default function HomeScreen() {
     setSinceFill(since);
   };
 
+  const reloadDueMaintenances = async () => {
+    try {
+      const list = await getMaintenances();
+      setDueMaintenances(
+        list.filter(
+          (m) => m.status !== 'done' && m.status !== 'cancelled' && (m.dueDate || maintenanceIsUrgent(m))
+        )
+      );
+    } catch {
+      setDueMaintenances([]);
+    }
+  };
+
   useEffect(() => {
     void getPlaces().then(setPlaces).catch(() => setPlaces([]));
-    void getMaintenances()
-      .then((list) =>
-        setDueMaintenances(
-          list.filter((m) => m.status !== 'done' && m.status !== 'cancelled' && (m.dueDate || maintenanceIsUrgent(m)))
-        )
-      )
-      .catch(() => setDueMaintenances([]));
+    void reloadDueMaintenances();
     if (activeVehicle) {
       void (async () => {
         try {
@@ -95,6 +102,7 @@ export default function HomeScreen() {
     if (activeVehicle) await reloadStats(activeVehicle.id);
     const p = await getPlaces().catch(() => [] as Place[]);
     setPlaces(p);
+    await reloadDueMaintenances();
     setRefreshing(false);
   };
 
@@ -297,11 +305,36 @@ export default function HomeScreen() {
                 value={formatDistance(sinceFill?.rangeKm ?? 0)}
                 subtitle={
                   sinceFill?.lastFill
-                    ? `${formatDistance(sinceFill.tripKm)} depuis dernier plein · ~${sinceFill.fuelRemainingEst.toFixed(1)} L`
+                    ? `~${sinceFill.fuelRemainingEst.toFixed(1)} L restants`
                     : 'Après un plein + trajets'
                 }
               />
             </View>
+
+            {sinceFill?.lastFill && (
+              <Card style={{ marginBottom: 16 }}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  Depuis le dernier plein
+                </Text>
+                <Text
+                  style={{
+                    color: colors.accent,
+                    fontWeight: '800',
+                    fontSize: 22,
+                    marginBottom: 6,
+                  }}
+                >
+                  {formatDistance(sinceFill.tripKm)}
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18 }}>
+                  {sinceFill.tripCount} trajet{sinceFill.tripCount > 1 ? 's' : ''} · ~
+                  {formatEuro(sinceFill.costEst)} · ~{sinceFill.fuelUsedEst.toFixed(1)} L
+                  {'\n'}
+                  Plein du {formatDateSlash(sinceFill.lastFill.date)} (
+                  {formatEuro(sinceFill.lastFill.totalCost)})
+                </Text>
+              </Card>
+            )}
 
             <View style={styles.statsRow}>
               <StatCard
@@ -357,9 +390,35 @@ export default function HomeScreen() {
 
             {dueMaintenances.length > 0 && (
               <Card style={{ marginBottom: 16, borderColor: colors.warning, borderWidth: 1 }}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>À faire (véhicules)</Text>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: 8,
+                  }}
+                >
+                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
+                    Entretien à prévoir
+                  </Text>
+                  {dueMaintenances.length > 4 && (
+                    <Pressable
+                      onPress={() =>
+                        router.push({
+                          pathname: '/vehicle/maintenance' as never,
+                          params: { id: String(activeVehicle.id) },
+                        })
+                      }
+                    >
+                      <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }}>
+                        Voir tout
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
                 {dueMaintenances.slice(0, 4).map((m) => {
                   const v = vehicles.find((x) => x.id === m.vehicleId);
+                  const urgent = maintenanceIsUrgent(m) || m.status === 'overdue';
                   return (
                     <Pressable
                       key={m.id}
@@ -371,16 +430,28 @@ export default function HomeScreen() {
                       }
                       style={{ marginBottom: 10 }}
                     >
-                      <Text style={{ color: colors.text, fontWeight: '700' }}>
-                        {v?.name || 'Véhicule'} · {m.title}
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <View
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: 4,
+                            backgroundColor: urgent ? colors.danger : colors.warning,
+                          }}
+                        />
+                        <Text style={{ color: colors.text, fontWeight: '700', flex: 1 }}>
+                          {v?.name || 'Véhicule'} · {m.title}
+                        </Text>
+                      </View>
                       <Text
                         style={{
-                          color: m.status === 'overdue' ? colors.danger : colors.warning,
+                          color: urgent ? colors.danger : colors.warning,
                           fontSize: 13,
                           marginTop: 2,
+                          marginLeft: 16,
                         }}
                       >
+                        {urgent ? 'Urgent · ' : ''}
                         {MAINTENANCE_KIND_LABELS[m.kind]}
                         {m.dueDate ? ` · avant le ${formatDateSlash(m.dueDate)}` : ''}
                       </Text>
@@ -476,13 +547,15 @@ export default function HomeScreen() {
               </Card>
             )}
 
-            <Button
-              title="Ajouter journée type (aujourd’hui)"
-              variant="outline"
-              loading={seedingToday}
-              onPress={loadToday}
-              style={{ marginTop: 4, marginBottom: 24 }}
-            />
+            {__DEV__ && (
+              <Button
+                title="Ajouter journée type (aujourd’hui)"
+                variant="outline"
+                loading={seedingToday}
+                onPress={loadToday}
+                style={{ marginTop: 4, marginBottom: 24 }}
+              />
+            )}
           </>
         )}
       </ScrollView>

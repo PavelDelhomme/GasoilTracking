@@ -106,9 +106,35 @@ export function tripPlaceLabel(
   role: 'origin' | 'destination' = 'origin'
 ): string {
   const n = (name || '').trim();
-  if (n && !/^départ$/i.test(n) && !/^arrivée$/i.test(n) && n !== '?') return n;
+  if (n && !/^départ$/i.test(n) && !/^arrivée$/i.test(n) && n !== '?') {
+    // Évite d’afficher des coords brutes déjà stockées comme nom
+    if (/^-?\d+\.\d+\s*,\s*-?\d+\.\d+$/.test(n)) {
+      return role === 'origin' ? 'Lieu de départ' : 'Lieu d’arrivée';
+    }
+    return n;
+  }
   if (fallbackCoords) {
-    return `${fallbackCoords.latitude.toFixed(5)}, ${fallbackCoords.longitude.toFixed(5)}`;
+    return role === 'origin' ? 'Lieu de départ' : 'Lieu d’arrivée';
   }
   return role === 'origin' ? 'Lieu de départ' : 'Lieu d’arrivée';
+}
+
+/** Source trajet → libellé FR court. */
+export function tripSourceLabel(source?: string | null): string {
+  switch ((source || '').toLowerCase()) {
+    case 'gps':
+      return 'GPS';
+    case 'manual':
+      return 'Manuel';
+    case 'maps_import':
+    case 'maps':
+      return 'Import Maps';
+    case 'detected':
+      return 'Détecté';
+    case 'takeout':
+    case 'timeline':
+      return 'Timeline';
+    default:
+      return source ? source : '';
+  }
 }

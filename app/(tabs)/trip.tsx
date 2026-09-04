@@ -41,12 +41,15 @@ import {
   calculateTripStats,
   formatEuro,
   formatDistance,
+  getSinceLastFillStats,
   parseRoutePoints,
 } from '@/lib/calculations';
 import { applyTripFuelBurn } from '@/lib/fuelLevel';
 import { notify, confirm } from '@/lib/notify';
 import { TripHistoryCard } from '@/components/TripHistoryCard';
 import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
+import { formatDateSlash } from '@/lib/dates';
+import type { SinceLastFillStats } from '@/types';
 
 type TripTab = 'live' | 'history';
 /** free = suivi GPS sans destination ; nav = avec destination */
@@ -74,6 +77,8 @@ export default function TripScreen() {
   const [isStopping, setIsStopping] = useState(false);
   const [history, setHistory] = useState<Trip[]>([]);
   const [pending, setPending] = useState<Trip[]>([]);
+  const [sinceFill, setSinceFill] = useState<SinceLastFillStats | null>(null);
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'sinceFill'>('all');
   const [userLocation, setUserLocation] = useState<GeoCoords | null>(null);
   const [currentRegion, setCurrentRegion] = useState({
     latitude: 48.8566,
@@ -89,14 +94,17 @@ export default function TripScreen() {
     if (!activeVehicle) {
       setHistory([]);
       setPending([]);
+      setSinceFill(null);
       return;
     }
-    const [trips, pend] = await Promise.all([
+    const [trips, pend, since] = await Promise.all([
       getTrips(activeVehicle.id),
       getPendingTrips(activeVehicle.id),
+      getSinceLastFillStats(activeVehicle.id),
     ]);
     setHistory(trips.filter((t) => !t.isActive).slice(0, 50));
     setPending(pend);
+    setSinceFill(since);
   }, [activeVehicle]);
 
   useFocusEffect(
@@ -296,10 +304,10 @@ export default function TripScreen() {
           'Suivi démarré',
           isWeb
             ? startMode === 'free'
-              ? 'GPS actif — gardez l’onglet / l’app ouverte pendant le trajet.'
+              ? 'Suivi en cours — gardez l’onglet ouvert pendant le trajet.'
               : `Direction : ${destName} — gardez l’app ouverte pour le suivi.`
             : startMode === 'free'
-              ? 'GPS actif en arrière-plan — km & vitesse enregistrés sans destination.'
+              ? 'Suivi en cours (arrière-plan) — km & vitesse enregistrés.'
               : `Direction : ${destName}`
         );
       }
@@ -527,7 +535,12 @@ export default function TripScreen() {
               fontWeight: '700',
             }}
           >
-            Historique{history.length ? ` (${history.length})` : ''}
+            Historique
+            {pending.length > 0
+              ? ` (${pending.length} à valider)`
+              : history.length
+                ? ` (${history.length})`
+                : ''}
           </Text>
         </TouchableOpacity>
       </View>
@@ -592,7 +605,7 @@ export default function TripScreen() {
                         { color: paused ? colors.warning : colors.accent },
                       ]}
                     >
-                      {paused ? 'Pause' : 'GPS actif (arrière-plan OK)'}
+                      {paused ? 'En pause' : 'Suivi en cours'}
                     </Text>
                   </View>
                   <Text style={[styles.placeLine, { color: colors.success }]}>
@@ -618,11 +631,11 @@ export default function TripScreen() {
                     label="Carburant est."
                     value={`${activeTrip.estimatedFuelUsed.toFixed(2)} L`}
                   />
-                  <StatCard
-                    label="Durée"
-                    value={`${Math.floor(tripStats?.durationMinutes ?? 0)} min`}
-                  />
+                  <StatCard label="Coût est." value={formatEuro(activeTrip.estimatedCost)} />
                 </View>
+                <Text style={{ color: colors.textSecondary, marginBottom: 12, fontSize: 13 }}>
+                  Durée : {Math.floor(tripStats?.durationMinutes ?? 0)} min
+                </Text>
 
                 {paused ? (
                   <>
@@ -766,20 +779,44 @@ export default function TripScreen() {
                       pts.length > 1 ? pts[pts.length - 1] : null,
                       'destination'
                     );
+                    let when = '';
+                    try {
+                      const dt = new Date(t.startTime);
+                      when = `${formatDateSlash(t.startTime)} · ${dt.toLocaleTimeString('fr-FR', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}`;
+                    } catch {
+                      when = formatDateSlash(t.startTime);
+                    }
                     return (
                       <Card key={t.id} style={{ marginTop: 10 }}>
                         <TouchableOpacity onPress={() => openDetail(t)}>
                           <Text style={{ color: colors.text, fontWeight: '700' }}>
                             {o} → {d}
                           </Text>
+                          <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
+                            {when}
+                          </Text>
+                          <Text style={{ color: colors.accent, fontWeight: '700', marginTop: 6 }}>
+                            {formatDistance(t.distanceKm)} · {formatEuro(t.estimatedCost)}
+                            {t.estimatedFuelUsed > 0
+                              ? ` · ${t.estimatedFuelUsed.toFixed(1)} L`
+                              : ''}
+                          </Text>
                         </TouchableOpacity>
                         <View style={styles.pendingActions}>
-                          <TouchableOpacity onPress={() => validateTrip(t, 'confirmed')}>
-                            <Text style={{ color: colors.success, fontWeight: '700' }}>Valider</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity onPress={() => validateTrip(t, 'rejected')}>
-                            <Text style={{ color: colors.danger, fontWeight: '700' }}>Ignorer</Text>
-                          </TouchableOpacity>
+                          <Button
+                            title="Valider"
+                            onPress={() => validateTrip(t, 'confirmed')}
+                            style={{ flex: 1, paddingVertical: 10 }}
+                          />
+                          <Button
+                            title="Ignorer"
+                            variant="outline"
+                            onPress={() => validateTrip(t, 'rejected')}
+                            style={{ flex: 1, paddingVertical: 10 }}
+                          />
                         </View>
                       </Card>
                     );
@@ -787,26 +824,107 @@ export default function TripScreen() {
                 </View>
               )}
 
+              {sinceFill?.lastFill && (
+                <Card style={{ marginBottom: 14, borderColor: colors.accent, borderWidth: 1 }}>
+                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 4 }]}>
+                    Depuis le dernier plein
+                  </Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
+                    {formatDateSlash(sinceFill.lastFill.date)} ·{' '}
+                    {formatEuro(sinceFill.lastFill.totalCost)}
+                    {sinceFill.lastFill.isFull ? ' · quasi-plein' : ''}
+                  </Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                    <Text style={{ color: colors.text, fontWeight: '700' }}>
+                      {formatDistance(sinceFill.tripKm)}
+                    </Text>
+                    <Text style={{ color: colors.textSecondary }}>
+                      {sinceFill.tripCount} trajet{sinceFill.tripCount > 1 ? 's' : ''}
+                    </Text>
+                    <Text style={{ color: colors.accent, fontWeight: '800' }}>
+                      ~{formatEuro(sinceFill.costEst)}
+                    </Text>
+                    <Text style={{ color: colors.textSecondary }}>
+                      ~{sinceFill.fuelUsedEst.toFixed(1)} L
+                    </Text>
+                  </View>
+                </Card>
+              )}
+
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Trajets réalisés</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                <Pressable
+                  onPress={() => setHistoryFilter('all')}
+                  style={[
+                    styles.filterChip,
+                    {
+                      borderColor: historyFilter === 'all' ? colors.accent : colors.border,
+                      backgroundColor:
+                        historyFilter === 'all' ? colors.accent + '22' : colors.card,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      color: historyFilter === 'all' ? colors.accent : colors.text,
+                      fontWeight: '700',
+                      fontSize: 13,
+                    }}
+                  >
+                    Tout
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setHistoryFilter('sinceFill')}
+                  style={[
+                    styles.filterChip,
+                    {
+                      borderColor: historyFilter === 'sinceFill' ? colors.accent : colors.border,
+                      backgroundColor:
+                        historyFilter === 'sinceFill' ? colors.accent + '22' : colors.card,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      color: historyFilter === 'sinceFill' ? colors.accent : colors.text,
+                      fontWeight: '700',
+                      fontSize: 13,
+                    }}
+                  >
+                    Depuis le dernier plein
+                  </Text>
+                </Pressable>
+              </View>
               <Text style={[styles.hint, { color: colors.textSecondary }]}>
                 Adresses départ / arrivée · touchez pour le détail carte.
               </Text>
-              {history.length === 0 ? (
-                <Card style={{ marginTop: 12 }}>
-                  <Text style={{ color: colors.textSecondary, textAlign: 'center' }}>
-                    Aucun trajet terminé.
-                  </Text>
-                </Card>
-              ) : (
-                history.map((t) => (
+              {(() => {
+                const fillDate = sinceFill?.lastFill?.date;
+                const list =
+                  historyFilter === 'sinceFill' && fillDate
+                    ? history.filter((t) => t.startTime >= fillDate)
+                    : history;
+                if (list.length === 0) {
+                  return (
+                    <Card style={{ marginTop: 12 }}>
+                      <Text style={{ color: colors.textSecondary, textAlign: 'center' }}>
+                        {historyFilter === 'sinceFill'
+                          ? 'Aucun trajet depuis le dernier plein.'
+                          : 'Aucun trajet terminé.'}
+                      </Text>
+                    </Card>
+                  );
+                }
+                return list.map((t) => (
                   <TripHistoryCard
                     key={t.id}
                     trip={t}
                     onPress={openDetail}
                     onDelete={handleDeleteTrip}
                   />
-                ))
-              )}
+                ));
+              })()}
             </>
           )}
         </ScrollView>
@@ -843,5 +961,11 @@ const styles = StyleSheet.create({
   placeLine: { fontSize: 14, fontWeight: '600', marginTop: 4, lineHeight: 20 },
   hint: { fontSize: 13, lineHeight: 18, marginBottom: 4 },
   warning: { fontSize: 15, textAlign: 'center' },
-  pendingActions: { flexDirection: 'row', gap: 24, marginTop: 10 },
+  pendingActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
 });
