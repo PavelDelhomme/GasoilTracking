@@ -652,12 +652,34 @@ app.get('/api/fx/latest', async (_req, res) => {
 });
 
 app.get('/api/version', (_req, res) => {
-  const latest = db.prepare('SELECT * FROM app_releases ORDER BY id DESC LIMIT 1').get();
+  const latest = db
+    .prepare('SELECT * FROM app_releases WHERE apk_filename IS NOT NULL ORDER BY id DESC LIMIT 1')
+    .get();
   const version = latest?.version || APP_VERSION;
   const apkAvailable = Boolean(latest?.apk_filename);
   const apkUrl = apkAvailable
     ? `${PUBLIC_URL}/api/download/${latest.apk_filename}`
     : null;
+
+  let buildingVersion = null;
+  let buildingSince = null;
+  let buildingNotes = '';
+  try {
+    const pendingPath = path.join(DATA_DIR, 'build-pending.json');
+    if (fs.existsSync(pendingPath)) {
+      const pending = JSON.parse(fs.readFileSync(pendingPath, 'utf8'));
+      const pv = String(pending?.version || '');
+      // N'afficher « en cours » que si plus récent que l’APK déjà publiée
+      if (pv && compareSemver(pv, version) > 0) {
+        buildingVersion = pv;
+        buildingSince = pending.startedAt || null;
+        buildingNotes = pending.notes || '';
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
   res.json({
     version,
     minVersion: MIN_VERSION,
@@ -669,6 +691,9 @@ app.get('/api/version', (_req, res) => {
     downloadPage: `${PUBLIC_URL}/download`,
     iosInstallUrl: `${PUBLIC_URL}/download#ios`,
     releaseNotes: latest?.release_notes || '',
+    buildingVersion,
+    buildingSince,
+    buildingNotes,
     channels: {
       android: apkAvailable,
       web: true,
@@ -677,6 +702,17 @@ app.get('/api/version', (_req, res) => {
     },
   });
 });
+
+/** Compare a.b.c — positif si a > b */
+function compareSemver(a, b) {
+  const pa = String(a || '0').split('.').map((x) => parseInt(x, 10) || 0);
+  const pb = String(b || '0').split('.').map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
 
 /** Inscription : envoie un email de vérification (pas de compte actif tant que non cliqué) */
 app.post('/api/auth/register', authLimiter, registerLimiter, async (req, res) => {
@@ -1125,12 +1161,39 @@ function saveRelease({ version, notes, force, file }) {
   db.prepare(
     'INSERT INTO app_releases (version, platform, apk_filename, release_notes, force_update, created_at) VALUES (?, ?, ?, ?, ?, ?)'
   ).run(version, 'android', filename, notes, force ? 1 : 0, new Date().toISOString());
+  // Clear pending build once APK is published
+  try {
+    const pendingPath = path.join(DATA_DIR, 'build-pending.json');
+    if (fs.existsSync(pendingPath)) fs.unlinkSync(pendingPath);
+  } catch {
+    /* ignore */
+  }
   return {
     ok: true,
     version,
     apkUrl: filename ? `${PUBLIC_URL}/api/download/${filename}` : null,
   };
 }
+
+/** Annonce une build EAS en cours (avant upload APK) — évite « à jour » trompeur. */
+app.post('/api/ci/releases/pending', (req, res) => {
+  const header = req.headers['x-release-token'] || req.headers.authorization?.replace('Bearer ', '');
+  if (!RELEASE_UPLOAD_TOKEN || header !== RELEASE_UPLOAD_TOKEN) {
+    return res.status(401).json({ error: 'Token CI invalide' });
+  }
+  const version = String(req.body?.version || '').trim();
+  if (!version) return res.status(400).json({ error: 'version requise' });
+  const notes = String(req.body?.releaseNotes || 'Build EAS en cours').slice(0, 500);
+  const payload = {
+    version,
+    startedAt: new Date().toISOString(),
+    notes,
+    sha: req.body?.sha || null,
+  };
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(path.join(DATA_DIR, 'build-pending.json'), JSON.stringify(payload));
+  res.status(201).json({ ok: true, ...payload });
+});
 
 app.post('/api/ci/releases', upload.single('apk'), (req, res) => {
   const header = req.headers['x-release-token'] || req.headers.authorization?.replace('Bearer ', '');

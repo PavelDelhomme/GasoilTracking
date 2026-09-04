@@ -22,7 +22,7 @@ import { useAppUpdate } from '@/context/AppUpdateContext';
 import { useToast } from '@/context/ToastContext';
 import { Button } from '@/components/Button';
 import { CountryPickerCard } from '@/components/CountryPickerCard';
-import { isManagerEmail, API_URL, getLocalAppVersion } from '@/lib/api';
+import { isManagerEmail, API_URL, getLocalAppVersion, fetchAppVersion, compareVersions } from '@/lib/api';
 import { notify } from '@/lib/notify';
 
 type RowProps = {
@@ -174,11 +174,19 @@ export function AccountDrawer() {
             <Text style={[styles.section, { color: colors.textSecondary }]}>Application</Text>
             <DrawerRow
               icon="download-outline"
-              label={updateAvailable ? 'Mettre à jour maintenant' : 'Vérifier / installer la mise à jour'}
+              label={
+                updateAvailable
+                  ? 'Mettre à jour maintenant'
+                  : info?.buildingVersion
+                    ? `Build v${info.buildingVersion} en cours…`
+                    : 'Vérifier / installer la mise à jour'
+              }
               subtitle={
                 updateAvailable
-                  ? `v${info?.version} disponible — installation dans l’app`
-                  : 'Vérifie d’abord, puis installe dans l’app (pas de page web)'
+                  ? `v${info?.version} prête — installation dans l’app`
+                  : info?.buildingVersion
+                    ? `APK en construction (~45–60 min). Local v${getLocalAppVersion()} · serveur v${info?.version || '—'}`
+                    : `Local v${getLocalAppVersion()}${info?.version ? ` · serveur v${info.version}` : ''} — vérifie puis installe in-app`
               }
               onPress={async () => {
                 closeDrawer();
@@ -187,7 +195,22 @@ export function AccountDrawer() {
                   await startUpdate();
                   return;
                 }
-                showToast(`À jour — v${getLocalAppVersion()}`);
+                const local = getLocalAppVersion();
+                try {
+                  const remote = await fetchAppVersion();
+                  if (
+                    remote.buildingVersion &&
+                    compareVersions(remote.buildingVersion, local) > 0
+                  ) {
+                    showToast(
+                      `v${remote.buildingVersion} en build (~45–60 min). Pas encore installable. Serveur actuel v${remote.version}.`
+                    );
+                    return;
+                  }
+                  showToast(`À jour — local v${local} · serveur v${remote.version}`);
+                } catch {
+                  showToast(`À jour — v${local}`);
+                }
               }}
             />
             <DrawerRow

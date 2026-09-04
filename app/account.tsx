@@ -11,7 +11,9 @@ import { Input } from '@/components/Input';
 import { InlineBackBar } from '@/components/HeaderBackButton';
 import {
   changePassword,
+  compareVersions,
   deleteAccount,
+  fetchAppVersion,
   forgotPassword,
   getLocalAppVersion,
   resendVerificationEmail,
@@ -66,17 +68,40 @@ export default function AccountScreen() {
         <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 10, lineHeight: 18 }}>
           {updateAvailable
             ? `Nouvelle version ${info?.version} disponible — installation dans l’app.`
-            : `Vous êtes à jour (v${getLocalAppVersion()}). Le bouton vérifie le serveur puis installe dans l’app.`}
+            : info?.buildingVersion
+              ? `Build v${info.buildingVersion} en cours (~45–60 min). Pas encore installable. Serveur actuel v${info.version}.`
+              : `Local v${getLocalAppVersion()}${info?.version ? ` · serveur v${info.version}` : ''}. Le bouton vérifie puis installe dans l’app.`}
         </Text>
         <Button
-          title={updateAvailable ? 'Installer maintenant' : 'Vérifier et installer'}
+          title={
+            updateAvailable
+              ? 'Installer maintenant'
+              : info?.buildingVersion
+                ? 'Actualiser le statut build'
+                : 'Vérifier et installer'
+          }
           onPress={async () => {
             const found = await checkNow({ ignoreSnooze: true });
             if (found) {
               await startUpdate();
               return;
             }
-            showToast(`À jour — v${getLocalAppVersion()}`);
+            const local = getLocalAppVersion();
+            try {
+              const remote = await fetchAppVersion();
+              if (
+                remote.buildingVersion &&
+                compareVersions(remote.buildingVersion, local) > 0
+              ) {
+                showToast(
+                  `v${remote.buildingVersion} en build (~45–60 min). Serveur actuel v${remote.version}.`
+                );
+                return;
+              }
+              showToast(`À jour — local v${local} · serveur v${remote.version}`);
+            } catch {
+              showToast(`À jour — v${local}`);
+            }
           }}
           style={{ marginBottom: 8 }}
         />

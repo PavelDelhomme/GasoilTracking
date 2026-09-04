@@ -53,6 +53,17 @@ jobs:
           fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
+      - name: Announce build pending (API)
+        env:
+          TOKEN: ${{ secrets.RELEASE_UPLOAD_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          curl -fsS -X POST "https://gasoil-tracking.delhomme.ovh/api/ci/releases/pending" \
+            -H "X-Release-Token: $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"version\":\"$VERSION\",\"releaseNotes\":\"Build EAS en cours (GitHub Actions)\",\"sha\":\"$GITHUB_SHA\"}" \
+            || echo "Annonce pending échouée (API pas encore à jour ?) — on continue"
+
       - name: Build Android APK (EAS cloud)
         id: build
         run: |
@@ -76,3 +87,5 @@ jobs:
             -F "releaseNotes=Build automatique GitHub Actions ($GITHUB_SHA)" \
             -F "apk=@/tmp/gasoil.apk"
           echo "APK $VERSION publié"
+          curl -sf "https://gasoil-tracking.delhomme.ovh/api/version" || true
+          echo
