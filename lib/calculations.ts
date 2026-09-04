@@ -18,6 +18,10 @@ import {
   getVehicleById,
 } from './database';
 import { monthKeyFromDate } from './dates';
+import {
+  calculateFilteredRouteDistance,
+  evaluateGpsSample,
+} from '@/lib/gpsTracking';
 
 /** Calcule la distance entre deux points GPS (formule Haversine) en km */
 export function haversineDistance(
@@ -536,11 +540,14 @@ export interface RoutePoint {
   latitude: number;
   longitude: number;
   timestamp: number;
+  /** Précision GPS en mètres (optionnel) */
+  accuracy?: number;
 }
 
 export function parseRoutePoints(routePoints: string): RoutePoint[] {
   try {
-    return JSON.parse(routePoints);
+    const parsed = JSON.parse(routePoints);
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
@@ -548,28 +555,24 @@ export function parseRoutePoints(routePoints: string): RoutePoint[] {
 
 export function appendRoutePoint(
   routePoints: string,
-  point: RoutePoint
+  point: RoutePoint & { accuracy?: number | null; speed?: number | null }
 ): string {
   const points = parseRoutePoints(routePoints);
-  if (points.length > 0) {
-    const last = points[points.length - 1];
-    const dist = haversineDistance(last.latitude, last.longitude, point.latitude, point.longitude);
-    if (dist < 0.01) return routePoints;
-  }
-  points.push(point);
+  const prev = points.length > 0 ? points[points.length - 1] : null;
+  const verdict = evaluateGpsSample(prev, point, { isFirst: points.length === 0 });
+  if (!verdict.accept) return routePoints;
+
+  points.push({
+    latitude: point.latitude,
+    longitude: point.longitude,
+    timestamp: point.timestamp,
+    ...(point.accuracy != null && Number.isFinite(point.accuracy)
+      ? { accuracy: point.accuracy }
+      : {}),
+  });
   return JSON.stringify(points);
 }
 
 export function calculateRouteDistance(routePoints: string): number {
-  const points = parseRoutePoints(routePoints);
-  let total = 0;
-  for (let i = 1; i < points.length; i++) {
-    total += haversineDistance(
-      points[i - 1].latitude,
-      points[i - 1].longitude,
-      points[i].latitude,
-      points[i].longitude
-    );
-  }
-  return total;
+  return calculateFilteredRouteDistance(parseRoutePoints(routePoints));
 }

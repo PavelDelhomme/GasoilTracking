@@ -17,6 +17,7 @@ import {
 
 let watchId: number | null = null;
 let applying = false;
+const pending: GeolocationPosition[] = [];
 
 function toLocationObject(pos: GeolocationPosition): Location.LocationObject {
   return {
@@ -33,41 +34,61 @@ function toLocationObject(pos: GeolocationPosition): Location.LocationObject {
   } as Location.LocationObject;
 }
 
-async function applyPosition(pos: GeolocationPosition) {
+async function flushPending() {
   if (applying) return;
   applying = true;
   try {
-    const trip = await getActiveTrip();
-    if (!trip || trip.isPaused) return;
+    while (pending.length > 0) {
+      const batch = pending.splice(0, pending.length);
+      const trip = await getActiveTrip();
+      if (!trip || trip.isPaused || !trip.isActive) continue;
 
-    const vehicle = await getVehicleById(trip.vehicleId);
-    if (!vehicle) return;
+      const vehicle = await getVehicleById(trip.vehicleId);
+      if (!vehicle) continue;
 
-    const routePoints = appendRoutePoint(trip.routePoints, {
-      latitude: pos.coords.latitude,
-      longitude: pos.coords.longitude,
-      timestamp: pos.timestamp,
-    });
-    const distanceKm = calculateRouteDistance(routePoints);
-    const fuelUsed = estimateFuelUsed(distanceKm, vehicle.consumptionPer100);
-    const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
+      let routePoints = trip.routePoints;
+      for (const pos of batch) {
+        routePoints = appendRoutePoint(routePoints, {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          timestamp: pos.timestamp || Date.now(),
+          accuracy: pos.coords.accuracy,
+          speed: pos.coords.speed,
+        });
+      }
 
-    await updateTrip(trip.id, {
-      routePoints,
-      distanceKm,
-      estimatedFuelUsed: fuelUsed,
-      estimatedCost: cost,
-    });
+      const distanceKm = calculateRouteDistance(routePoints);
+      const fuelUsed = estimateFuelUsed(distanceKm, vehicle.consumptionPer100);
+      const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
+
+      await updateTrip(trip.id, {
+        routePoints,
+        distanceKm,
+        estimatedFuelUsed: fuelUsed,
+        estimatedCost: cost,
+      });
+    }
   } catch (e) {
     console.warn('[web-gps] apply', e);
   } finally {
     applying = false;
+    if (pending.length > 0) {
+      void flushPending();
+    }
   }
+}
+
+function enqueuePosition(pos: GeolocationPosition) {
+  pending.push(pos);
+  // Cap mémoire : garde les 40 derniers si le flush est lent
+  if (pending.length > 40) {
+    pending.splice(0, pending.length - 40);
+  }
+  void flushPending();
 }
 
 export async function requestLocationPermissions(): Promise<boolean> {
   if (typeof navigator === 'undefined' || !navigator.geolocation) return false;
-  // Permission via un getCurrentPosition (prompt navigateur / Safari)
   return new Promise((resolve) => {
     navigator.geolocation.getCurrentPosition(
       () => resolve(true),
@@ -82,21 +103,21 @@ export async function startBackgroundTracking(): Promise<boolean> {
   const ok = await requestLocationPermissions();
   if (!ok) return false;
 
+  // Déjà en cours : ne pas clearWatch (évite trou de suivi)
   if (watchId != null) {
-    navigator.geolocation.clearWatch(watchId);
-    watchId = null;
+    return true;
   }
 
   watchId = navigator.geolocation.watchPosition(
     (pos) => {
-      void applyPosition(pos);
+      enqueuePosition(pos);
     },
     (err) => {
       console.warn('[web-gps]', err.message);
     },
     {
       enableHighAccuracy: true,
-      maximumAge: 2000,
+      maximumAge: 1000,
       timeout: 20000,
     }
   );
@@ -109,15 +130,22 @@ export async function stopBackgroundTracking(): Promise<void> {
     navigator.geolocation.clearWatch(watchId);
     watchId = null;
   }
+  pending.length = 0;
 }
 
-export async function getCurrentLocation(): Promise<Location.LocationObject | null> {
+export async function getCurrentLocation(opts?: {
+  fresh?: boolean;
+}): Promise<Location.LocationObject | null> {
   if (typeof navigator === 'undefined' || !navigator.geolocation) return null;
   return new Promise((resolve) => {
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve(toLocationObject(pos)),
       () => resolve(null),
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 120_000 }
+      {
+        enableHighAccuracy: !!opts?.fresh,
+        timeout: opts?.fresh ? 15000 : 8000,
+        maximumAge: opts?.fresh ? 0 : 60_000,
+      }
     );
   });
 }

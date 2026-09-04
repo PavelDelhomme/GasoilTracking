@@ -48,8 +48,10 @@ import { applyTripFuelBurn } from '@/lib/fuelLevel';
 import { notify, confirm } from '@/lib/notify';
 import { TripHistoryCard } from '@/components/TripHistoryCard';
 import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
+import { evaluateGpsSample } from '@/lib/gpsTracking';
 import { formatDateSlash } from '@/lib/dates';
 import type { SinceLastFillStats } from '@/types';
+import type { RoutePoint } from '@/lib/calculations';
 
 type TripTab = 'live' | 'history';
 /** free = suivi GPS sans destination ; nav = avec destination */
@@ -88,6 +90,7 @@ export default function TripScreen() {
   });
   const [liveOriginLabel, setLiveOriginLabel] = useState('');
   const [liveDestLabel, setLiveDestLabel] = useState('');
+  const lastMapGps = useRef<RoutePoint | null>(null);
   const isWeb = Platform.OS === 'web';
 
   const loadLists = useCallback(async () => {
@@ -133,32 +136,79 @@ export default function TripScreen() {
     let nativeSub: { remove: () => void } | null = null;
     let webWatch: number | null = null;
 
+    const acceptMapFix = (
+      latitude: number,
+      longitude: number,
+      timestamp: number,
+      accuracy?: number | null
+    ) => {
+      const sample = { latitude, longitude, timestamp, accuracy };
+      const verdict = evaluateGpsSample(lastMapGps.current, sample, {
+        isFirst: !lastMapGps.current,
+      });
+      // UI : un peu plus tolérant sur la précision (carte), mais rejette les sauts
+      if (!verdict.accept && verdict.reason === 'too_fast') return null;
+      if (!verdict.accept && verdict.reason === 'bad_coords') return null;
+      if (
+        accuracy != null &&
+        accuracy > 120 &&
+        lastMapGps.current
+      ) {
+        return null;
+      }
+      if (verdict.accept || verdict.reason === 'too_close' || verdict.reason === 'too_soon') {
+        // too_close : on met à jour la pastille user sans « avancer » le last pour distance
+        if (verdict.accept) {
+          lastMapGps.current = {
+            latitude,
+            longitude,
+            timestamp,
+            ...(accuracy != null ? { accuracy } : {}),
+          };
+        }
+        return { latitude, longitude };
+      }
+      if (verdict.reason === 'bad_accuracy' && !lastMapGps.current) {
+        // premier fix médiocre : afficher quand même
+        lastMapGps.current = { latitude, longitude, timestamp };
+        return { latitude, longitude };
+      }
+      return null;
+    };
+
     (async () => {
-      const loc = await getCurrentLocation();
+      const loc = await getCurrentLocation({ fresh: !!activeTrip });
       if (loc && !cancelled) {
-        const coords = {
-          latitude: loc.coords.latitude,
-          longitude: loc.coords.longitude,
-        };
-        setUserLocation(coords);
-        setCurrentRegion({ ...coords, latitudeDelta: 0.04, longitudeDelta: 0.04 });
+        const coords = acceptMapFix(
+          loc.coords.latitude,
+          loc.coords.longitude,
+          loc.timestamp || Date.now(),
+          loc.coords.accuracy
+        );
+        if (coords) {
+          setUserLocation(coords);
+          setCurrentRegion({ ...coords, latitudeDelta: 0.04, longitudeDelta: 0.04 });
+        }
       }
 
       if (isWeb) {
         if (typeof navigator === 'undefined' || !navigator.geolocation) return;
         webWatch = navigator.geolocation.watchPosition(
           (pos) => {
-            const coords = {
-              latitude: pos.coords.latitude,
-              longitude: pos.coords.longitude,
-            };
+            const coords = acceptMapFix(
+              pos.coords.latitude,
+              pos.coords.longitude,
+              pos.timestamp || Date.now(),
+              pos.coords.accuracy
+            );
+            if (!coords) return;
             setUserLocation(coords);
             setCurrentRegion((r) => ({ ...r, ...coords }));
           },
           () => {},
           {
             enableHighAccuracy: !!activeTrip && !activeTrip.isPaused,
-            maximumAge: activeTrip ? 4000 : 20000,
+            maximumAge: activeTrip ? 2000 : 20000,
             timeout: 15000,
           }
         );
@@ -172,14 +222,17 @@ export default function TripScreen() {
         nativeSub = await Location.watchPositionAsync(
           {
             accuracy: trackingLive ? Location.Accuracy.High : Location.Accuracy.Balanced,
-            timeInterval: trackingLive ? 5000 : 15000,
-            distanceInterval: trackingLive ? 12 : 40,
+            timeInterval: trackingLive ? 4000 : 15000,
+            distanceInterval: trackingLive ? 10 : 40,
           },
           (pos) => {
-            const coords = {
-              latitude: pos.coords.latitude,
-              longitude: pos.coords.longitude,
-            };
+            const coords = acceptMapFix(
+              pos.coords.latitude,
+              pos.coords.longitude,
+              pos.timestamp || Date.now(),
+              pos.coords.accuracy
+            );
+            if (!coords) return;
             setUserLocation(coords);
             setCurrentRegion((r) => ({ ...r, ...coords }));
           }
@@ -240,13 +293,14 @@ export default function TripScreen() {
     setIsStarting(true);
     try {
       await stopActiveTrips();
-      const loc = await getCurrentLocation();
+      const loc = await getCurrentLocation({ fresh: true });
       const startPoint = loc
         ? [
             {
               latitude: loc.coords.latitude,
               longitude: loc.coords.longitude,
               timestamp: Date.now(),
+              accuracy: loc.coords.accuracy ?? undefined,
             },
           ]
         : [];

@@ -133,7 +133,7 @@ export default function StationTripScreen() {
       await stopActiveTrips();
       await stopBackgroundTracking();
 
-      const loc = await getCurrentLocation();
+      const loc = await getCurrentLocation({ fresh: true });
       const startPoint = loc
         ? [
             {

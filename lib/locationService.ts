@@ -17,6 +17,14 @@ interface LocationTaskData {
   locations: Location.LocationObject[];
 }
 
+/** Sérialise les mises à jour trajet pour éviter last-write-wins (perte de points). */
+let tripWriteChain: Promise<void> = Promise.resolve();
+
+function enqueueTripUpdate(fn: () => Promise<void>): Promise<void> {
+  tripWriteChain = tripWriteChain.then(fn, fn);
+  return tripWriteChain;
+}
+
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   if (error) {
     console.error('Erreur suivi GPS:', error);
@@ -26,30 +34,34 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   const { locations } = data as LocationTaskData;
   if (!locations || locations.length === 0) return;
 
-  const trip = await getActiveTrip();
-  if (!trip || trip.isPaused) return;
+  await enqueueTripUpdate(async () => {
+    const trip = await getActiveTrip();
+    if (!trip || trip.isPaused || !trip.isActive) return;
 
-  const vehicle = await getVehicleById(trip.vehicleId);
-  if (!vehicle) return;
+    const vehicle = await getVehicleById(trip.vehicleId);
+    if (!vehicle) return;
 
-  let routePoints = trip.routePoints;
-  for (const loc of locations) {
-    routePoints = appendRoutePoint(routePoints, {
-      latitude: loc.coords.latitude,
-      longitude: loc.coords.longitude,
-      timestamp: loc.timestamp,
+    let routePoints = trip.routePoints;
+    for (const loc of locations) {
+      routePoints = appendRoutePoint(routePoints, {
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        timestamp: loc.timestamp || Date.now(),
+        accuracy: loc.coords.accuracy ?? undefined,
+        speed: loc.coords.speed ?? undefined,
+      });
+    }
+
+    const distanceKm = calculateRouteDistance(routePoints);
+    const fuelUsed = estimateFuelUsed(distanceKm, vehicle.consumptionPer100);
+    const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
+
+    await updateTrip(trip.id, {
+      routePoints,
+      distanceKm,
+      estimatedFuelUsed: fuelUsed,
+      estimatedCost: cost,
     });
-  }
-
-  const distanceKm = calculateRouteDistance(routePoints);
-  const fuelUsed = estimateFuelUsed(distanceKm, vehicle.consumptionPer100);
-  const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
-
-  await updateTrip(trip.id, {
-    routePoints,
-    distanceKm,
-    estimatedFuelUsed: fuelUsed,
-    estimatedCost: cost,
   });
 });
 
@@ -65,25 +77,25 @@ export async function startBackgroundTracking(): Promise<boolean> {
   const hasPermission = await requestLocationPermissions();
   if (!hasPermission) return false;
 
+  // Ne pas stop/restart si déjà actif — ça coupait le trajet et perdait des updates OS.
   const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_LOCATION_TASK);
   if (isRegistered) {
-    await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+    return true;
   }
 
   await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-    // Balanced : bien assez pour le km trajet, beaucoup moins gourmand que BestForNavigation
-    accuracy: Location.Accuracy.Balanced,
-    timeInterval: 10000,
-    distanceInterval: 25,
-    deferredUpdatesInterval: 15000,
+    accuracy: Location.Accuracy.High,
+    timeInterval: 4000,
+    distanceInterval: 12,
+    deferredUpdatesInterval: 5000,
     showsBackgroundLocationIndicator: true,
     foregroundService: {
       notificationTitle: 'Gasoil Tracking — trajet en cours',
       notificationBody: 'Suivi GPS actif même en arrière-plan (km & conso estimée)',
       notificationColor: '#e94560',
     },
-    // Pause auto à l’arrêt (économie batterie) — le suivi reprend au mouvement
-    pausesUpdatesAutomatically: true,
+    // false : sinon Android/iOS stoppent le flux à l’arrêt / en ville → trajet « coupé »
+    pausesUpdatesAutomatically: false,
     activityType: Location.ActivityType.AutomotiveNavigation,
   });
 
@@ -97,22 +109,29 @@ export async function stopBackgroundTracking(): Promise<void> {
   }
 }
 
-export async function getCurrentLocation(): Promise<Location.LocationObject | null> {
+export async function getCurrentLocation(opts?: {
+  /** Pour démarrer un trajet : frais + précis, pas last-known lâche. */
+  fresh?: boolean;
+}): Promise<Location.LocationObject | null> {
   const { status } = await Location.requestForegroundPermissionsAsync();
   if (status !== 'granted') return null;
-  // Dernière position connue (< 2 min) : affichage stations / départ plus rapide
-  try {
-    const last = await Location.getLastKnownPositionAsync({
-      maxAge: 120_000,
-      requiredAccuracy: 500,
-    });
-    if (last) return last;
-  } catch {
-    /* ignore */
+
+  if (!opts?.fresh) {
+    try {
+      const last = await Location.getLastKnownPositionAsync({
+        maxAge: 60_000,
+        requiredAccuracy: 80,
+      });
+      if (last && (last.coords.accuracy == null || last.coords.accuracy <= 80)) {
+        return last;
+      }
+    } catch {
+      /* ignore */
+    }
   }
-  // Balanced : assez précis pour départ trajet / stations, moins de drain
+
   return Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.Balanced,
+    accuracy: opts?.fresh ? Location.Accuracy.High : Location.Accuracy.Balanced,
     mayShowUserSettingsDialog: true,
   });
 }

@@ -152,14 +152,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       if (!cancelled) await refresh();
     })();
+  }, [refresh]);
+
+  // Polling léger pendant un trajet actif (ne pas dépendre de l’objet trip entier)
+  useEffect(() => {
+    const live = !!activeTrip?.isActive && !activeTrip?.isPaused;
     const interval = setInterval(() => {
       void refresh();
-    }, activeTrip ? 5000 : 30000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [refresh, activeTrip]);
+    }, live ? 4000 : 30000);
+    return () => clearInterval(interval);
+  }, [refresh, activeTrip?.id, activeTrip?.isActive, activeTrip?.isPaused]);
 
   return (
     <AppContext.Provider
