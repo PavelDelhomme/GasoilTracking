@@ -287,7 +287,7 @@ export default function ImportTripsScreen() {
           Export Timeline / Takeout (optionnel)
         </Text>
         <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 8 }}>
-          Si tu arrives à exporter un .json Timeline ou un .zip Takeout, tu peux encore l’importer
+          Si vous exportez un .json Timeline ou un .zip Takeout, vous pouvez encore l’importer
           ici — mais ce n’est plus nécessaire au quotidien.
         </Text>
         <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginBottom: 10 }}>
