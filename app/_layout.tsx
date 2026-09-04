@@ -41,6 +41,10 @@ function RootNavigation() {
           name="vehicle/edit"
           options={{ title: 'Modifier le véhicule', presentation: 'modal' }}
         />
+        <Stack.Screen
+          name="vehicle/maintenance"
+          options={{ title: 'Entretien & CT', presentation: 'modal' }}
+        />
         <Stack.Screen name="fillup/add" options={{ title: 'Nouveau plein', presentation: 'modal' }} />
         <Stack.Screen name="fillup/[id]" options={{ title: 'Détail du plein' }} />
         <Stack.Screen name="fillup/station" options={{ title: 'Station essence', presentation: 'modal' }} />

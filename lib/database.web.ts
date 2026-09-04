@@ -2,7 +2,8 @@
  * Stockage web : AsyncStorage — même API que database.ts
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Budget, FillUp, Place, RecurringRoute, Trip, Vehicle } from '@/types';
+import type { Budget, FillUp, Place, RecurringRoute, Trip, Vehicle, VehicleMaintenance } from '@/types';
+import { refreshMaintenanceStatus } from '@/lib/vehicleMaintenance';
 
 const STORAGE_KEY = 'gasoil_tracking_v1';
 
@@ -14,6 +15,7 @@ interface Store {
     trips: number;
     places: number;
     routes: number;
+    maintenances: number;
   };
   vehicles: Vehicle[];
   fillUps: FillUp[];
@@ -21,16 +23,18 @@ interface Store {
   trips: Trip[];
   places: Place[];
   routes: RecurringRoute[];
+  maintenances: VehicleMaintenance[];
 }
 
 const emptyStore = (): Store => ({
-  seq: { vehicles: 1, fillUps: 1, budgets: 1, trips: 1, places: 1, routes: 1 },
+  seq: { vehicles: 1, fillUps: 1, budgets: 1, trips: 1, places: 1, routes: 1, maintenances: 1 },
   vehicles: [],
   fillUps: [],
   budgets: [],
   trips: [],
   places: [],
   routes: [],
+  maintenances: [],
 });
 
 let cache: Store | null = null;
@@ -45,6 +49,7 @@ async function load(): Promise<Store> {
       parsed.seq = { ...emptyStore().seq, ...parsed.seq };
       parsed.places = parsed.places || [];
       parsed.routes = parsed.routes || [];
+      parsed.maintenances = parsed.maintenances || [];
       parsed.trips = (parsed.trips || []).map((t) => ({
         ...t,
         status: t.status || 'confirmed',
@@ -428,6 +433,7 @@ export async function replaceAllData(data: {
   trips: Trip[];
   places: Place[];
   recurringRoutes: RecurringRoute[];
+  maintenances?: VehicleMaintenance[];
 }): Promise<void> {
   const vehicles = data.vehicles || [];
   const fillUps = data.fillUps || [];
@@ -435,6 +441,7 @@ export async function replaceAllData(data: {
   const trips = data.trips || [];
   const places = data.places || [];
   const routes = data.recurringRoutes || [];
+  const maintenances = data.maintenances || [];
   const max = (arr: { id: number }[]) => arr.reduce((m, x) => Math.max(m, x.id || 0), 0);
   const store: Store = {
     seq: {
@@ -444,6 +451,7 @@ export async function replaceAllData(data: {
       trips: max(trips) + 1,
       places: max(places) + 1,
       routes: max(routes) + 1,
+      maintenances: max(maintenances) + 1,
     },
     vehicles: [...vehicles],
     fillUps: [...fillUps],
@@ -451,9 +459,60 @@ export async function replaceAllData(data: {
     trips: [...trips],
     places: [...places],
     routes: [...routes],
+    maintenances: [...maintenances],
   };
   cache = store;
   await save(store);
+}
+
+export async function getMaintenances(vehicleId?: number): Promise<VehicleMaintenance[]> {
+  const s = await load();
+  const list = (s.maintenances || []).map((m) => ({
+    ...m,
+    status: refreshMaintenanceStatus(m),
+  }));
+  return (vehicleId ? list.filter((m) => m.vehicleId === vehicleId) : list).sort((a, b) =>
+    String(b.dueDate || b.doneAt || b.createdAt).localeCompare(
+      String(a.dueDate || a.doneAt || a.createdAt)
+    )
+  );
+}
+
+export async function createMaintenance(
+  m: Omit<VehicleMaintenance, 'id' | 'createdAt'>
+): Promise<number> {
+  const s = await load();
+  if (!s.seq.maintenances) s.seq.maintenances = 1;
+  const id = s.seq.maintenances++;
+  const createdAt = nowIso();
+  const row: VehicleMaintenance = {
+    ...m,
+    id,
+    createdAt,
+    status: refreshMaintenanceStatus({ ...m, id, createdAt }),
+  };
+  s.maintenances = [...(s.maintenances || []), row];
+  await save(s);
+  return id;
+}
+
+export async function updateMaintenance(
+  id: number,
+  patch: Partial<VehicleMaintenance>
+): Promise<void> {
+  const s = await load();
+  s.maintenances = (s.maintenances || []).map((m) => {
+    if (m.id !== id) return m;
+    const next = { ...m, ...patch, id };
+    return { ...next, status: refreshMaintenanceStatus(next) };
+  });
+  await save(s);
+}
+
+export async function deleteMaintenance(id: number): Promise<void> {
+  const s = await load();
+  s.maintenances = (s.maintenances || []).filter((m) => m.id !== id);
+  await save(s);
 }
 
 export async function hasLocalUserData(): Promise<boolean> {

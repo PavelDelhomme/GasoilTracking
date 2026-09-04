@@ -1,6 +1,16 @@
 import * as SQLite from 'expo-sqlite';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Budget, FillUp, Place, PlaceKind, RecurringRoute, Trip, Vehicle } from '@/types';
+import type {
+  Budget,
+  FillUp,
+  Place,
+  PlaceKind,
+  RecurringRoute,
+  Trip,
+  Vehicle,
+  VehicleMaintenance,
+} from '@/types';
+import { refreshMaintenanceStatus } from '@/lib/vehicleMaintenance';
 
 let db: SQLite.SQLiteDatabase | null = null;
 
@@ -106,6 +116,20 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
       FOREIGN KEY (from_place_id) REFERENCES places(id) ON DELETE CASCADE,
       FOREIGN KEY (to_place_id) REFERENCES places(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS vehicle_maintenances (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vehicle_id INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      amount REAL,
+      done_at TEXT,
+      due_date TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
+    );
   `);
 
   // Migrations douces (anciennes bases)
@@ -163,6 +187,23 @@ function mapVehicle(row: unknown): Vehicle {
   };
 }
 
+function mapMaintenance(row: unknown): VehicleMaintenance {
+  const r = row as Record<string, unknown>;
+  const base: VehicleMaintenance = {
+    id: r.id as number,
+    vehicleId: r.vehicle_id as number,
+    kind: r.kind as VehicleMaintenance['kind'],
+    title: r.title as string,
+    amount: r.amount === null || r.amount === undefined ? null : (r.amount as number),
+    doneAt: (r.done_at as string) || null,
+    dueDate: (r.due_date as string) || null,
+    status: (r.status as VehicleMaintenance['status']) || 'pending',
+    note: (r.note as string) || undefined,
+    createdAt: (r.created_at as string) || new Date().toISOString(),
+  };
+  return { ...base, status: refreshMaintenanceStatus(base) };
+}
+
 function mapFillUp(row: unknown): FillUp {
   const r = row as Record<string, unknown>;
   return {
@@ -181,6 +222,90 @@ function mapFillUp(row: unknown): FillUp {
     note: r.note as string | undefined,
     tripId: r.trip_id === null || r.trip_id === undefined ? null : (r.trip_id as number),
   };
+}
+
+export async function getMaintenances(vehicleId?: number): Promise<VehicleMaintenance[]> {
+  const database = await getDatabase();
+  const rows = vehicleId
+    ? await database.getAllAsync(
+        'SELECT * FROM vehicle_maintenances WHERE vehicle_id = ? ORDER BY COALESCE(due_date, done_at, created_at) DESC',
+        [vehicleId]
+      )
+    : await database.getAllAsync(
+        'SELECT * FROM vehicle_maintenances ORDER BY COALESCE(due_date, done_at, created_at) DESC'
+      );
+  return (rows || []).map(mapMaintenance);
+}
+
+export async function createMaintenance(
+  m: Omit<VehicleMaintenance, 'id' | 'createdAt'>
+): Promise<number> {
+  const database = await getDatabase();
+  const status = refreshMaintenanceStatus({
+    ...m,
+    id: 0,
+    createdAt: new Date().toISOString(),
+  });
+  const result = await database.runAsync(
+    `INSERT INTO vehicle_maintenances (vehicle_id, kind, title, amount, done_at, due_date, status, note)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      m.vehicleId,
+      m.kind,
+      m.title,
+      m.amount,
+      m.doneAt,
+      m.dueDate,
+      status,
+      m.note ?? null,
+    ]
+  );
+  return Number(result.lastInsertRowId);
+}
+
+export async function updateMaintenance(
+  id: number,
+  patch: Partial<VehicleMaintenance>
+): Promise<void> {
+  const database = await getDatabase();
+  const fields: string[] = [];
+  const values: (string | number | null)[] = [];
+  if (patch.kind !== undefined) {
+    fields.push('kind = ?');
+    values.push(patch.kind);
+  }
+  if (patch.title !== undefined) {
+    fields.push('title = ?');
+    values.push(patch.title);
+  }
+  if (patch.amount !== undefined) {
+    fields.push('amount = ?');
+    values.push(patch.amount);
+  }
+  if (patch.doneAt !== undefined) {
+    fields.push('done_at = ?');
+    values.push(patch.doneAt);
+  }
+  if (patch.dueDate !== undefined) {
+    fields.push('due_date = ?');
+    values.push(patch.dueDate);
+  }
+  if (patch.status !== undefined) {
+    fields.push('status = ?');
+    values.push(patch.status);
+  }
+  if (patch.note !== undefined) {
+    fields.push('note = ?');
+    values.push(patch.note ?? null);
+  }
+  if (!fields.length) return;
+  values.push(id);
+  await database.runAsync(`UPDATE vehicle_maintenances SET ${fields.join(', ')} WHERE id = ?`, values);
+}
+
+export async function deleteMaintenance(id: number): Promise<void> {
+  const database = await getDatabase();
+  await database.runAsync('DELETE FROM vehicle_maintenances WHERE id = ?', [id]);
 }
 
 function mapBudget(row: unknown): Budget {
@@ -917,12 +1042,14 @@ export async function replaceAllData(data: {
   trips: Trip[];
   places: Place[];
   recurringRoutes: RecurringRoute[];
+  maintenances?: VehicleMaintenance[];
 }): Promise<void> {
   const database = await getDatabase();
   await database.execAsync('PRAGMA foreign_keys = OFF;');
   try {
     await database.withTransactionAsync(async () => {
       await database.execAsync(`
+        DELETE FROM vehicle_maintenances;
         DELETE FROM recurring_routes;
         DELETE FROM places;
         DELETE FROM fill_ups;
@@ -1051,6 +1178,25 @@ export async function replaceAllData(data: {
             r.isOnVacation ? 1 : 0,
             r.vacationUntil || null,
             r.isActive ? 1 : 0,
+          ]
+        );
+      }
+
+      for (const m of data.maintenances || []) {
+        await database.runAsync(
+          `INSERT INTO vehicle_maintenances (id, vehicle_id, kind, title, amount, done_at, due_date, status, note, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            m.id,
+            m.vehicleId,
+            m.kind,
+            m.title,
+            m.amount,
+            m.doneAt,
+            m.dueDate,
+            m.status || 'pending',
+            m.note ?? null,
+            m.createdAt || new Date().toISOString(),
           ]
         );
       }

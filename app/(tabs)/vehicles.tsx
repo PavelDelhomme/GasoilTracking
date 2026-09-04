@@ -64,6 +64,12 @@ export default function VehiclesScreen() {
             onEdit={() =>
               router.push({ pathname: '/vehicle/edit' as never, params: { id: String(item.id) } })
             }
+            onMaintenance={() =>
+              router.push({
+                pathname: '/vehicle/maintenance' as never,
+                params: { id: String(item.id) },
+              })
+            }
             onLongPress={() => handleDelete(item.id, item.name)}
             onDelete={() => handleDelete(item.id, item.name)}
             onFuelUpdated={() => void refresh()}

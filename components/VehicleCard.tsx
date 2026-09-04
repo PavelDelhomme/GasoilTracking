@@ -15,6 +15,7 @@ interface VehicleCardProps {
   onLongPress?: () => void;
   onSelect?: () => void;
   onEdit?: () => void;
+  onMaintenance?: () => void;
   onDelete?: () => void;
   /** Après changement rapide de jauge. */
   onFuelUpdated?: () => void;
@@ -35,6 +36,7 @@ export function VehicleCard({
   onLongPress,
   onSelect,
   onEdit,
+  onMaintenance,
   onDelete,
   onFuelUpdated,
 }: VehicleCardProps) {
@@ -160,6 +162,14 @@ export function VehicleCard({
             onPress={onEdit}
           >
             <Text style={[styles.selectText, { color: colors.text }]}>Modifier</Text>
+          </TouchableOpacity>
+        )}
+        {onMaintenance && (
+          <TouchableOpacity
+            style={[styles.selectBtn, { borderColor: colors.accent, flex: 1 }]}
+            onPress={onMaintenance}
+          >
+            <Text style={[styles.selectText, { color: colors.accent }]}>CT / entretien</Text>
           </TouchableOpacity>
         )}
         {onDelete && (

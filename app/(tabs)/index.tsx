@@ -24,8 +24,10 @@ import {
 import { seedDemoData } from '@/lib/seedDemo';
 import { seedTodayCommuteAndFillUp } from '@/lib/seedToday';
 import { notify } from '@/lib/notify';
-import { getPlaces, reconcileTrackedKmFromTrips } from '@/lib/database';
-import type { ConsumptionStats, Place, SinceLastFillStats } from '@/types';
+import { getPlaces, getMaintenances, reconcileTrackedKmFromTrips } from '@/lib/database';
+import type { ConsumptionStats, Place, SinceLastFillStats, VehicleMaintenance } from '@/types';
+import { MAINTENANCE_KIND_LABELS, maintenanceIsUrgent } from '@/lib/vehicleMaintenance';
+import { formatDateSlash } from '@/lib/dates';
 
 export default function HomeScreen() {
   const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles } = useApp();
@@ -40,6 +42,7 @@ export default function HomeScreen() {
   const [seeding, setSeeding] = useState(false);
   const [seedingToday, setSeedingToday] = useState(false);
   const [places, setPlaces] = useState<Place[]>([]);
+  const [dueMaintenances, setDueMaintenances] = useState<VehicleMaintenance[]>([]);
 
   const reloadStats = async (vehicleId: number) => {
     const [s, since] = await Promise.all([
@@ -52,6 +55,13 @@ export default function HomeScreen() {
 
   useEffect(() => {
     void getPlaces().then(setPlaces).catch(() => setPlaces([]));
+    void getMaintenances()
+      .then((list) =>
+        setDueMaintenances(
+          list.filter((m) => m.status !== 'done' && m.status !== 'cancelled' && (m.dueDate || maintenanceIsUrgent(m)))
+        )
+      )
+      .catch(() => setDueMaintenances([]));
     if (activeVehicle) {
       void (async () => {
         try {
@@ -293,6 +303,41 @@ export default function HomeScreen() {
                   {formatEuro(mainBudget.spent)} dépensés sur {formatEuro(mainBudget.budget.amount)}
                 </Text>
                 <ProgressBar percent={mainBudget.percentUsed} />
+              </Card>
+            )}
+
+            {dueMaintenances.length > 0 && (
+              <Card style={{ marginBottom: 16, borderColor: colors.warning, borderWidth: 1 }}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>À faire (véhicules)</Text>
+                {dueMaintenances.slice(0, 4).map((m) => {
+                  const v = vehicles.find((x) => x.id === m.vehicleId);
+                  return (
+                    <Pressable
+                      key={m.id}
+                      onPress={() =>
+                        router.push({
+                          pathname: '/vehicle/maintenance' as never,
+                          params: { id: String(m.vehicleId) },
+                        })
+                      }
+                      style={{ marginBottom: 10 }}
+                    >
+                      <Text style={{ color: colors.text, fontWeight: '700' }}>
+                        {v?.name || 'Véhicule'} · {m.title}
+                      </Text>
+                      <Text
+                        style={{
+                          color: m.status === 'overdue' ? colors.danger : colors.warning,
+                          fontSize: 13,
+                          marginTop: 2,
+                        }}
+                      >
+                        {MAINTENANCE_KIND_LABELS[m.kind]}
+                        {m.dueDate ? ` · avant le ${formatDateSlash(m.dueDate)}` : ''}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </Card>
             )}
 

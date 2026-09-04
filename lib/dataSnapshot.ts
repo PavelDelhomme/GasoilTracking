@@ -1,7 +1,16 @@
-import type { Budget, FillUp, Place, RecurringRoute, Trip, Vehicle } from '@/types';
+import type {
+  Budget,
+  FillUp,
+  Place,
+  RecurringRoute,
+  Trip,
+  Vehicle,
+  VehicleMaintenance,
+} from '@/types';
 import {
   getBudgets,
   getFillUps,
+  getMaintenances,
   getPlaces,
   getRecurringRoutes,
   getTrips,
@@ -23,17 +32,20 @@ export type AppDataSnapshot = {
   trips: Trip[];
   places: Place[];
   recurringRoutes: RecurringRoute[];
+  maintenances: VehicleMaintenance[];
 };
 
 export async function collectSnapshot(): Promise<AppDataSnapshot> {
-  const [vehicles, fillUps, budgets, trips, places, recurringRoutes] = await Promise.all([
-    getVehicles(),
-    getFillUps(),
-    getBudgets(),
-    getTrips(undefined, { includeRejected: true }),
-    getPlaces(),
-    getRecurringRoutes(),
-  ]);
+  const [vehicles, fillUps, budgets, trips, places, recurringRoutes, maintenances] =
+    await Promise.all([
+      getVehicles(),
+      getFillUps(),
+      getBudgets(),
+      getTrips(undefined, { includeRejected: true }),
+      getPlaces(),
+      getRecurringRoutes(),
+      getMaintenances(),
+    ]);
   return {
     schema: SNAPSHOT_SCHEMA,
     exportedAt: new Date().toISOString(),
@@ -44,6 +56,7 @@ export async function collectSnapshot(): Promise<AppDataSnapshot> {
     trips,
     places,
     recurringRoutes,
+    maintenances,
   };
 }
 
@@ -60,8 +73,17 @@ export function normalizeSnapshot(raw: unknown): AppDataSnapshot | null {
     : Array.isArray(d.routes)
       ? (d.routes as RecurringRoute[])
       : [];
+  const maintenances = Array.isArray(d.maintenances)
+    ? (d.maintenances as VehicleMaintenance[])
+    : [];
   if (
-    vehicles.length + fillUps.length + budgets.length + trips.length + places.length === 0 &&
+    vehicles.length +
+      fillUps.length +
+      budgets.length +
+      trips.length +
+      places.length +
+      maintenances.length ===
+      0 &&
     recurringRoutes.length === 0
   ) {
     return null;
@@ -76,6 +98,7 @@ export function normalizeSnapshot(raw: unknown): AppDataSnapshot | null {
     trips,
     places,
     recurringRoutes,
+    maintenances,
   };
 }
 
@@ -93,6 +116,7 @@ export async function applySnapshot(
     trips: snap.trips,
     places: snap.places,
     recurringRoutes: snap.recurringRoutes,
+    maintenances: snap.maintenances || [],
   });
   return true;
 }

@@ -160,3 +160,30 @@ export interface BudgetStatus {
   percentUsed: number;
   projectedEndOfPeriod: number;
 }
+
+/** Entretien / admin véhicule (CT, contre-visite, etc.) */
+export type MaintenanceKind =
+  | 'controle_technique'
+  | 'contre_visite'
+  | 'entretien'
+  | 'assurance'
+  | 'amende'
+  | 'autre';
+
+export type MaintenanceStatus = 'done' | 'pending' | 'overdue' | 'cancelled';
+
+export interface VehicleMaintenance {
+  id: number;
+  vehicleId: number;
+  kind: MaintenanceKind;
+  title: string;
+  /** Coût payé (ou estimé) */
+  amount: number | null;
+  /** Date de réalisation (si fait) */
+  doneAt: string | null;
+  /** Échéance légale / rappel */
+  dueDate: string | null;
+  status: MaintenanceStatus;
+  note?: string;
+  createdAt: string;
+}
