@@ -259,19 +259,39 @@ export default function ImportTripsScreen() {
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={[styles.title, { color: colors.text }]}>Importer Timeline / Takeout</Text>
+      <Text style={[styles.title, { color: colors.text }]}>Importer des trajets</Text>
 
       <Card style={{ marginBottom: 14 }}>
         <Text style={{ color: colors.text, fontWeight: '700', marginBottom: 6 }}>
-          Google Maps → fichier
+          Méthode recommandée (sans Takeout)
+        </Text>
+        <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 10 }}>
+          Google ne propose plus d’API pour récupérer ta Timeline personnelle. Le plus fiable :
+          démarrer un trajet GPS dans l’app (onglet Trajet) avant de partir, ou saisir un trajet
+          manuel / coller un lien Google Maps Directions plus bas.
+        </Text>
+        <Button
+          title="Ouvrir le suivi GPS"
+          onPress={() => router.push('/(tabs)/trip' as never)}
+          style={{ marginBottom: 8 }}
+        />
+        <Button
+          title="Saisir un trajet manuel"
+          variant="outline"
+          onPress={() => router.push('/trip/add' as never)}
+        />
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
+        <Text style={{ color: colors.text, fontWeight: '700', marginBottom: 6 }}>
+          Export Timeline / Takeout (optionnel)
         </Text>
         <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 8 }}>
-          Pas d’API Google pour lire ta Timeline perso (données sur le téléphone depuis 2024/25).
-          Export : Maps → Timeline → Exporter (.json) ou ancien Takeout (.zip).
+          Si tu arrives à exporter un .json Timeline ou un .zip Takeout, tu peux encore l’importer
+          ici — mais ce n’est plus nécessaire au quotidien.
         </Text>
         <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginBottom: 10 }}>
-          Astuce attribution : filtre les dates (cette semaine / semaine dernière = 806), puis
-          change le véhicule ligne par ligne (Touran pour les 1ères semaines travail).
+          Astuce : filtre les dates, puis change le véhicule ligne par ligne si besoin.
         </Text>
 
         <Text style={{ color: colors.text, fontWeight: '600', marginBottom: 6 }}>

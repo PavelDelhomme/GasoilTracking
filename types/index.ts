@@ -171,6 +171,7 @@ export interface BudgetStatus {
 export type MaintenanceKind =
   | 'controle_technique'
   | 'contre_visite'
+  | 'controle_pollution'
   | 'entretien'
   | 'assurance'
   | 'amende'

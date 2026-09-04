@@ -180,7 +180,7 @@ export default function BudgetScreen() {
   };
 
   const estimateMonthlyFromRoutes = () => {
-    if (!activeVehicle) return 0;
+    if (!activeVehicle) return { week: 0, month: 0 };
     const today = new Date().toISOString().slice(0, 10);
     let kmWeek = 0;
     for (const r of routes) {
@@ -190,9 +190,20 @@ export default function BudgetScreen() {
       const days = r.workDaysPerWeek || r.timesPerWeek || 0;
       kmWeek += r.distanceKm * days;
     }
-    const kmMonth = kmWeek * 4.33;
-    const liters = (kmMonth * activeVehicle.consumptionPer100) / 100;
-    return liters * activeVehicle.defaultFuelPrice;
+    const litersWeek = (kmWeek * activeVehicle.consumptionPer100) / 100;
+    const week = litersWeek * activeVehicle.defaultFuelPrice;
+    return { week, month: week * 4.33 };
+  };
+
+  const routeWeeklyCost = (r: RecurringRoute) => {
+    if (!activeVehicle) return 0;
+    const today = new Date().toISOString().slice(0, 10);
+    const onVac =
+      r.isOnVacation && (!r.vacationUntil || r.vacationUntil >= today);
+    if (onVac) return 0;
+    const days = r.workDaysPerWeek || r.timesPerWeek || 0;
+    const kmWeek = r.distanceKm * days;
+    return ((kmWeek * activeVehicle.consumptionPer100) / 100) * activeVehicle.defaultFuelPrice;
   };
 
   const loadFuelPrices = async (
@@ -663,6 +674,7 @@ export default function BudgetScreen() {
               const onVac =
                 r.isOnVacation && (!r.vacationUntil || r.vacationUntil >= today);
               const days = r.workDaysPerWeek || r.timesPerWeek;
+              const weekCost = routeWeeklyCost(r);
               return (
                 <Pressable
                   key={r.id}
@@ -690,6 +702,11 @@ export default function BudgetScreen() {
                       j/sem.
                       {onVac && r.vacationUntil ? ` · reprise ${r.vacationUntil}` : ''}
                     </Text>
+                    {!onVac && weekCost > 0 && (
+                      <Text style={{ color: colors.accent, fontSize: 13, fontWeight: '700', marginTop: 4 }}>
+                        ~{formatEuro(weekCost)} / semaine
+                      </Text>
+                    )}
                   </View>
                   <Text style={{ color: colors.accent, fontWeight: '700' }}>Édit.</Text>
                 </Pressable>
@@ -697,9 +714,14 @@ export default function BudgetScreen() {
             })
           )}
           {activeVehicle && routes.length > 0 && (
-            <Text style={{ color: colors.accent, marginTop: 10, fontWeight: '600' }}>
-              Estimation mensuelle trajets réguliers : ~{formatEuro(projected)}
-            </Text>
+            <View style={{ marginTop: 10, gap: 4 }}>
+              <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 15 }}>
+                Estimation semaine : ~{formatEuro(projected.week)}
+              </Text>
+              <Text style={{ color: colors.textSecondary, fontWeight: '600' }}>
+                Estimation mensuelle : ~{formatEuro(projected.month)}
+              </Text>
+            </View>
           )}
         </Card>
 

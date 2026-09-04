@@ -7,6 +7,7 @@ import type { MaintenanceKind, MaintenanceStatus, VehicleMaintenance } from '@/t
 export const MAINTENANCE_KIND_LABELS: Record<MaintenanceKind, string> = {
   controle_technique: 'Contrôle technique',
   contre_visite: 'Contre-visite',
+  controle_pollution: 'Contrôle pollution',
   entretien: 'Entretien',
   assurance: 'Assurance',
   amende: 'Amende / contravention',

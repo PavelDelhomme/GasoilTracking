@@ -26,6 +26,7 @@ import type { MaintenanceKind, VehicleMaintenance } from '@/types';
 const KINDS: MaintenanceKind[] = [
   'controle_technique',
   'contre_visite',
+  'controle_pollution',
   'entretien',
   'assurance',
   'amende',
@@ -162,8 +163,8 @@ export default function VehicleMaintenanceScreen() {
     >
       <Text style={[styles.title, { color: colors.text }]}>{vehicle.name}</Text>
       <Text style={{ color: colors.textSecondary, marginBottom: 16, lineHeight: 18 }}>
-        Contrôle technique, contre-visite, entretien, amendes… L’app rappelle les échéances (ex.
-        contre-visite sous 2 mois après un CT).
+        CT, contre-visite, contrôle pollution, assurance, entretien… L’app rappelle les échéances
+        (notifications si activées sur le véhicule).
       </Text>
 
       <Text style={[styles.section, { color: colors.text }]}>À faire / historique</Text>

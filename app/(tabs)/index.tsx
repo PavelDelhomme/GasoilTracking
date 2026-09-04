@@ -30,7 +30,7 @@ import { MAINTENANCE_KIND_LABELS, maintenanceIsUrgent } from '@/lib/vehicleMaint
 import { formatDateSlash } from '@/lib/dates';
 
 export default function HomeScreen() {
-  const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles } = useApp();
+  const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles, selectVehicle } = useApp();
   const { syncNow } = useAuth();
   const { colors } = useTheme();
   const { locale } = useLocale();
@@ -201,6 +201,14 @@ export default function HomeScreen() {
                     {activeVehicle.brand} {activeVehicle.model} • {activeVehicle.year}
                   </Text>
                 </View>
+                <Pressable
+                  onPress={onRefresh}
+                  hitSlop={10}
+                  style={[styles.iconBtn, { borderColor: colors.border }]}
+                  accessibilityLabel="Actualiser les données"
+                >
+                  <Ionicons name="refresh" size={20} color={colors.accent} />
+                </Pressable>
               </View>
               <Text style={[styles.odometer, { color: colors.text }]}>
                 {displayOdometerKm(activeVehicle).toLocaleString(locale)} km
@@ -209,6 +217,37 @@ export default function HomeScreen() {
                 Base {(activeVehicle.currentOdometer || 0).toLocaleString(locale)} +{' '}
                 {Math.round(activeVehicle.trackedKm || 0).toLocaleString(locale)} km de trajets
               </Text>
+              {vehicles.length > 1 && (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+                  {vehicles.map((v) => {
+                    const selected = v.id === activeVehicle.id;
+                    return (
+                      <Pressable
+                        key={v.id}
+                        onPress={() => void selectVehicle(v.id)}
+                        style={[
+                          styles.vehChip,
+                          {
+                            borderColor: selected ? colors.accent : colors.border,
+                            backgroundColor: selected ? colors.accent + '22' : colors.background,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={{
+                            color: selected ? colors.accent : colors.text,
+                            fontWeight: '700',
+                            fontSize: 13,
+                          }}
+                          numberOfLines={1}
+                        >
+                          {v.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
             </Card>
 
             {activeTrip && (
@@ -291,18 +330,28 @@ export default function HomeScreen() {
                           ? colors.warning
                           : colors.success,
                     fontWeight: '800',
-                    fontSize: 26,
-                    letterSpacing: -0.4,
+                    fontSize: 22,
+                    marginBottom: 6,
                   }}
                 >
                   {mainBudget.percentUsed > 100
                     ? `Dépassé de ${formatEuro(mainBudget.spent - mainBudget.budget.amount)}`
                     : `Il reste ${formatEuro(mainBudget.remaining)}`}
                 </Text>
-                <Text style={[styles.budgetRemaining, { color: colors.textSecondary, marginTop: 4 }]}>
+                <ProgressBar
+                  percent={Math.min(100, mainBudget.percentUsed)}
+                  color={
+                    mainBudget.percentUsed > 100
+                      ? colors.danger
+                      : mainBudget.percentUsed > 80
+                        ? colors.warning
+                        : colors.success
+                  }
+                  height={12}
+                />
+                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 8 }}>
                   {formatEuro(mainBudget.spent)} dépensés sur {formatEuro(mainBudget.budget.amount)}
                 </Text>
-                <ProgressBar percent={mainBudget.percentUsed} />
               </Card>
             )}
 
@@ -472,6 +521,21 @@ const styles = StyleSheet.create({
   vehicleName: { fontSize: 20, fontWeight: '700' },
   vehicleDetail: { fontSize: 14, marginTop: 2 },
   odometer: { fontSize: 13, marginTop: 8 },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  vehChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    maxWidth: '48%',
+  },
   tripBanner: { marginBottom: 16, borderWidth: 2 },
   tripHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   tripTitle: { fontSize: 16, fontWeight: '700' },

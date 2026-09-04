@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
 import type { Vehicle } from '@/types';
@@ -140,7 +141,7 @@ export function VehicleCard({
         </View>
         {(vehicle.currentOdometer > 0 || (vehicle.trackedKm ?? 0) > 0) && (
           <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
-                        Compteur {odo.toLocaleString('fr-FR')} km · base{' '}
+            Compteur {odo.toLocaleString('fr-FR')} km · base{' '}
             {(vehicle.currentOdometer || 0).toLocaleString('fr-FR')} +{' '}
             {(vehicle.trackedKm || 0).toFixed(0)} suivis
           </Text>
@@ -149,42 +150,67 @@ export function VehicleCard({
 
       <View style={styles.actions}>
         {!isActive && onSelect && (
-          <TouchableOpacity
-            style={[styles.selectBtn, { borderColor: colors.accent, flex: 1 }]}
+          <ActionBtn
+            icon="checkmark-circle-outline"
+            label="Sélectionner"
+            color={colors.accent}
+            borderColor={colors.accent}
             onPress={onSelect}
-          >
-            <Text style={[styles.selectText, { color: colors.accent }]}>Sélectionner</Text>
-          </TouchableOpacity>
+          />
         )}
         {onEdit && (
-          <TouchableOpacity
-            style={[styles.selectBtn, { borderColor: colors.border, flex: 1 }]}
+          <ActionBtn
+            icon="create-outline"
+            label="Modifier"
+            color={colors.text}
+            borderColor={colors.border}
             onPress={onEdit}
-          >
-            <Text style={[styles.selectText, { color: colors.text }]}>Modifier</Text>
-          </TouchableOpacity>
+          />
         )}
         {onMaintenance && (
-          <TouchableOpacity
-            style={[styles.selectBtn, { borderColor: colors.accent, flex: 1 }]}
+          <ActionBtn
+            icon="construct-outline"
+            label="Entretien"
+            color={colors.accent}
+            borderColor={colors.accent}
             onPress={onMaintenance}
-          >
-            <Text style={[styles.selectText, { color: colors.accent }]}>CT / entretien</Text>
-          </TouchableOpacity>
+          />
         )}
         {onDelete && (
-          <TouchableOpacity
-            style={[
-              styles.selectBtn,
-              { borderColor: colors.danger, flex: 0, minWidth: 44, paddingHorizontal: 12 },
-            ]}
+          <Pressable
             onPress={onDelete}
+            style={[styles.deleteBtn, { borderColor: colors.danger }]}
+            hitSlop={6}
+            accessibilityLabel="Supprimer"
           >
-            <Text style={[styles.selectText, { color: colors.danger }]}>✕</Text>
-          </TouchableOpacity>
+            <Ionicons name="trash-outline" size={18} color={colors.danger} />
+          </Pressable>
         )}
       </View>
     </TouchableOpacity>
+  );
+}
+
+function ActionBtn({
+  icon,
+  label,
+  color,
+  borderColor,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  color: string;
+  borderColor: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={[styles.actionBtn, { borderColor }]}>
+      <Ionicons name={icon} size={16} color={color} />
+      <Text style={[styles.actionLabel, { color }]} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -235,13 +261,30 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
   },
-  selectBtn: {
-    marginTop: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
     alignItems: 'center',
   },
-  selectText: { fontSize: 14, fontWeight: '600' },
-  actions: { flexDirection: 'row', gap: 8 },
+  actionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    minHeight: 40,
+  },
+  actionLabel: { fontSize: 13, fontWeight: '700' },
+  deleteBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });
