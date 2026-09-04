@@ -159,7 +159,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const live = !!activeTrip?.isActive && !activeTrip?.isPaused;
     const interval = setInterval(() => {
       void refresh();
-    }, live ? 4000 : 30000);
+    }, live ? 3000 : 30000);
     return () => clearInterval(interval);
   }, [refresh, activeTrip?.id, activeTrip?.isActive, activeTrip?.isPaused]);
 

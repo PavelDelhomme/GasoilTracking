@@ -84,17 +84,17 @@ export async function startBackgroundTracking(): Promise<boolean> {
   }
 
   await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-    accuracy: Location.Accuracy.High,
-    timeInterval: 4000,
-    distanceInterval: 12,
-    deferredUpdatesInterval: 5000,
+    // BestForNavigation = meilleure précision trajet voiture (Android / iOS)
+    accuracy: Location.Accuracy.BestForNavigation,
+    timeInterval: 2500,
+    distanceInterval: 8,
+    deferredUpdatesInterval: 3000,
     showsBackgroundLocationIndicator: true,
     foregroundService: {
       notificationTitle: 'Gasoil Tracking — trajet en cours',
-      notificationBody: 'Suivi GPS actif même en arrière-plan (km & conso estimée)',
+      notificationBody: 'Suivi GPS précis actif (arrière-plan)',
       notificationColor: '#e94560',
     },
-    // false : sinon Android/iOS stoppent le flux à l’arrêt / en ville → trajet « coupé »
     pausesUpdatesAutomatically: false,
     activityType: Location.ActivityType.AutomotiveNavigation,
   });
@@ -119,10 +119,10 @@ export async function getCurrentLocation(opts?: {
   if (!opts?.fresh) {
     try {
       const last = await Location.getLastKnownPositionAsync({
-        maxAge: 60_000,
-        requiredAccuracy: 80,
+        maxAge: 45_000,
+        requiredAccuracy: 50,
       });
-      if (last && (last.coords.accuracy == null || last.coords.accuracy <= 80)) {
+      if (last && (last.coords.accuracy == null || last.coords.accuracy <= 50)) {
         return last;
       }
     } catch {
@@ -131,7 +131,7 @@ export async function getCurrentLocation(opts?: {
   }
 
   return Location.getCurrentPositionAsync({
-    accuracy: opts?.fresh ? Location.Accuracy.High : Location.Accuracy.Balanced,
+    accuracy: opts?.fresh ? Location.Accuracy.BestForNavigation : Location.Accuracy.High,
     mayShowUserSettingsDialog: true,
   });
 }

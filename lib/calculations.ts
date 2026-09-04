@@ -562,12 +562,13 @@ export function appendRoutePoint(
   const verdict = evaluateGpsSample(prev, point, { isFirst: points.length === 0 });
   if (!verdict.accept) return routePoints;
 
+  const use = verdict.sample || point;
   points.push({
-    latitude: point.latitude,
-    longitude: point.longitude,
-    timestamp: point.timestamp,
-    ...(point.accuracy != null && Number.isFinite(point.accuracy)
-      ? { accuracy: point.accuracy }
+    latitude: use.latitude,
+    longitude: use.longitude,
+    timestamp: use.timestamp,
+    ...(use.accuracy != null && Number.isFinite(use.accuracy)
+      ? { accuracy: use.accuracy }
       : {}),
   });
   return JSON.stringify(points);

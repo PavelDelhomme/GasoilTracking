@@ -151,7 +151,7 @@ export default function TripScreen() {
       if (!verdict.accept && verdict.reason === 'bad_coords') return null;
       if (
         accuracy != null &&
-        accuracy > 120 &&
+        accuracy > 80 &&
         lastMapGps.current
       ) {
         return null;
@@ -221,9 +221,11 @@ export default function TripScreen() {
         const trackingLive = !!activeTrip && !activeTrip.isPaused;
         nativeSub = await Location.watchPositionAsync(
           {
-            accuracy: trackingLive ? Location.Accuracy.High : Location.Accuracy.Balanced,
-            timeInterval: trackingLive ? 4000 : 15000,
-            distanceInterval: trackingLive ? 10 : 40,
+            accuracy: trackingLive
+              ? Location.Accuracy.BestForNavigation
+              : Location.Accuracy.Balanced,
+            timeInterval: trackingLive ? 2500 : 15000,
+            distanceInterval: trackingLive ? 8 : 40,
           },
           (pos) => {
             const coords = acceptMapFix(

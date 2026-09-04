@@ -117,8 +117,8 @@ export async function startBackgroundTracking(): Promise<boolean> {
     },
     {
       enableHighAccuracy: true,
-      maximumAge: 1000,
-      timeout: 20000,
+      maximumAge: 500,
+      timeout: 15000,
     }
   );
 
