@@ -858,6 +858,21 @@ export async function deleteTrip(id: number): Promise<void> {
   await database.runAsync('DELETE FROM trips WHERE id = ?', [id]);
 }
 
+/** Supprime les trajets de test (simulateur) — notes / lieux « (sim) » / SIMULATEUR. */
+export async function purgeSimulatorTrips(vehicleId?: number): Promise<number> {
+  const trips = await getTrips(vehicleId, { includeRejected: true });
+  const sims = trips.filter(
+    (t) =>
+      /SIMULATEUR/i.test(t.note || '') ||
+      /\(sim\)/i.test(t.originName || '') ||
+      /\(sim\)/i.test(t.destinationName || '')
+  );
+  for (const t of sims) {
+    await deleteTrip(t.id);
+  }
+  return sims.length;
+}
+
 export async function stopActiveTrips(): Promise<void> {
   const database = await getDatabase();
   await database.runAsync(

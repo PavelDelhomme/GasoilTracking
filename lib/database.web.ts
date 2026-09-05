@@ -364,6 +364,23 @@ export async function deleteTrip(id: number): Promise<void> {
   await save(s);
 }
 
+/** Supprime les trajets de test (simulateur). */
+export async function purgeSimulatorTrips(vehicleId?: number): Promise<number> {
+  const s = await load();
+  const before = s.trips.length;
+  s.trips = s.trips.filter((t) => {
+    if (vehicleId != null && t.vehicleId !== vehicleId) return true;
+    const sim =
+      /SIMULATEUR/i.test(t.note || '') ||
+      /\(sim\)/i.test(t.originName || '') ||
+      /\(sim\)/i.test(t.destinationName || '');
+    return !sim;
+  });
+  const removed = before - s.trips.length;
+  if (removed > 0) await save(s);
+  return removed;
+}
+
 export async function stopActiveTrips(): Promise<void> {
   const s = await load();
   const end = nowIso();

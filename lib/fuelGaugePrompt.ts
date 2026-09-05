@@ -9,25 +9,9 @@ export type FuelGaugeResult = {
   skipped: boolean;
 };
 
-function fractionButtons(
-  vehicle: Vehicle,
-  resolve: (r: FuelGaugeResult) => void
-): { text: string; onPress: () => void }[] {
-  const pick = (f: number) => async () => {
-    const liters = await setFuelFraction(vehicle, f);
-    resolve({ liters, skipped: false });
-  };
-  return [
-    { text: 'Plein', onPress: pick(1) },
-    { text: '3/4', onPress: pick(0.75) },
-    { text: '1/2', onPress: pick(0.5) },
-    { text: '1/4', onPress: pick(0.25) },
-    { text: 'Presque vide', onPress: pick(0.1) },
-  ];
-}
-
 /**
  * Demande le niveau essence (fractions ou saisie litres).
+ * Android : Alert limité à ~3 boutons → menus en cascade.
  * `skipped: true` si l’utilisateur passe.
  */
 export function askFuelGaugeApprox(
@@ -36,38 +20,59 @@ export function askFuelGaugeApprox(
   message: string
 ): Promise<FuelGaugeResult> {
   return new Promise((resolve) => {
-    const skip = () => resolve({ liters: vehicle.estimatedFuelLiters ?? 0, skipped: true });
+    const skip = () =>
+      resolve({ liters: vehicle.estimatedFuelLiters ?? 0, skipped: true });
 
-    const askLiters = () => {
-      const promptFn =
-        Platform.OS === 'ios'
-          ? Alert.prompt.bind(Alert)
-          : Platform.OS === 'web' && typeof window !== 'undefined'
-            ? (t: string, m: string, cb: (text: string | undefined) => void) => {
-                const v = window.prompt(`${t}\n${m}`, '');
-                cb(v ?? undefined);
-              }
-            : null;
+    const setLiters = async (liters: number) => {
+      const v = Math.min(vehicle.tankCapacity, Math.max(0, Math.round(liters * 10) / 10));
+      await updateVehicle(vehicle.id, { estimatedFuelLiters: v });
+      resolve({ liters: v, skipped: false });
+    };
 
-      if (!promptFn) {
-        // Android : pas de prompt natif → on propose 1/2 comme défaut via boutons déjà listés
-        skip();
+    const pickFraction = async (f: number) => {
+      const liters = await setFuelFraction(vehicle, f);
+      resolve({ liters, skipped: false });
+    };
+
+    const askLitersNative = () => {
+      if (Platform.OS === 'ios' && typeof Alert.prompt === 'function') {
+        Alert.prompt(
+          'Litres restants',
+          `Capacité ${vehicle.tankCapacity} L`,
+          async (text) => {
+            const n = Number(String(text || '').replace(',', '.'));
+            if (!Number.isFinite(n) || n < 0) {
+              skip();
+              return;
+            }
+            await setLiters(n);
+          }
+        );
         return;
       }
-      promptFn(
-        'Litres restants',
-        `Capacité ${vehicle.tankCapacity} L — indiquez le niveau actuel`,
-        async (text: string | undefined) => {
-          const n = Number(String(text || '').replace(',', '.'));
-          if (!Number.isFinite(n) || n < 0) {
-            skip();
-            return;
-          }
-          const liters = Math.min(vehicle.tankCapacity, Math.round(n * 10) / 10);
-          await updateVehicle(vehicle.id, { estimatedFuelLiters: liters });
-          resolve({ liters, skipped: false });
-        }
-      );
+      // Android : 4 niveaux rapides (pas de prompt natif)
+      Alert.alert('Niveau approximatif', `Réservoir ${vehicle.tankCapacity} L`, [
+        { text: 'Plein', onPress: () => void pickFraction(1) },
+        { text: '1/2', onPress: () => void pickFraction(0.5) },
+        { text: '1/4', onPress: () => void pickFraction(0.25) },
+        { text: 'Passer', style: 'cancel', onPress: skip },
+      ]);
+    };
+
+    const askMoreFractions = () => {
+      Alert.alert(title, 'Niveau plus précis', [
+        { text: '3/4', onPress: () => void pickFraction(0.75) },
+        { text: 'Presque vide', onPress: () => void pickFraction(0.1) },
+        { text: 'Retour', style: 'cancel', onPress: () => showRoot() },
+      ]);
+    };
+
+    const showRoot = () => {
+      Alert.alert(title, message, [
+        { text: 'Passer', style: 'cancel', onPress: skip },
+        { text: 'Plein / 1/2 / 1/4…', onPress: askLitersNative },
+        { text: 'Autres niveaux', onPress: askMoreFractions },
+      ]);
     };
 
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -87,21 +92,14 @@ export function askFuelGaugeApprox(
           return;
         }
         if (n <= 1) {
-          const liters = await setFuelFraction(vehicle, n);
-          resolve({ liters, skipped: false });
+          await pickFraction(n);
           return;
         }
-        const liters = Math.min(vehicle.tankCapacity, Math.round(n * 10) / 10);
-        await updateVehicle(vehicle.id, { estimatedFuelLiters: liters });
-        resolve({ liters, skipped: false });
+        await setLiters(n);
       })();
       return;
     }
 
-    Alert.alert(title, message, [
-      { text: 'Passer', style: 'cancel', onPress: skip },
-      ...fractionButtons(vehicle, resolve),
-      { text: 'Saisir L…', onPress: askLiters },
-    ]);
+    showRoot();
   });
 }

@@ -33,6 +33,7 @@ import {
   getFillUps,
   updateVehicle,
   getVehicleById,
+  purgeSimulatorTrips,
 } from '@/lib/database';
 import {
   startBackgroundTracking,
@@ -88,6 +89,7 @@ export default function TripScreen() {
     destLon?: string;
     autoStart?: string;
     runSim?: string;
+    purgeSim?: string;
   }>();
   const { activeVehicle, activeTrip, refresh } = useApp();
   const { colors } = useTheme();
@@ -489,6 +491,18 @@ export default function TripScreen() {
     }, 600);
     return () => clearTimeout(t);
   }, [params.runSim, activeVehicle?.id, gpsSimEnabled]);
+
+  const purgeAutoDone = useRef(false);
+  useEffect(() => {
+    if (params.purgeSim !== '1' || purgeAutoDone.current) return;
+    purgeAutoDone.current = true;
+    void (async () => {
+      const n = await purgeSimulatorTrips(activeVehicle?.id);
+      await refresh();
+      await loadLists();
+      notify('Purge test', n > 0 ? `${n} trajet(s) simulateur supprimé(s).` : 'Aucun trajet simulateur.');
+    })();
+  }, [params.purgeSim, activeVehicle?.id]);
 
   const handlePause = async (withFillUp: boolean) => {
     if (!activeTrip) return;
