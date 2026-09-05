@@ -557,6 +557,8 @@ export interface RoutePoint {
   timestamp: number;
   /** Précision GPS en mètres (optionnel) */
   accuracy?: number;
+  /** Vitesse device m/s (optionnel) */
+  speed?: number;
 }
 
 export function parseRoutePoints(routePoints: string): RoutePoint[] {

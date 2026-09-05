@@ -12,6 +12,7 @@ import {
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import Constants from 'expo-constants';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Card, StatCard } from '@/components/Card';
@@ -41,13 +42,21 @@ import {
   openGoogleMapsSearch,
 } from '@/lib/locationService';
 import {
+  appendRoutePoint,
+  calculateRouteDistance,
   calculateTripStats,
+  compactRoutePointsJson,
   estimateCost,
   formatEuro,
   formatDistance,
   getSinceLastFillStats,
   parseRoutePoints,
 } from '@/lib/calculations';
+import {
+  buildDrivingPoints,
+  SIM_HOME,
+  SIM_WORK,
+} from '@/lib/gpsCarSimulator';
 import { applyTripFuelBurn, blendConsumptionLearnFactor } from '@/lib/fuelLevel';
 import { askFuelGaugeApprox } from '@/lib/fuelGaugePrompt';
 import {
@@ -78,6 +87,7 @@ export default function TripScreen() {
     destLat?: string;
     destLon?: string;
     autoStart?: string;
+    runSim?: string;
   }>();
   const { activeVehicle, activeTrip, refresh } = useApp();
   const { colors } = useTheme();
@@ -92,6 +102,15 @@ export default function TripScreen() {
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [tripStartFuelLiters, setTripStartFuelLiters] = useState<number | null>(null);
+  const [simRunning, setSimRunning] = useState(false);
+  const [simProgress, setSimProgress] = useState('');
+  const simAbort = useRef({ aborted: false });
+
+  const gpsSimEnabled =
+    __DEV__ ||
+    Constants.expoConfig?.extra?.enableGpsSimulator === true ||
+    (Constants.easConfig as { enableGpsSimulator?: boolean } | undefined)?.enableGpsSimulator ===
+      true;
   const [history, setHistory] = useState<Trip[]>([]);
   const [pending, setPending] = useState<Trip[]>([]);
   const [sinceFill, setSinceFill] = useState<SinceLastFillStats | null>(null);
@@ -458,6 +477,19 @@ export default function TripScreen() {
     void handleStartTrip();
   }, [params.autoStart, destination, activeVehicle?.id, activeTrip?.id]);
 
+  const simAutoDone = useRef(false);
+  useEffect(() => {
+    if (!gpsSimEnabled) return;
+    if (params.runSim !== '1' || simAutoDone.current) return;
+    if (!activeVehicle || simRunning) return;
+    simAutoDone.current = true;
+    setTab('live');
+    const t = setTimeout(() => {
+      void handleRunCarSimulator();
+    }, 600);
+    return () => clearTimeout(t);
+  }, [params.runSim, activeVehicle?.id, gpsSimEnabled]);
+
   const handlePause = async (withFillUp: boolean) => {
     if (!activeTrip) return;
     await stopBackgroundTracking();
@@ -637,6 +669,138 @@ export default function TripScreen() {
       await Linking.openURL(
         openGoogleMapsNavigation(loc.latitude + 0.01, loc.longitude + 0.01, 'Destination')
       );
+    }
+  };
+
+  /** Simulateur voiture (tests) — injecte un trajet domicile→Inter à ~72 km/h. */
+  const handleRunCarSimulator = async () => {
+    if (!activeVehicle || simRunning) return;
+    simAbort.current.aborted = false;
+    setSimRunning(true);
+    setSimProgress('Démarrage sim…');
+    try {
+      await stopBackgroundTracking();
+      await stopActiveTrips();
+
+      const points = buildDrivingPoints(SIM_HOME, SIM_WORK, {
+        speedKmh: 72,
+        stepMeters: 110,
+      });
+      setDestCoords(SIM_WORK);
+      setDestination('Intermarché La Guerche (sim)');
+      setPlannedRoute(points.map((p) => ({ latitude: p.latitude, longitude: p.longitude })));
+      setUserLocation(SIM_HOME);
+      setCurrentRegion({
+        latitude: SIM_HOME.latitude,
+        longitude: SIM_HOME.longitude,
+        latitudeDelta: 0.35,
+        longitudeDelta: 0.35,
+      });
+
+      const first = points[0];
+      const tripId = await createTrip({
+        vehicleId: activeVehicle.id,
+        startTime: new Date(first.timestamp).toISOString(),
+        endTime: null,
+        distanceKm: 0,
+        estimatedFuelUsed: 0,
+        estimatedCost: 0,
+        routePoints: JSON.stringify([
+          {
+            latitude: first.latitude,
+            longitude: first.longitude,
+            timestamp: first.timestamp,
+          },
+        ]),
+        originName: 'Domicile (sim)',
+        destinationName: 'Intermarché La Guerche (sim)',
+        isActive: true,
+        isPaused: false,
+        status: 'confirmed',
+        source: 'gps',
+        fillUpId: null,
+        note: 'SIMULATEUR — ne pas compter comme trajet réel',
+      });
+      await refresh();
+
+      // Mode rapide : injecte tout le trajet d’un coup (fiable pour tests Samsung)
+      let routeJson = JSON.stringify(
+        points.map((p) => ({
+          latitude: p.latitude,
+          longitude: p.longitude,
+          timestamp: p.timestamp,
+        }))
+      );
+      // Repasse par le filtre GPS point à point pour coller au vrai pipeline
+      routeJson = JSON.stringify([
+        {
+          latitude: first.latitude,
+          longitude: first.longitude,
+          timestamp: first.timestamp,
+        },
+      ]);
+      setSimProgress('Injection GPS…');
+      for (let i = 1; i < points.length; i++) {
+        if (simAbort.current.aborted) break;
+        const point = points[i];
+        routeJson = appendRoutePoint(routeJson, {
+          latitude: point.latitude,
+          longitude: point.longitude,
+          timestamp: point.timestamp,
+          accuracy: point.accuracy ?? 8,
+          speed: point.speed ?? 20,
+        });
+        if (i % 40 === 0) {
+          setSimProgress(`Sim ${i}/${points.length}`);
+          setUserLocation({ latitude: point.latitude, longitude: point.longitude });
+        }
+      }
+
+      if (simAbort.current.aborted) {
+        notify('Sim annulée', 'Trajet sim laissé actif — terminez-le ou supprimez-le.');
+        return;
+      }
+
+      routeJson = compactRoutePointsJson(routeJson);
+      const distanceKm = calculateRouteDistance(routeJson);
+      const fuelUsed = estimateTripFuelLiters(activeVehicle, distanceKm);
+      const cost = estimateCost(fuelUsed, activeVehicle.defaultFuelPrice);
+      const stats = calculateTripStats(
+        activeVehicle,
+        distanceKm,
+        new Date(first.timestamp).toISOString(),
+        new Date().toISOString(),
+        routeJson
+      );
+      await updateTrip(tripId, {
+        routePoints: routeJson,
+        distanceKm,
+        estimatedFuelUsed: fuelUsed,
+        estimatedCost: cost,
+        isActive: false,
+        isPaused: false,
+        endTime: new Date().toISOString(),
+        originName: 'Domicile (sim)',
+        destinationName: 'Intermarché La Guerche (sim)',
+        note: `SIMULATEUR · ${formatDistance(distanceKm)} · ${stats.movingSpeedKmh.toFixed(0)} km/h moy. · ~${fuelUsed.toFixed(1)} L`,
+      });
+      setUserLocation({
+        latitude: points[points.length - 1].latitude,
+        longitude: points[points.length - 1].longitude,
+      });
+      setSimProgress('');
+      await refresh();
+      await loadLists();
+      setTab('history');
+      notify(
+        'Sim OK',
+        `${formatDistance(distanceKm)} · ~${fuelUsed.toFixed(1)} L · ${formatEuro(cost)} · ${stats.movingSpeedKmh.toFixed(0)} km/h — vérifiez l’historique.`
+      );
+    } catch (e) {
+      notify('Sim erreur', e instanceof Error ? e.message : 'Échec simulateur');
+    } finally {
+      setSimRunning(false);
+      setSimProgress('');
     }
   };
 
@@ -983,6 +1147,20 @@ export default function TripScreen() {
                     title="Ouvrir Google Maps seulement"
                     variant="outline"
                     onPress={handleOpenGoogleMaps}
+                  />
+                )}
+                {gpsSimEnabled && (
+                  <Button
+                    title={
+                      simRunning
+                        ? simProgress || 'Simulation en cours…'
+                        : 'Simuler trajet voiture (test)'
+                    }
+                    variant="outline"
+                    onPress={handleRunCarSimulator}
+                    loading={simRunning}
+                    disabled={simRunning || isStarting}
+                    style={{ marginTop: 12 }}
                   />
                 )}
               </>

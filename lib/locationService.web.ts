@@ -53,8 +53,8 @@ async function flushPending() {
           latitude: pos.coords.latitude,
           longitude: pos.coords.longitude,
           timestamp: pos.timestamp || Date.now(),
-          accuracy: pos.coords.accuracy,
-          speed: pos.coords.speed,
+          accuracy: pos.coords.accuracy ?? undefined,
+          speed: pos.coords.speed ?? undefined,
         });
       }
 

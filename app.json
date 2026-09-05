@@ -2,7 +2,7 @@
   "expo": {
     "name": "Gasoil Tracking",
     "slug": "gasoil-tracking",
-    "version": "1.4.24",
+    "version": "1.4.25",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "gasoiltracking",
@@ -51,7 +51,7 @@
           "apiKey": "VOTRE_CLE_GOOGLE_MAPS_ANDROID"
         }
       },
-      "versionCode": 50
+      "versionCode": 51
     },
     "web": {
       "bundler": "metro",
@@ -91,6 +91,8 @@
     "extra": {
       "apiUrl": "https://gasoil-tracking.delhomme.ovh",
       "personalMail": "paveldelhomme@gmail.com",
+      /** false en prod Nothing — true seulement pour builds de test Samsung. */
+      "enableGpsSimulator": false,
       "eas": {
         "projectId": "d85bab84-0971-4266-8f8c-a37113bc7761"
       },
