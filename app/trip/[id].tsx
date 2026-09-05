@@ -93,7 +93,7 @@ export default function TripDetailScreen() {
 
   const stats =
     trip && activeVehicle
-      ? calculateTripStats(activeVehicle, trip.distanceKm, trip.startTime, trip.endTime)
+      ? calculateTripStats(activeVehicle, trip.distanceKm, trip.startTime, trip.endTime, trip.routePoints)
       : trip
         ? {
             fuelUsed: trip.estimatedFuelUsed,
@@ -101,6 +101,7 @@ export default function TripDetailScreen() {
             durationMinutes: trip.endTime
               ? (new Date(trip.endTime).getTime() - new Date(trip.startTime).getTime()) / 60000
               : 0,
+            movingSpeedKmh: 0,
           }
         : null;
 

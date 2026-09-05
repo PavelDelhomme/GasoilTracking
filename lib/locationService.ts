@@ -12,8 +12,9 @@ import {
   calculateRouteDistance,
   compactRoutePointsJson,
   estimateCost,
-  estimateFuelUsed,
+  parseRoutePoints,
 } from '@/lib/calculations';
+import { estimateTripFuelLiters } from '@/lib/consumptionModel';
 
 interface LocationTaskData {
   locations: Location.LocationObject[];
@@ -68,7 +69,9 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
 
       routePoints = compactRoutePointsJson(routePoints);
       const distanceKm = calculateRouteDistance(routePoints);
-      const fuelUsed = estimateFuelUsed(distanceKm, vehicle.consumptionPer100);
+      const fuelUsed = estimateTripFuelLiters(vehicle, distanceKm, {
+        learnedFactor: vehicle.consumptionLearnFactor,
+      });
       const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
 
       await updateTrip(trip.id, {

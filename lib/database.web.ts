@@ -68,6 +68,8 @@ async function load(): Promise<Store> {
         notifyMaintenance: v.notifyMaintenance !== false,
         notifyLowFuel: !!v.notifyLowFuel,
         lowFuelThresholdLiters: v.lowFuelThresholdLiters ?? null,
+        consumptionLearnFactor: v.consumptionLearnFactor ?? 1,
+        transmissionGears: v.transmissionGears ?? null,
       }));
       cache = parsed;
       return cache;
@@ -145,6 +147,8 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
     notifyMaintenance: vehicle.notifyMaintenance !== false,
     notifyLowFuel: !!vehicle.notifyLowFuel,
     lowFuelThresholdLiters: vehicle.lowFuelThresholdLiters ?? null,
+    consumptionLearnFactor: vehicle.consumptionLearnFactor ?? 1,
+    transmissionGears: vehicle.transmissionGears ?? null,
     createdAt: nowIso(),
   });
   await save(s);

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Gasoil Tracking",
     "slug": "gasoil-tracking",
-    "version": "1.4.23",
+    "version": "1.4.24",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "gasoiltracking",
@@ -19,6 +19,7 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Gasoil Tracking utilise votre position pour suivre vos trajets et calculer la consommation en temps réel.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Gasoil Tracking suit vos trajets en arrière-plan pendant la navigation pour estimer la consommation de carburant.",
+        "NSContactsUsageDescription": "Gasoil Tracking propose les adresses de vos contacts comme destinations de trajet.",
         "UIBackgroundModes": [
           "location"
         ]
@@ -42,14 +43,15 @@
         "REQUEST_INSTALL_PACKAGES",
         "POST_NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED",
-        "VIBRATE"
+        "VIBRATE",
+        "READ_CONTACTS"
       ],
       "config": {
         "googleMaps": {
           "apiKey": "VOTRE_CLE_GOOGLE_MAPS_ANDROID"
         }
       },
-      "versionCode": 49
+      "versionCode": 50
     },
     "web": {
       "bundler": "metro",
@@ -72,6 +74,12 @@
           "icon": "./assets/icon.png",
           "color": "#e94560",
           "sounds": []
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Gasoil Tracking propose les adresses de vos contacts comme destinations."
         }
       ],
       "expo-asset",

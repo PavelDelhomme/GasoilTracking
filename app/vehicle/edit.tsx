@@ -48,6 +48,7 @@ export default function EditVehicleScreen() {
   const [notifyMaint, setNotifyMaint] = useState(true);
   const [notifyFuel, setNotifyFuel] = useState(false);
   const [fuelThreshold, setFuelThreshold] = useState('');
+  const [gears, setGears] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
@@ -83,6 +84,7 @@ export default function EditVehicleScreen() {
       setFuelThreshold(
         v.lowFuelThresholdLiters != null ? String(v.lowFuelThresholdLiters) : ''
       );
+      setGears(v.transmissionGears != null ? String(v.transmissionGears) : '');
       setVehicle(v);
       setReady(true);
       void getConsumptionStats(v.id).then((s) => {
@@ -133,6 +135,9 @@ export default function EditVehicleScreen() {
         notifyLowFuel: notifyFuel,
         lowFuelThresholdLiters: fuelThreshold.trim()
           ? parseFloat(fuelThreshold.replace(',', '.')) || null
+          : null,
+        transmissionGears: gears.trim()
+          ? parseInt(gears.replace(',', '.'), 10) || null
           : null,
       });
       await refresh();
@@ -238,6 +243,13 @@ export default function EditVehicleScreen() {
         value={consumption}
         onChangeText={setConsumption}
         keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
+      />
+      <Input
+        label="Boîte (nb de rapports)"
+        value={gears}
+        onChangeText={setGears}
+        placeholder="4, 5, 6…"
+        keyboardType="numeric"
       />
       {measuredConso != null && (
         <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 10, marginTop: -4 }}>

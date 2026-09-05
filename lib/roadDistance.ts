@@ -16,40 +16,70 @@ export async function fetchDrivingDistanceKm(
   from: { latitude: number; longitude: number },
   to: { latitude: number; longitude: number }
 ): Promise<RoadDistanceResult> {
+  const r = await fetchDrivingRoute(from, to);
+  return {
+    distanceKm: r.distanceKm,
+    durationMinutes: r.durationMinutes,
+    source: r.source,
+  };
+}
+
+/** Itinéraire complet (géométrie) pour affichage carte. */
+export async function fetchDrivingRoute(
+  from: { latitude: number; longitude: number },
+  to: { latitude: number; longitude: number }
+): Promise<{
+  distanceKm: number;
+  durationMinutes: number | null;
+  coordinates: { latitude: number; longitude: number }[];
+  source: 'osrm' | 'estimate';
+}> {
   const bird = haversineDistance(from.latitude, from.longitude, to.latitude, to.longitude);
   try {
     const url =
       `https://router.project-osrm.org/route/v1/driving/` +
       `${from.longitude},${from.latitude};${to.longitude},${to.latitude}` +
-      `?overview=false&alternatives=false`;
+      `?overview=full&geometries=geojson&alternatives=false`;
     const res = await fetch(url, {
-      headers: { Accept: 'application/json', 'User-Agent': 'GasoilTracking/1.3' },
+      headers: { Accept: 'application/json', 'User-Agent': 'GasoilTracking/1.4' },
     });
     if (res.ok) {
       const data = (await res.json()) as {
         code?: string;
-        routes?: Array<{ distance?: number; duration?: number }>;
+        routes?: Array<{
+          distance?: number;
+          duration?: number;
+          geometry?: { coordinates?: [number, number][] };
+        }>;
       };
       const route = data.routes?.[0];
+      const coords = (route?.geometry?.coordinates || []).map(([lon, lat]) => ({
+        latitude: lat,
+        longitude: lon,
+      }));
       if (data.code === 'Ok' && route?.distance != null && route.distance > 0) {
         return {
           distanceKm: Math.round((route.distance / 1000) * 10) / 10,
-          durationMinutes:
-            route.duration != null ? Math.round(route.duration / 60) : null,
+          durationMinutes: route.duration != null ? Math.round(route.duration / 60) : null,
+          coordinates: coords,
           source: 'osrm',
         };
       }
     }
   } catch {
-    /* fallback below */
+    /* fallback */
   }
-  // Facteur route ~+30 % vs vol d’oiseau
   return {
     distanceKm: Math.round(bird * 1.3 * 10) / 10,
     durationMinutes: null,
+    coordinates: [
+      { latitude: from.latitude, longitude: from.longitude },
+      { latitude: to.latitude, longitude: to.longitude },
+    ],
     source: 'estimate',
   };
 }
+
 
 /** Coords d’un lieu : GPS stocké, sinon géocodage de l’adresse / nom. */
 export async function resolvePlaceCoords(

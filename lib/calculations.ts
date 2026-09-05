@@ -22,6 +22,11 @@ import {
   calculateFilteredRouteDistance,
   evaluateGpsSample,
 } from '@/lib/gpsTracking';
+import {
+  averageMovingSpeedKmh,
+  estimateTripFuelLiters,
+  movingDurationMinutes,
+} from '@/lib/consumptionModel';
 
 /** Calcule la distance entre deux points GPS (formule Haversine) en km */
 export function haversineDistance(
@@ -202,9 +207,7 @@ export async function getSinceLastFillStats(vehicleId: number): Promise<SinceLas
       t.startTime >= lastFill.date
   );
   const tripKm = Math.round(since.reduce((s, t) => s + t.distanceKm, 0) * 10) / 10;
-  const conso =
-    vehicle.consumptionPer100 > 0 ? vehicle.consumptionPer100 : 7;
-  const fuelUsedEst = Math.round(estimateFuelUsed(tripKm, conso) * 100) / 100;
+  const fuelUsedEst = Math.round(estimateTripFuelLiters(vehicle, tripKm) * 100) / 100;
   const price =
     lastFill.pricePerLiter > 0
       ? lastFill.pricePerLiter
@@ -223,8 +226,10 @@ export async function getSinceLastFillStats(vehicleId: number): Promise<SinceLas
     vehicle.estimatedFuelLiters != null
       ? Math.max(0, Math.round(vehicle.estimatedFuelLiters * 100) / 100)
       : Math.max(0, Math.round((startFuel - fuelUsedEst) * 100) / 100);
+  const effectiveL100 =
+    tripKm > 0 ? (fuelUsedEst / tripKm) * 100 : estimateTripFuelLiters(vehicle, 100);
   const rangeKm =
-    conso > 0 ? Math.round((fuelRemainingEst / conso) * 1000) / 10 : 0;
+    effectiveL100 > 0 ? Math.round((fuelRemainingEst / effectiveL100) * 1000) / 10 : 0;
 
   return {
     lastFill,
@@ -449,13 +454,23 @@ export function calculateTripStats(
   vehicle: Vehicle,
   distanceKm: number,
   startTime: string,
-  endTime?: string | null
-): { fuelUsed: number; cost: number; durationMinutes: number } {
-  const fuelUsed = estimateFuelUsed(distanceKm, vehicle.consumptionPer100);
+  endTime?: string | null,
+  routePointsJson?: string
+): { fuelUsed: number; cost: number; durationMinutes: number; movingSpeedKmh: number } {
+  const fuelUsed = estimateTripFuelLiters(vehicle, distanceKm, {
+    learnedFactor: vehicle.consumptionLearnFactor,
+  });
   const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
   const endMs = endTime ? new Date(endTime).getTime() : Date.now();
-  const durationMinutes = Math.max(0, (endMs - new Date(startTime).getTime()) / (1000 * 60));
-  return { fuelUsed, cost, durationMinutes };
+  const wallMinutes = Math.max(0, (endMs - new Date(startTime).getTime()) / (1000 * 60));
+  const points = routePointsJson ? parseRoutePoints(routePointsJson) : [];
+  const movingMins = movingDurationMinutes(points);
+  const durationMinutes = movingMins > 0.5 ? movingMins : wallMinutes;
+  const movingSpeedKmh =
+    points.length >= 2
+      ? averageMovingSpeedKmh(distanceKm, points)
+      : averageSpeedKmh(distanceKm, durationMinutes);
+  return { fuelUsed, cost, durationMinutes, movingSpeedKmh };
 }
 
 /** Autonomie restante estimée en km (conso adaptée si fournie) */
@@ -472,7 +487,7 @@ export function estimateRange(
   return (fuelInTank / conso) * 100;
 }
 
-/** Vitesse moyenne km/h depuis distance et durée */
+/** Vitesse moyenne km/h depuis distance et durée (durée = en mouvement de préférence) */
 export function averageSpeedKmh(distanceKm: number, durationMinutes: number): number {
   if (durationMinutes <= 0 || distanceKm <= 0) return 0;
   return (distanceKm / durationMinutes) * 60;

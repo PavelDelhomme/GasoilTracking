@@ -160,6 +160,8 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
   await alterSafe('ALTER TABLE vehicles ADD COLUMN notify_maintenance INTEGER NOT NULL DEFAULT 1');
   await alterSafe('ALTER TABLE vehicles ADD COLUMN notify_low_fuel INTEGER NOT NULL DEFAULT 0');
   await alterSafe('ALTER TABLE vehicles ADD COLUMN low_fuel_threshold_liters REAL');
+  await alterSafe('ALTER TABLE vehicles ADD COLUMN consumption_learn_factor REAL NOT NULL DEFAULT 1');
+  await alterSafe('ALTER TABLE vehicles ADD COLUMN transmission_gears INTEGER');
 }
 
 function mapVehicle(row: unknown): Vehicle {
@@ -194,6 +196,14 @@ function mapVehicle(row: unknown): Vehicle {
       r.low_fuel_threshold_liters === null || r.low_fuel_threshold_liters === undefined
         ? null
         : (r.low_fuel_threshold_liters as number),
+    consumptionLearnFactor:
+      r.consumption_learn_factor === null || r.consumption_learn_factor === undefined
+        ? 1
+        : (r.consumption_learn_factor as number),
+    transmissionGears:
+      r.transmission_gears === null || r.transmission_gears === undefined
+        ? null
+        : (r.transmission_gears as number),
     isActive: Boolean(r.is_active),
     createdAt: r.created_at as string,
   };
@@ -407,8 +417,8 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
       await database.runAsync('UPDATE vehicles SET is_active = 0');
     }
     const result = await database.runAsync(
-      `INSERT INTO vehicles (name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO vehicles (name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, consumption_learn_factor, transmission_gears, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         vehicle.name,
         vehicle.brand,
@@ -426,6 +436,8 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
         vehicle.notifyMaintenance === false ? 0 : 1,
         vehicle.notifyLowFuel ? 1 : 0,
         vehicle.lowFuelThresholdLiters ?? null,
+        vehicle.consumptionLearnFactor ?? 1,
+        vehicle.transmissionGears ?? null,
         vehicle.isActive ? 1 : 0,
       ]
     );
@@ -483,6 +495,14 @@ export async function updateVehicle(id: number, vehicle: Partial<Vehicle>): Prom
   if (vehicle.lowFuelThresholdLiters !== undefined) {
     fields.push('low_fuel_threshold_liters = ?');
     values.push(vehicle.lowFuelThresholdLiters);
+  }
+  if (vehicle.consumptionLearnFactor !== undefined) {
+    fields.push('consumption_learn_factor = ?');
+    values.push(vehicle.consumptionLearnFactor);
+  }
+  if (vehicle.transmissionGears !== undefined) {
+    fields.push('transmission_gears = ?');
+    values.push(vehicle.transmissionGears);
   }
   if (vehicle.isActive !== undefined) { fields.push('is_active = ?'); values.push(vehicle.isActive ? 1 : 0); }
 
@@ -1087,8 +1107,8 @@ export async function replaceAllData(data: {
 
       for (const v of data.vehicles || []) {
         await database.runAsync(
-          `INSERT INTO vehicles (id, name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, is_active, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO vehicles (id, name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, consumption_learn_factor, transmission_gears, is_active, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             v.id,
             v.name,
@@ -1107,6 +1127,8 @@ export async function replaceAllData(data: {
             v.notifyMaintenance === false ? 0 : 1,
             v.notifyLowFuel ? 1 : 0,
             v.lowFuelThresholdLiters ?? null,
+            v.consumptionLearnFactor ?? 1,
+            v.transmissionGears ?? null,
             v.isActive ? 1 : 0,
             v.createdAt || new Date().toISOString(),
           ]

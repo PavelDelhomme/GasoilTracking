@@ -32,6 +32,13 @@ export interface Vehicle {
   notifyLowFuel?: boolean;
   /** Seuil litres restants pour l’alerte plein (défaut ~20 % du réservoir). */
   lowFuelThresholdLiters?: number | null;
+  /**
+   * Facteur appris (jauges début/fin trajet) — multiplie la conso estimée.
+   * 1 = neutre ; >1 = vous consommez plus que le catalogue.
+   */
+  consumptionLearnFactor?: number;
+  /** Nombre de rapports (4 / 5 / 6…) pour affiner la conso. */
+  transmissionGears?: number | null;
   isActive: boolean;
   createdAt: string;
 }

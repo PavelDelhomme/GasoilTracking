@@ -10,6 +10,7 @@ import {
   getVehicles,
 } from '@/lib/database';
 import { refreshBudgets } from '@/lib/calculations';
+import { estimateTripFuelLiters } from '@/lib/consumptionModel';
 import { toLocalYmd } from '@/lib/dates';
 
 function todayAt(hour: number, minute = 0): string {
@@ -75,8 +76,7 @@ export async function seedTodayCommuteAndFillUp(vehicleId?: number): Promise<{
   );
 
   const price = vehicle.defaultFuelPrice;
-  const conso = vehicle.consumptionPer100 || 7.5;
-  const oneWayKm = 22;
+  const oneWayKm = 44;
   let tripsAdded = 0;
   let tracked = 0;
 
@@ -87,7 +87,7 @@ export async function seedTodayCommuteAndFillUp(vehicleId?: number): Promise<{
     dest: string,
     km: number
   ) => {
-    const fuel = (km * conso) / 100;
+    const fuel = estimateTripFuelLiters(vehicle, km);
     await createTrip({
       vehicleId: vId,
       startTime: todayAt(startH, 15),
@@ -102,17 +102,29 @@ export async function seedTodayCommuteAndFillUp(vehicleId?: number): Promise<{
       status: 'confirmed',
       source: 'manual',
       fillUpId: null,
-      note: 'Saisie manuelle — journée type',
+      note: 'Saisie manuelle — A/R travail (Intermarché)',
     });
     tripsAdded += 1;
     tracked += km;
   };
 
   if (!hasHomeWork) {
-    await addTrip(7, 8, home?.name || 'Domicile', work?.name || 'Travail', oneWayKm);
+    await addTrip(
+      7,
+      8,
+      home?.name || 'Domicile',
+      work?.name || 'Travail (Intermarché)',
+      oneWayKm
+    );
   }
   if (!hasWorkHome) {
-    await addTrip(17, 18, work?.name || 'Travail', home?.name || 'Domicile', oneWayKm);
+    await addTrip(
+      17,
+      18,
+      work?.name || 'Travail (Intermarché)',
+      home?.name || 'Domicile',
+      oneWayKm
+    );
   }
   if (tracked > 0) await addTrackedKm(vId, tracked);
 

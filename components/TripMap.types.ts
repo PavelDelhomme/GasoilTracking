@@ -24,4 +24,8 @@ export type TripMapProps = {
   userLocation?: RouteCoord | null;
   /** Trajet en pause */
   paused?: boolean;
+  /** Itinéraire prévu (OSRM) vers la destination */
+  plannedRoute?: RouteCoord[];
+  /** Marqueur destination */
+  destination?: RouteCoord | null;
 };

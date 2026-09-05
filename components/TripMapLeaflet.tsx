@@ -10,10 +10,14 @@ function buildHtml(
   route: RouteCoord[],
   user: RouteCoord | null | undefined,
   accent: string,
-  paused: boolean
+  paused: boolean,
+  planned: RouteCoord[],
+  dest: RouteCoord | null | undefined
 ): string {
   const routeJson = JSON.stringify(route.map((p) => [p.latitude, p.longitude]));
+  const plannedJson = JSON.stringify(planned.map((p) => [p.latitude, p.longitude]));
   const userJson = user ? JSON.stringify([user.latitude, user.longitude]) : 'null';
+  const destJson = dest ? JSON.stringify([dest.latitude, dest.longitude]) : 'null';
   const accentSafe = String(accent || '#e94560').replace(/[^#a-fA-F0-9]/g, '');
 
   return `<!DOCTYPE html>
@@ -39,8 +43,10 @@ function buildHtml(
 
     var accent = '${accentSafe}';
     var routeLayer = null;
+    var plannedLayer = null;
     var startMarker = null;
     var userMarker = null;
+    var destMarker = null;
 
     function setRoute(pts) {
       if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
@@ -50,6 +56,14 @@ function buildHtml(
       startMarker = L.circleMarker(pts[0], {
         radius: 7, color: '#fff', weight: 2, fillColor: '#22c55e', fillOpacity: 1
       }).addTo(map).bindPopup('Départ');
+    }
+
+    function setPlanned(pts) {
+      if (plannedLayer) { map.removeLayer(plannedLayer); plannedLayer = null; }
+      if (!pts || pts.length < 2) return;
+      plannedLayer = L.polyline(pts, {
+        color: '#94a3b8', weight: 4, opacity: 0.75, dashArray: '8 10'
+      }).addTo(map);
     }
 
     function setUser(pt, paused) {
@@ -64,6 +78,18 @@ function buildHtml(
       }).addTo(map).bindPopup(paused ? 'Pause' : 'Vous');
     }
 
+    function setDest(pt) {
+      if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+      if (!pt) return;
+      destMarker = L.circleMarker(pt, {
+        radius: 10,
+        color: '#fff',
+        weight: 2,
+        fillColor: '#ef4444',
+        fillOpacity: 1
+      }).addTo(map).bindPopup('Destination');
+    }
+
     function fit(pts) {
       if (!pts || pts.length === 0) return;
       if (pts.length === 1) { map.setView(pts[0], 15); return; }
@@ -71,9 +97,12 @@ function buildHtml(
     }
 
     setRoute(${routeJson});
+    setPlanned(${plannedJson});
     setUser(${userJson}, ${paused ? 'true' : 'false'});
-    var all = ${routeJson}.slice();
+    setDest(${destJson});
+    var all = ${routeJson}.slice().concat(${plannedJson});
     if (${userJson}) all.push(${userJson});
+    if (${destJson}) all.push(${destJson});
     if (all.length) fit(all);
     else map.setView([${lat}, ${lon}], ${zoom});
 
@@ -83,7 +112,9 @@ function buildHtml(
         if (!msg || !msg.type) return;
         if (msg.type === 'update') {
           setRoute(msg.route || []);
+          setPlanned(msg.planned || []);
           setUser(msg.user || null, !!msg.paused);
+          setDest(msg.dest || null);
           if (msg.follow && msg.user) map.panTo(msg.user);
         }
         if (msg.type === 'fit' && msg.route && msg.route.length) fit(msg.route);
@@ -98,12 +129,8 @@ function buildHtml(
 </html>`;
 }
 
-/**
- * Carte OpenStreetMap (Leaflet) — pas de clé Google Maps requise.
- * Affiche tracé + position actuelle.
- */
 const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
-  { region, routePoints, accentColor, userLocation, paused },
+  { region, routePoints, accentColor, userLocation, paused, plannedRoute = [], destination },
   ref
 ) {
   const webRef = useRef<WebView>(null);
@@ -121,9 +148,10 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
         routePoints,
         userLocation,
         accentColor,
-        !!paused
+        !!paused,
+        plannedRoute,
+        destination
       ),
-    // HTML initial seulement ; les updates passent par postMessage
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
@@ -144,13 +172,14 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
     inject(webRef, {
       type: 'update',
       route: routePoints.map((p) => [p.latitude, p.longitude]),
+      planned: (plannedRoute || []).map((p) => [p.latitude, p.longitude]),
       user: userLocation ? [userLocation.latitude, userLocation.longitude] : null,
+      dest: destination ? [destination.latitude, destination.longitude] : null,
       paused: !!paused,
       follow: true,
     });
-  }, [routePoints, userLocation, paused]);
+  }, [routePoints, userLocation, paused, plannedRoute, destination]);
 
-  // Remount HTML when first GPS fix arrives far from default Paris
   const [bootKey, setBootKey] = useState(0);
   useEffect(() => {
     if (Math.abs(region.latitude - 48.8566) > 0.2 || Math.abs(region.longitude - 2.3522) > 0.2) {
@@ -167,7 +196,9 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
         routePoints,
         userLocation,
         accentColor,
-        !!paused
+        !!paused,
+        plannedRoute,
+        destination
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [bootKey]
@@ -200,7 +231,7 @@ function inject(webRef: React.RefObject<WebView | null>, payload: object) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, height: '100%', width: '100%', overflow: 'hidden' },
+  wrap: { flex: 1 },
   web: { flex: 1, backgroundColor: '#0f172a' },
 });
 

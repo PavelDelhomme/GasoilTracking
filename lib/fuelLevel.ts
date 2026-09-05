@@ -2,7 +2,7 @@
 
 import type { FillUp, Vehicle } from '@/types';
 import { updateVehicle } from '@/lib/database';
-import { estimateFuelUsed } from '@/lib/calculations';
+import { estimateTripFuelLiters } from '@/lib/consumptionModel';
 
 /** Applique un plein au niveau estimé du véhicule. */
 export async function applyFillUpToFuelEstimate(
@@ -15,8 +15,6 @@ export async function applyFillUpToFuelEstimate(
   } else if (vehicle.estimatedFuelLiters != null) {
     next = Math.min(vehicle.tankCapacity, vehicle.estimatedFuelLiters + fill.liters);
   } else {
-    // Inconnu avant : on considère que le plein remplit « presque » jusqu’à liters ajoutés
-    // (hypothèse prudente : réservoir était bas)
     next = Math.min(vehicle.tankCapacity, fill.liters);
   }
   next = Math.round(next * 10) / 10;
@@ -24,10 +22,17 @@ export async function applyFillUpToFuelEstimate(
   return next;
 }
 
-/** Décrémente le niveau après un trajet. */
-export async function applyTripFuelBurn(vehicle: Vehicle, distanceKm: number): Promise<number | null> {
+/** Décrémente le niveau après un trajet (modèle conso réaliste). */
+export async function applyTripFuelBurn(
+  vehicle: Vehicle,
+  distanceKm: number,
+  ascentM = 0
+): Promise<number | null> {
   if (vehicle.estimatedFuelLiters == null || distanceKm <= 0) return vehicle.estimatedFuelLiters;
-  const burned = estimateFuelUsed(distanceKm, vehicle.consumptionPer100);
+  const burned = estimateTripFuelLiters(vehicle, distanceKm, {
+    ascentM,
+    learnedFactor: vehicle.consumptionLearnFactor,
+  });
   const next = Math.max(0, Math.round((vehicle.estimatedFuelLiters - burned) * 10) / 10);
   await updateVehicle(vehicle.id, { estimatedFuelLiters: next });
   return next;
@@ -38,6 +43,21 @@ export async function setFuelFraction(vehicle: Vehicle, fraction: number): Promi
   const f = Math.max(0, Math.min(1, fraction));
   const next = Math.round(vehicle.tankCapacity * f * 10) / 10;
   await updateVehicle(vehicle.id, { estimatedFuelLiters: next });
+  return next;
+}
+
+/**
+ * Met à jour le facteur d’apprentissage (EMA) après saisie jauge début/fin.
+ */
+export async function blendConsumptionLearnFactor(
+  vehicle: Vehicle,
+  sampleFactor: number
+): Promise<number> {
+  const prev = vehicle.consumptionLearnFactor && vehicle.consumptionLearnFactor > 0.5
+    ? vehicle.consumptionLearnFactor
+    : 1;
+  const next = Math.round((prev * 0.72 + sampleFactor * 0.28) * 1000) / 1000;
+  await updateVehicle(vehicle.id, { consumptionLearnFactor: next });
   return next;
 }
 
@@ -53,19 +73,12 @@ export function fuelLevelPercent(vehicle: Vehicle): number {
   return Math.min(100, Math.max(0, (vehicle.estimatedFuelLiters / vehicle.tankCapacity) * 100));
 }
 
-/** Niveau d’alerte carburant / autonomie (pas décoratif). */
 export type FuelTone = 'ok' | 'warn' | 'critical' | 'unknown';
 
-/**
- * Rouge/orange seulement si on approche de la panne.
- * Vert sinon. Inconnu → neutre (unknown).
- */
 export function fuelRemainingTone(opts: {
   litersRemaining: number | null | undefined;
   tankCapacity: number;
-  /** Seuil perso (ex. notif low fuel), sinon ~12 % du réservoir (min 8 L). */
   lowLitersThreshold?: number | null;
-  /** Autonomie estimée en km (optionnel, renforce l’alerte). */
   rangeKm?: number | null;
 }): FuelTone {
   const { litersRemaining, tankCapacity, lowLitersThreshold, rangeKm } = opts;
@@ -87,7 +100,6 @@ export function fuelRemainingTone(opts: {
   return 'ok';
 }
 
-/** Mappe le ton vers les couleurs du thème. */
 export function fuelToneColor(
   tone: FuelTone,
   colors: { success: string; warning: string; danger: string; text: string }

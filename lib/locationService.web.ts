@@ -13,8 +13,8 @@ import {
   calculateRouteDistance,
   compactRoutePointsJson,
   estimateCost,
-  estimateFuelUsed,
 } from '@/lib/calculations';
+import { estimateTripFuelLiters } from '@/lib/consumptionModel';
 
 let watchId: number | null = null;
 let applying = false;
@@ -60,7 +60,9 @@ async function flushPending() {
 
       routePoints = compactRoutePointsJson(routePoints);
       const distanceKm = calculateRouteDistance(routePoints);
-      const fuelUsed = estimateFuelUsed(distanceKm, vehicle.consumptionPer100);
+      const fuelUsed = estimateTripFuelLiters(vehicle, distanceKm, {
+        learnedFactor: vehicle.consumptionLearnFactor,
+      });
       const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
 
       await updateTrip(trip.id, {

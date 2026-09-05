@@ -8,7 +8,7 @@ import {
   updateTrip,
   addTrackedKm,
 } from '@/lib/database';
-import { averageSpeedKmh, parseRoutePoints, ensureDefaultBudgets, refreshAllBudgets } from '@/lib/calculations';
+import { parseRoutePoints, ensureDefaultBudgets, refreshAllBudgets, calculateTripStats } from '@/lib/calculations';
 import { recoverDataAfterUpdateIfNeeded, getUpdatePending } from '@/lib/backup';
 import { confirm, notify } from '@/lib/notify';
 import { stopBackgroundTracking } from '@/lib/locationService';
@@ -88,9 +88,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   }
                   if (!originName) originName = activeTrip.originName;
 
-                  const durationMin =
-                    (Date.now() - new Date(activeTrip.startTime).getTime()) / 60000;
-                  const speed = averageSpeedKmh(activeTrip.distanceKm, durationMin);
+                  if (!activeVehicle) {
+                    await dbSetActiveVehicle(id);
+                    await refresh();
+                    resolve();
+                    return;
+                  }
+
+                  const live = calculateTripStats(
+                    activeVehicle,
+                    activeTrip.distanceKm,
+                    activeTrip.startTime,
+                    new Date().toISOString(),
+                    activeTrip.routePoints
+                  );
+                  const speed =
+                    live.movingSpeedKmh > 0
+                      ? live.movingSpeedKmh
+                      : (activeTrip.distanceKm / Math.max(live.durationMinutes, 0.01)) * 60;
                   const noteParts = [
                     activeTrip.note,
                     speed > 0 ? `Vitesse moy. ${speed.toFixed(0)} km/h` : null,

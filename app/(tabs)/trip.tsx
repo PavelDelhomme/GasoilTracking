@@ -16,10 +16,10 @@ import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Card, StatCard } from '@/components/Card';
 import { Button } from '@/components/Button';
-import { Input } from '@/components/Input';
 import TripMap from '@/components/TripMap';
 import type { TripMapRef } from '@/components/TripMap.types';
-import type { Trip } from '@/types';
+import { PlaceSuggestField } from '@/components/PlaceSuggestField';
+import type { Place, Trip } from '@/types';
 import {
   createTrip,
   stopActiveTrips,
@@ -28,6 +28,10 @@ import {
   getTrips,
   getPendingTrips,
   deleteTrip,
+  getPlaces,
+  getFillUps,
+  updateVehicle,
+  getVehicleById,
 } from '@/lib/database';
 import {
   startBackgroundTracking,
@@ -37,14 +41,22 @@ import {
   openGoogleMapsSearch,
 } from '@/lib/locationService';
 import {
-  averageSpeedKmh,
   calculateTripStats,
+  estimateCost,
   formatEuro,
   formatDistance,
   getSinceLastFillStats,
   parseRoutePoints,
 } from '@/lib/calculations';
-import { applyTripFuelBurn } from '@/lib/fuelLevel';
+import { applyTripFuelBurn, blendConsumptionLearnFactor } from '@/lib/fuelLevel';
+import { askFuelGaugeApprox } from '@/lib/fuelGaugePrompt';
+import {
+  estimateTripFuelLiters,
+  fetchElevationAscentM,
+  learnedFactorFromGauge,
+} from '@/lib/consumptionModel';
+import { fetchDrivingRoute } from '@/lib/roadDistance';
+import { forwardGeocode } from '@/lib/geocode';
 import { notify, confirm } from '@/lib/notify';
 import { TripHistoryCard } from '@/components/TripHistoryCard';
 import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
@@ -75,8 +87,11 @@ export default function TripScreen() {
   const [startMode, setStartMode] = useState<StartMode>('free');
   const [destination, setDestination] = useState('');
   const [destCoords, setDestCoords] = useState<GeoCoords | null>(null);
+  const [places, setPlaces] = useState<Place[]>([]);
+  const [plannedRoute, setPlannedRoute] = useState<GeoCoords[]>([]);
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [tripStartFuelLiters, setTripStartFuelLiters] = useState<number | null>(null);
   const [history, setHistory] = useState<Trip[]>([]);
   const [pending, setPending] = useState<Trip[]>([]);
   const [sinceFill, setSinceFill] = useState<SinceLastFillStats | null>(null);
@@ -100,14 +115,16 @@ export default function TripScreen() {
       setSinceFill(null);
       return;
     }
-    const [trips, pend, since] = await Promise.all([
+    const [trips, pend, since, pl] = await Promise.all([
       getTrips(activeVehicle.id),
       getPendingTrips(activeVehicle.id),
       getSinceLastFillStats(activeVehicle.id),
+      getPlaces(),
     ]);
     setHistory(trips.filter((t) => !t.isActive).slice(0, 50));
     setPending(pend);
     setSinceFill(since);
+    setPlaces(pl);
   }, [activeVehicle]);
 
   useFocusEffect(
@@ -300,6 +317,16 @@ export default function TripScreen() {
 
     setIsStarting(true);
     try {
+      const gauge = await askFuelGaugeApprox(
+        activeVehicle,
+        'Niveau d’essence au départ',
+        'Indiquez approximativement la jauge pour affiner la conso (passable).'
+      );
+      const startFuel = gauge.skipped
+        ? activeVehicle.estimatedFuelLiters
+        : gauge.liters;
+      setTripStartFuelLiters(startFuel);
+
       await stopActiveTrips();
       const loc = await getCurrentLocation({ fresh: true });
       const startPoint = loc
@@ -318,6 +345,30 @@ export default function TripScreen() {
           latitude: loc.coords.latitude,
           longitude: loc.coords.longitude,
         });
+      }
+
+      let resolvedDest = destCoords;
+      if (startMode === 'nav' && !resolvedDest && destination.trim()) {
+        const geo = await forwardGeocode(destination.trim()).catch(() => null);
+        if (geo) {
+          resolvedDest = { latitude: geo.latitude, longitude: geo.longitude };
+          setDestCoords(resolvedDest);
+        }
+      }
+
+      if (loc && resolvedDest) {
+        try {
+          const route = await fetchDrivingRoute(
+            { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
+            resolvedDest
+          );
+          setPlannedRoute(route.coordinates);
+        } catch {
+          setPlannedRoute([
+            { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
+            resolvedDest,
+          ]);
+        }
       }
 
       const originName = loc
@@ -347,7 +398,9 @@ export default function TripScreen() {
           ? isWeb
             ? 'Suivi GPS web (onglet ouvert)'
             : 'Suivi GPS libre (arrière-plan)'
-          : undefined,
+          : startFuel != null
+            ? `Jauge départ ~${startFuel.toFixed(1)} L`
+            : undefined,
       });
 
       if (originName) setLiveOriginLabel(originName);
@@ -376,9 +429,9 @@ export default function TripScreen() {
 
       if (startMode === 'nav' && destName) {
         try {
-          if (destCoords) {
+          if (resolvedDest) {
             await Linking.openURL(
-              openGoogleMapsNavigation(destCoords.latitude, destCoords.longitude, destName)
+              openGoogleMapsNavigation(resolvedDest.latitude, resolvedDest.longitude, destName)
             );
           } else {
             await Linking.openURL(openGoogleMapsSearch(destName));
@@ -447,7 +500,6 @@ export default function TripScreen() {
         void (async () => {
           try {
             await stopBackgroundTracking();
-            // Sécurité : coupe aussi côté DB (évite qu’un task bg continue à écrire).
             await stopActiveTrips();
 
             const pts = parseRoutePoints(activeTrip.routePoints);
@@ -468,12 +520,72 @@ export default function TripScreen() {
                 'Lieu de départ';
             }
 
-            const durationMin =
-              (Date.now() - new Date(activeTrip.startTime).getTime()) / 60000;
-            const speed = averageSpeedKmh(activeTrip.distanceKm, durationMin);
+            const vehicle =
+              (activeVehicle && (await getVehicleById(activeVehicle.id))) || activeVehicle;
+            const ascentM = await fetchElevationAscentM(pts);
+            const fuelUsed = vehicle
+              ? estimateTripFuelLiters(vehicle, activeTrip.distanceKm, {
+                  ascentM,
+                  learnedFactor: vehicle.consumptionLearnFactor,
+                })
+              : activeTrip.estimatedFuelUsed;
+            const fills = vehicle ? await getFillUps(vehicle.id) : [];
+            const lastFill = [...fills].sort((a, b) => b.date.localeCompare(a.date))[0];
+            const priceAtTrip =
+              lastFill?.pricePerLiter && lastFill.pricePerLiter > 0
+                ? lastFill.pricePerLiter
+                : vehicle?.defaultFuelPrice || 0;
+            const cost = estimateCost(fuelUsed, priceAtTrip);
+
+            const liveStats = vehicle
+              ? calculateTripStats(
+                  vehicle,
+                  activeTrip.distanceKm,
+                  activeTrip.startTime,
+                  new Date().toISOString(),
+                  activeTrip.routePoints
+                )
+              : null;
+            const speed =
+              liveStats && liveStats.movingSpeedKmh > 0
+                ? liveStats.movingSpeedKmh
+                : liveStats
+                  ? (activeTrip.distanceKm / Math.max(liveStats.durationMinutes, 0.01)) * 60
+                  : 0;
+
+            let endFuel: number | null = null;
+            if (vehicle) {
+              const gauge = await askFuelGaugeApprox(
+                vehicle,
+                'Niveau d’essence à l’arrivée',
+                'Comparez avec la jauge pour corriger les prochaines estimations.'
+              );
+              if (!gauge.skipped) {
+                endFuel = gauge.liters;
+                const startFuel =
+                  tripStartFuelLiters ??
+                  (vehicle.estimatedFuelLiters != null
+                    ? vehicle.estimatedFuelLiters + fuelUsed
+                    : null);
+                if (startFuel != null && endFuel != null && startFuel > endFuel) {
+                  const drop = startFuel - endFuel;
+                  const sample = learnedFactorFromGauge(fuelUsed, drop);
+                  await blendConsumptionLearnFactor(vehicle, sample);
+                }
+                await updateVehicle(vehicle.id, { estimatedFuelLiters: endFuel });
+              } else if (activeTrip.distanceKm > 0) {
+                await applyTripFuelBurn(vehicle, activeTrip.distanceKm, ascentM);
+              }
+            }
+
             const noteParts = [
               activeTrip.note,
               speed > 0 ? `Vitesse moy. ${speed.toFixed(0)} km/h` : null,
+              ascentM > 20 ? `D+ ${ascentM} m` : null,
+              priceAtTrip > 0
+                ? `Essence ~${priceAtTrip.toFixed(3)} €/L · ${formatEuro(cost)}`
+                : null,
+              endFuel != null ? `Jauge arrivée ~${endFuel.toFixed(1)} L` : null,
             ].filter(Boolean);
 
             await updateTrip(activeTrip.id, {
@@ -483,23 +595,25 @@ export default function TripScreen() {
               status: 'confirmed',
               originName: originName || activeTrip.originName,
               destinationName: destName,
+              estimatedFuelUsed: fuelUsed,
+              estimatedCost: cost,
               note: noteParts.join(' · ') || undefined,
             });
-            if (activeVehicle && activeTrip.distanceKm > 0) {
-              await applyTripFuelBurn(activeVehicle, activeTrip.distanceKm);
-            }
             if (activeTrip.distanceKm > 0) {
               await addTrackedKm(activeTrip.vehicleId, activeTrip.distanceKm);
             }
             setLiveOriginLabel('');
             setLiveDestLabel('');
             setDestination('');
+            setDestCoords(null);
+            setPlannedRoute([]);
+            setTripStartFuelLiters(null);
             await refresh();
             await loadLists();
             setTab('history');
             notify(
               'Trajet terminé',
-              `${originName || 'Départ'} → ${destName} · ${formatDistance(activeTrip.distanceKm)}`
+              `${originName || 'Départ'} → ${destName} · ${formatDistance(activeTrip.distanceKm)} · ~${fuelUsed.toFixed(1)} L`
             );
           } catch (e) {
             notify('Erreur', e instanceof Error ? e.message : 'Impossible de terminer le trajet.');
@@ -560,15 +674,30 @@ export default function TripScreen() {
 
   const tripStats =
     activeTrip && activeVehicle
-      ? calculateTripStats(activeVehicle, activeTrip.distanceKm, activeTrip.startTime)
+      ? calculateTripStats(
+          activeVehicle,
+          activeTrip.distanceKm,
+          activeTrip.startTime,
+          undefined,
+          activeTrip.routePoints
+        )
       : null;
   const avgSpeed =
     activeTrip && tripStats
-      ? averageSpeedKmh(activeTrip.distanceKm, tripStats.durationMinutes)
+      ? tripStats.movingSpeedKmh > 0
+        ? tripStats.movingSpeedKmh
+        : (activeTrip.distanceKm / Math.max(tripStats.durationMinutes, 0.01)) * 60
       : 0;
 
   const routePoints = activeTrip ? parseRoutePoints(activeTrip.routePoints) : [];
   const paused = Boolean(activeTrip?.isPaused);
+  /** Pendant trajet : derniers points GPS ; sinon itinéraire prévu */
+  const mapRoute =
+    routePoints.length > 1
+      ? routePoints.slice(-120)
+      : plannedRoute.length > 0
+        ? plannedRoute
+        : routePoints;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -613,10 +742,14 @@ export default function TripScreen() {
             <TripMap
               ref={mapRef}
               region={currentRegion}
-              routePoints={routePoints}
+              routePoints={mapRoute}
               accentColor={colors.accent}
               userLocation={userLocation}
               paused={paused}
+              plannedRoute={
+                activeTrip && routePoints.length > 1 ? plannedRoute : plannedRoute
+              }
+              destination={destCoords}
             />
             {!userLocation && (
               <View style={styles.mapHint} pointerEvents="none">
@@ -787,11 +920,49 @@ export default function TripScreen() {
 
                   {startMode === 'nav' && (
                     <View style={{ marginTop: 12 }}>
-                      <Input
+                      <PlaceSuggestField
                         label="Destination"
-                        placeholder="Bureau, adresse…"
+                        placeholder="Maison, adresse, contact…"
                         value={destination}
-                        onChangeText={setDestination}
+                        onChangeText={(t) => {
+                          setDestination(t);
+                          setDestCoords(null);
+                        }}
+                        places={places}
+                        onPickPlace={(p) => {
+                          if (p.latitude != null && p.longitude != null) {
+                            setDestCoords({ latitude: p.latitude, longitude: p.longitude });
+                            if (userLocation) {
+                              void fetchDrivingRoute(userLocation, {
+                                latitude: p.latitude,
+                                longitude: p.longitude,
+                              }).then((r) => setPlannedRoute(r.coordinates));
+                            }
+                          }
+                        }}
+                        onPickCoords={(c) => {
+                          if (Number.isFinite(c.latitude) && Number.isFinite(c.longitude)) {
+                            setDestCoords({ latitude: c.latitude, longitude: c.longitude });
+                            if (userLocation) {
+                              void fetchDrivingRoute(userLocation, {
+                                latitude: c.latitude,
+                                longitude: c.longitude,
+                              }).then((r) => setPlannedRoute(r.coordinates));
+                            }
+                          } else if (c.label) {
+                            setDestination(c.label);
+                            void forwardGeocode(c.label).then((g) => {
+                              if (!g) return;
+                              setDestCoords({ latitude: g.latitude, longitude: g.longitude });
+                              if (userLocation) {
+                                void fetchDrivingRoute(userLocation, {
+                                  latitude: g.latitude,
+                                  longitude: g.longitude,
+                                }).then((r) => setPlannedRoute(r.coordinates));
+                              }
+                            });
+                          }
+                        }}
                       />
                     </View>
                   )}
