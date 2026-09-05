@@ -15,6 +15,7 @@ import { stopBackgroundTracking } from '@/lib/locationService';
 import { reverseGeocode } from '@/lib/geocode';
 import { applyTripFuelBurn } from '@/lib/fuelLevel';
 import { refreshVehicleReminders } from '@/lib/reminders';
+import { repairTripHistory } from '@/lib/repairTripHistory';
 
 interface AppContextType {
   activeVehicle: Vehicle | null;
@@ -45,6 +46,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setVehicles(vehicleList);
       setActiveVehicleState(active);
       setActiveTrip(trip);
+
+      try {
+        await repairTripHistory(active?.id);
+      } catch (e) {
+        console.warn('repairTripHistory', e);
+      }
 
       await ensureDefaultBudgets(vehicleList);
       const statuses = await refreshAllBudgets();

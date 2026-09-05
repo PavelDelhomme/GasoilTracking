@@ -17,6 +17,8 @@ import { formatDateSlash } from '@/lib/dates';
 import { reverseGeocode, tripPlaceLabel, tripSourceLabel } from '@/lib/geocode';
 import { notify, confirm } from '@/lib/notify';
 import { useApp } from '@/context/AppContext';
+import { getPlaces } from '@/lib/database';
+import { getTripDisplayRoute } from '@/lib/routeGeometry';
 import type { Trip } from '@/types';
 
 /** Détail d’un trajet passé : carte plein écran du tracé + stats. */
@@ -30,6 +32,9 @@ export default function TripDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [originLabel, setOriginLabel] = useState('');
   const [destLabel, setDestLabel] = useState('');
+  const [displayPoints, setDisplayPoints] = useState<
+    { latitude: number; longitude: number }[]
+  >([]);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(tripId)) {
@@ -41,14 +46,17 @@ export default function TripDetailScreen() {
     setLoading(false);
     if (!t) return;
 
-    const pts = parseRoutePoints(t.routePoints);
+    const places = await getPlaces();
+    const display = await getTripDisplayRoute(t, places);
+    setDisplayPoints(display);
+
+    const pts = display.length ? display : parseRoutePoints(t.routePoints);
     const start = pts[0];
     const end = pts.length > 1 ? pts[pts.length - 1] : null;
 
     let o = tripPlaceLabel(t.originName, start, 'origin');
     let d = tripPlaceLabel(t.destinationName, end, 'destination');
 
-    // Enrichit avec adresse réelle si libellé générique / coords
     if (start && (!t.originName || /lieu de départ|^départ$/i.test(t.originName))) {
       const geo = await reverseGeocode(start.latitude, start.longitude);
       if (geo) o = geo;
@@ -65,10 +73,10 @@ export default function TripDetailScreen() {
     void load();
   }, [load]);
 
-  const points = useMemo(
-    () => (trip ? parseRoutePoints(trip.routePoints) : []),
-    [trip]
-  );
+  const points = useMemo(() => {
+    if (displayPoints.length) return displayPoints;
+    return trip ? parseRoutePoints(trip.routePoints) : [];
+  }, [trip, displayPoints]);
 
   useEffect(() => {
     if (points.length > 0) {

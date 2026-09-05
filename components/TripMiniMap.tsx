@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { WebView } from 'react-native-webview';
 import type { RouteCoord } from '@/components/TripMap.types';
+import { downsampleRoute } from '@/lib/routeGeometry';
 
 type Props = {
   routePoints: RouteCoord[];
@@ -11,66 +12,66 @@ type Props = {
   height?: number;
 };
 
-/** Réduit les points pour rester léger dans une liste. */
-function downsample(pts: RouteCoord[], max = 64): RouteCoord[] {
-  if (pts.length <= max) return pts;
-  const out: RouteCoord[] = [pts[0]];
-  const step = (pts.length - 1) / (max - 1);
-  for (let i = 1; i < max - 1; i++) {
-    out.push(pts[Math.round(i * step)]);
-  }
-  out.push(pts[pts.length - 1]);
-  return out;
-}
-
 /**
- * Mini-carte trajet (Leaflet/OSM) — même stack que la carte live.
- * Évite react-native-maps (clé Google absente → carte vide).
+ * Mini-carte trajet réalisé (Leaflet) : polyline complète + marqueurs départ/arrivée.
  */
 export function TripMiniMap({
   routePoints,
   originName,
   destinationName,
   accentColor = '#e94560',
-  height = 118,
+  height = 148,
 }: Props) {
-  const pts = useMemo(() => downsample(routePoints), [routePoints]);
+  const pts = useMemo(() => downsampleRoute(routePoints, 180), [routePoints]);
+  const [webReady, setWebReady] = useState(false);
 
   const html = useMemo(() => {
     if (pts.length < 1) return null;
     const mid = pts[Math.floor(pts.length / 2)] || pts[0];
     const routeJson = JSON.stringify(pts.map((p) => [p.latitude, p.longitude]));
     const accent = String(accentColor).replace(/[^#a-fA-F0-9]/g, '') || '#e94560';
+    const oLabel = JSON.stringify(String(originName || 'Départ').slice(0, 48));
+    const dLabel = JSON.stringify(String(destinationName || 'Arrivée').slice(0, 48));
     return `<!DOCTYPE html><html><head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
-html,body,#m{margin:0;padding:0;height:100%;width:100%;background:#1a1a2e}
-.leaflet-control-attribution{display:none!important}
-.leaflet-control-zoom{display:none!important}
+html,body,#m{margin:0;padding:0;height:100%;width:100%;background:#0f172a}
+.leaflet-control-attribution,.leaflet-control-zoom{display:none!important}
 </style>
 </head><body><div id="m"></div><script>
 var map=L.map('m',{
   zoomControl:false,dragging:false,scrollWheelZoom:false,
-  doubleClickZoom:false,boxZoom:false,keyboard:false,tap:false
+  doubleClickZoom:false,boxZoom:false,keyboard:false,tap:false,
+  attributionControl:false
 }).setView([${mid.latitude},${mid.longitude}],12);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18}).addTo(map);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+  maxZoom:18, crossOrigin:true
+}).addTo(map);
 var pts=${routeJson};
+var line=null;
 if(pts.length>1){
-  L.polyline(pts,{color:'${accent}',weight:4,opacity:0.95}).addTo(map);
-  map.fitBounds(pts,{padding:[16,16]});
-} else { map.setView(pts[0],13); }
-L.circleMarker(pts[0],{radius:7,color:'#fff',weight:2,fillColor:'#22c55e',fillOpacity:1}).addTo(map);
-L.circleMarker(pts[pts.length-1],{radius:7,color:'#fff',weight:2,fillColor:'#ef4444',fillOpacity:1}).addTo(map);
-setTimeout(function(){ try{map.invalidateSize();}catch(e){} }, 120);
+  line=L.polyline(pts,{color:'${accent}',weight:5,opacity:0.95,lineJoin:'round'}).addTo(map);
+  map.fitBounds(line.getBounds(),{padding:[22,22], maxZoom:14});
+} else { map.setView(pts[0],14); }
+L.circleMarker(pts[0],{radius:8,color:'#fff',weight:2,fillColor:'#22c55e',fillOpacity:1})
+  .addTo(map).bindTooltip(${oLabel},{permanent:false,direction:'top'});
+L.circleMarker(pts[pts.length-1],{radius:8,color:'#fff',weight:2,fillColor:'#ef4444',fillOpacity:1})
+  .addTo(map).bindTooltip(${dLabel},{permanent:false,direction:'top'});
+function fix(){ try{ map.invalidateSize(true); if(line) map.fitBounds(line.getBounds(),{padding:[22,22], maxZoom:14}); }catch(e){} }
+setTimeout(fix,80); setTimeout(fix,280); setTimeout(fix,700);
 </script></body></html>`;
-  }, [pts, accentColor]);
+  }, [pts, accentColor, originName, destinationName]);
+
+  useEffect(() => {
+    setWebReady(false);
+  }, [html]);
 
   if (!html) {
     return (
-      <View style={[styles.schema, { height: Math.min(height, 72) }]}>
+      <View style={[styles.schema, { height: Math.min(height, 80) }]}>
         <View style={styles.schemaRow}>
           <View style={[styles.dot, { backgroundColor: '#22c55e' }]} />
           <Text style={styles.schemaText} numberOfLines={1}>
@@ -84,13 +85,18 @@ setTimeout(function(){ try{map.invalidateSize();}catch(e){} }, 120);
             {destinationName || 'Arrivée'}
           </Text>
         </View>
-        <Text style={styles.schemaHint}>Pas de tracé GPS enregistré</Text>
+        <Text style={styles.schemaHint}>Pas de tracé GPS — ouvrez le détail pour plus d’infos</Text>
       </View>
     );
   }
 
   return (
     <View style={[styles.wrap, { height }]} pointerEvents="none">
+      {!webReady && (
+        <View style={[StyleSheet.absoluteFillObject, styles.loading]}>
+          <Text style={styles.loadingText}>Carte…</Text>
+        </View>
+      )}
       <WebView
         originWhitelist={['*']}
         source={{ html }}
@@ -100,11 +106,17 @@ setTimeout(function(){ try{map.invalidateSize();}catch(e){} }, 120);
         domStorageEnabled
         mixedContentMode="always"
         setSupportMultipleWindows={false}
-        {...(Platform.OS === 'android' ? { androidLayerType: 'hardware' as const } : {})}
+        onLoadEnd={() => setWebReady(true)}
+        {...(Platform.OS === 'android'
+          ? { androidLayerType: 'software' as const, cacheEnabled: true }
+          : {})}
       />
       <View style={styles.legend} pointerEvents="none">
-        <Text style={styles.legendStart}>Départ</Text>
-        <Text style={styles.legendEnd}>Arrivée</Text>
+        <Text style={styles.legendStart}>● Départ</Text>
+        <Text style={styles.legendEnd}>● Arrivée</Text>
+        {pts.length > 2 ? (
+          <Text style={styles.legendPts}>{pts.length} pts</Text>
+        ) : null}
       </View>
     </View>
   );
@@ -117,22 +129,31 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: 8,
     position: 'relative',
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#0f172a',
   },
-  map: { ...StyleSheet.absoluteFillObject, backgroundColor: '#1a1a2e' },
+  map: { ...StyleSheet.absoluteFillObject, backgroundColor: '#0f172a' },
+  loading: {
+    zIndex: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0f172a',
+  },
+  loadingText: { color: '#94a3b8', fontSize: 12, fontWeight: '600' },
   legend: {
     position: 'absolute',
     left: 8,
     bottom: 8,
     flexDirection: 'row',
     gap: 10,
-    backgroundColor: 'rgba(15,23,42,0.75)',
+    backgroundColor: 'rgba(15,23,42,0.8)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
+    alignItems: 'center',
   },
   legendStart: { color: '#bbf7d0', fontSize: 10, fontWeight: '700' },
   legendEnd: { color: '#fecaca', fontSize: 10, fontWeight: '700' },
+  legendPts: { color: '#94a3b8', fontSize: 10, fontWeight: '600' },
   schema: {
     marginBottom: 8,
     borderRadius: 12,

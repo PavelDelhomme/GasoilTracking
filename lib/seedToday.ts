@@ -12,6 +12,8 @@ import {
 import { refreshBudgets } from '@/lib/calculations';
 import { estimateTripFuelLiters } from '@/lib/consumptionModel';
 import { toLocalYmd } from '@/lib/dates';
+import { buildStoredRouteJson } from '@/lib/routeGeometry';
+import { SIM_HOME, SIM_WORK } from '@/lib/gpsCarSimulator';
 
 function todayAt(hour: number, minute = 0): string {
   const d = new Date();
@@ -22,10 +24,9 @@ function todayAt(hour: number, minute = 0): string {
 /**
  * Ajoute manuellement pour aujourd’hui :
  * - lieux domicile / travail si absents
- * - trajet domicile → travail
- * - trajet travail → domicile
+ * - trajet domicile → travail (avec tracé)
+ * - trajet travail → domicile (avec tracé)
  * - un plein du jour
- * Idempotent si les trajets « aujourd’hui domicile↔travail » existent déjà.
  */
 export async function seedTodayCommuteAndFillUp(vehicleId?: number): Promise<{
   vehicleId: number;
@@ -46,17 +47,17 @@ export async function seedTodayCommuteAndFillUp(vehicleId?: number): Promise<{
       name: 'Domicile',
       address: 'Domicile',
       kind: 'home',
-      latitude: 50.6292,
-      longitude: 3.0573,
+      latitude: SIM_HOME.latitude,
+      longitude: SIM_HOME.longitude,
     });
   }
   if (!work) {
     await createPlace({
-      name: 'Travail',
-      address: 'Bureau',
+      name: 'Travail (Intermarché)',
+      address: 'La Guerche-de-Bretagne',
       kind: 'work',
-      latitude: 50.6372,
-      longitude: 3.0633,
+      latitude: SIM_WORK.latitude,
+      longitude: SIM_WORK.longitude,
     });
   }
   places = await getPlaces();
@@ -68,15 +69,24 @@ export async function seedTodayCommuteAndFillUp(vehicleId?: number): Promise<{
   const already = trips.filter((t) => t.startTime.slice(0, 10) === day);
   const hasHomeWork = already.some(
     (t) =>
-      /domicile/i.test(t.originName || '') && /travail|bureau/i.test(t.destinationName || '')
+      /domicile|maison/i.test(t.originName || '') &&
+      /travail|bureau|inter/i.test(t.destinationName || '')
   );
   const hasWorkHome = already.some(
     (t) =>
-      /travail|bureau/i.test(t.originName || '') && /domicile/i.test(t.destinationName || '')
+      /travail|bureau|inter/i.test(t.originName || '') &&
+      /domicile|maison/i.test(t.destinationName || '')
   );
 
   const price = vehicle.defaultFuelPrice;
-  const oneWayKm = 44;
+  const fromHome = {
+    latitude: home?.latitude ?? SIM_HOME.latitude,
+    longitude: home?.longitude ?? SIM_HOME.longitude,
+  };
+  const toWork = {
+    latitude: work?.latitude ?? SIM_WORK.latitude,
+    longitude: work?.longitude ?? SIM_WORK.longitude,
+  };
   let tripsAdded = 0;
   let tracked = 0;
 
@@ -85,17 +95,21 @@ export async function seedTodayCommuteAndFillUp(vehicleId?: number): Promise<{
     endH: number,
     origin: string,
     dest: string,
-    km: number
+    from: { latitude: number; longitude: number },
+    to: { latitude: number; longitude: number }
   ) => {
+    const startIso = todayAt(startH, 15);
+    const built = buildStoredRouteJson(from, to, Date.parse(startIso));
+    const km = built.distanceHintKm || 44;
     const fuel = estimateTripFuelLiters(vehicle, km);
     await createTrip({
       vehicleId: vId,
-      startTime: todayAt(startH, 15),
+      startTime: startIso,
       endTime: todayAt(endH, 5),
       distanceKm: km,
       estimatedFuelUsed: Math.round(fuel * 100) / 100,
       estimatedCost: Math.round(fuel * price * 100) / 100,
-      routePoints: '[]',
+      routePoints: built.json,
       originName: origin,
       destinationName: dest,
       isActive: false,
@@ -114,7 +128,8 @@ export async function seedTodayCommuteAndFillUp(vehicleId?: number): Promise<{
       8,
       home?.name || 'Domicile',
       work?.name || 'Travail (Intermarché)',
-      oneWayKm
+      fromHome,
+      toWork
     );
   }
   if (!hasWorkHome) {
@@ -123,7 +138,8 @@ export async function seedTodayCommuteAndFillUp(vehicleId?: number): Promise<{
       18,
       work?.name || 'Travail (Intermarché)',
       home?.name || 'Domicile',
-      oneWayKm
+      toWork,
+      fromHome
     );
   }
   if (tracked > 0) await addTrackedKm(vId, tracked);
@@ -140,7 +156,7 @@ export async function seedTodayCommuteAndFillUp(vehicleId?: number): Promise<{
       pricePerLiter: price,
       totalCost: Math.round(liters * price * 100) / 100,
       odometer: vehicle.hasOdometer ? vehicle.currentOdometer : null,
-      distanceSinceLastKm: oneWayKm * 2,
+      distanceSinceLastKm: tracked || 88,
       isFull: true,
       note: 'Plein du jour (après trajet travail → domicile)',
       tripId: null,

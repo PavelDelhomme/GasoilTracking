@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Card } from '@/components/Card';
@@ -7,7 +7,10 @@ import { useTheme } from '@/hooks/useTheme';
 import { formatDistance, formatEuro, parseRoutePoints } from '@/lib/calculations';
 import { formatDateSlash } from '@/lib/dates';
 import { tripPlaceLabel, tripSourceLabel } from '@/lib/geocode';
+import { getTripDisplayRoute } from '@/lib/routeGeometry';
+import { getPlaces } from '@/lib/database';
 import type { Trip } from '@/types';
+import type { RouteCoord } from '@/components/TripMap.types';
 
 type Props = {
   trip: Trip;
@@ -15,15 +18,38 @@ type Props = {
   onDelete: (trip: Trip) => void;
 };
 
-/** Carte historique cliquable : mini-carte + adresses départ/arrivée. */
+/** Carte historique : mini-carte du trajet réalisé + adresses. */
 export function TripHistoryCard({ trip, onPress, onDelete }: Props) {
   const { colors } = useTheme();
-  const points = useMemo(() => parseRoutePoints(trip.routePoints), [trip.routePoints]);
-  const start = points[0] || null;
-  const end = points.length > 1 ? points[points.length - 1] : null;
+  const stored = useMemo(() => parseRoutePoints(trip.routePoints), [trip.routePoints]);
+  const [displayPts, setDisplayPts] = useState<RouteCoord[]>(stored);
+
+  const start = displayPts[0] || stored[0] || null;
+  const end =
+    displayPts.length > 1
+      ? displayPts[displayPts.length - 1]
+      : stored.length > 1
+        ? stored[stored.length - 1]
+        : null;
 
   const origin = tripPlaceLabel(trip.originName, start, 'origin');
   const dest = tripPlaceLabel(trip.destinationName, end, 'destination');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const places = await getPlaces();
+        const pts = await getTripDisplayRoute(trip, places);
+        if (!cancelled && pts.length) setDisplayPts(pts);
+      } catch {
+        /* keep stored */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [trip.id, trip.routePoints, trip.originName, trip.destinationName]);
 
   const timeLabel = (() => {
     try {
@@ -41,11 +67,11 @@ export function TripHistoryCard({ trip, onPress, onDelete }: Props) {
     <Pressable onPress={() => onPress(trip)}>
       <Card style={styles.card}>
         <TripMiniMap
-          routePoints={points}
+          routePoints={displayPts}
           originName={origin}
           destinationName={dest}
           accentColor={colors.accent}
-          height={118}
+          height={152}
         />
 
         <View style={styles.ends}>
