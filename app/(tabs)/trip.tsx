@@ -1265,6 +1265,56 @@ export default function TripScreen() {
                     {formatEuro(sinceFill.lastFill.totalCost)}
                     {sinceFill.lastFill.isFull ? ' · quasi-plein' : ''}
                   </Text>
+                  {(() => {
+                    const tank = activeVehicle?.tankCapacity || 50;
+                    const rem = sinceFill.fuelRemainingEst;
+                    const tone =
+                      rem <= tank * 0.12
+                        ? 'critical'
+                        : rem <= tank * 0.28
+                          ? 'warn'
+                          : 'ok';
+                    const toneColor =
+                      tone === 'critical'
+                        ? colors.danger
+                        : tone === 'warn'
+                          ? colors.warning
+                          : colors.success;
+                    const pct = Math.min(100, Math.max(0, (rem / tank) * 100));
+                    return (
+                      <View style={{ marginBottom: 10 }}>
+                        <Text style={{ color: toneColor, fontWeight: '800', fontSize: 20 }}>
+                          ~{rem.toFixed(1)} L restants
+                          {sinceFill.rangeKm > 0 ? ` · ~${Math.round(sinceFill.rangeKm)} km` : ''}
+                        </Text>
+                        <View
+                          style={{
+                            height: 10,
+                            borderRadius: 5,
+                            backgroundColor: colors.border,
+                            marginTop: 8,
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <View
+                            style={{
+                              width: `${pct}%`,
+                              height: '100%',
+                              backgroundColor: toneColor,
+                              borderRadius: 5,
+                            }}
+                          />
+                        </View>
+                        <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }}>
+                          {tone === 'critical'
+                            ? 'Réservoir bas — pensez à faire le plein'
+                            : tone === 'warn'
+                              ? 'Niveau moyen — surveillez l’autonomie'
+                              : 'Niveau confortable'}
+                        </Text>
+                      </View>
+                    );
+                  })()}
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                     <Text style={{ color: colors.text, fontWeight: '700' }}>
                       {formatDistance(sinceFill.tripKm)}
@@ -1276,7 +1326,7 @@ export default function TripScreen() {
                       ~{formatEuro(sinceFill.costEst)}
                     </Text>
                     <Text style={{ color: colors.textSecondary }}>
-                      ~{sinceFill.fuelUsedEst.toFixed(1)} L
+                      ~{sinceFill.fuelUsedEst.toFixed(1)} L consommés
                     </Text>
                   </View>
                 </Card>

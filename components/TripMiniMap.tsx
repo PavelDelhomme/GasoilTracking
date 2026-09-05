@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import { WebView } from 'react-native-webview';
 import type { RouteCoord } from '@/components/TripMap.types';
 
 type Props = {
@@ -11,25 +11,8 @@ type Props = {
   height?: number;
 };
 
-function regionFromPoints(pts: RouteCoord[]) {
-  const lats = pts.map((p) => p.latitude);
-  const lons = pts.map((p) => p.longitude);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLon = Math.min(...lons);
-  const maxLon = Math.max(...lons);
-  const latDelta = Math.max((maxLat - minLat) * 1.6, 0.012);
-  const lonDelta = Math.max((maxLon - minLon) * 1.6, 0.012);
-  return {
-    latitude: (minLat + maxLat) / 2,
-    longitude: (minLon + maxLon) / 2,
-    latitudeDelta: latDelta,
-    longitudeDelta: lonDelta,
-  };
-}
-
 /** Réduit les points pour rester léger dans une liste. */
-function downsample(pts: RouteCoord[], max = 48): RouteCoord[] {
+function downsample(pts: RouteCoord[], max = 64): RouteCoord[] {
   if (pts.length <= max) return pts;
   const out: RouteCoord[] = [pts[0]];
   const step = (pts.length - 1) / (max - 1);
@@ -41,8 +24,8 @@ function downsample(pts: RouteCoord[], max = 48): RouteCoord[] {
 }
 
 /**
- * Mini-carte trajet (départ vert → arrivée rouge) pour les cartes d’historique.
- * MapView native (lite sur Android) — taille fixe, non interactive.
+ * Mini-carte trajet (Leaflet/OSM) — même stack que la carte live.
+ * Évite react-native-maps (clé Google absente → carte vide).
  */
 export function TripMiniMap({
   routePoints,
@@ -52,11 +35,40 @@ export function TripMiniMap({
   height = 118,
 }: Props) {
   const pts = useMemo(() => downsample(routePoints), [routePoints]);
-  const start = pts[0];
-  const end = pts.length > 1 ? pts[pts.length - 1] : start;
-  const region = useMemo(() => (pts.length ? regionFromPoints(pts) : null), [pts]);
 
-  if (!pts.length || !region || !start) {
+  const html = useMemo(() => {
+    if (pts.length < 1) return null;
+    const mid = pts[Math.floor(pts.length / 2)] || pts[0];
+    const routeJson = JSON.stringify(pts.map((p) => [p.latitude, p.longitude]));
+    const accent = String(accentColor).replace(/[^#a-fA-F0-9]/g, '') || '#e94560';
+    return `<!DOCTYPE html><html><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+html,body,#m{margin:0;padding:0;height:100%;width:100%;background:#1a1a2e}
+.leaflet-control-attribution{display:none!important}
+.leaflet-control-zoom{display:none!important}
+</style>
+</head><body><div id="m"></div><script>
+var map=L.map('m',{
+  zoomControl:false,dragging:false,scrollWheelZoom:false,
+  doubleClickZoom:false,boxZoom:false,keyboard:false,tap:false
+}).setView([${mid.latitude},${mid.longitude}],12);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18}).addTo(map);
+var pts=${routeJson};
+if(pts.length>1){
+  L.polyline(pts,{color:'${accent}',weight:4,opacity:0.95}).addTo(map);
+  map.fitBounds(pts,{padding:[16,16]});
+} else { map.setView(pts[0],13); }
+L.circleMarker(pts[0],{radius:7,color:'#fff',weight:2,fillColor:'#22c55e',fillOpacity:1}).addTo(map);
+L.circleMarker(pts[pts.length-1],{radius:7,color:'#fff',weight:2,fillColor:'#ef4444',fillOpacity:1}).addTo(map);
+setTimeout(function(){ try{map.invalidateSize();}catch(e){} }, 120);
+</script></body></html>`;
+  }, [pts, accentColor]);
+
+  if (!html) {
     return (
       <View style={[styles.schema, { height: Math.min(height, 72) }]}>
         <View style={styles.schemaRow}>
@@ -72,43 +84,24 @@ export function TripMiniMap({
             {destinationName || 'Arrivée'}
           </Text>
         </View>
+        <Text style={styles.schemaHint}>Pas de tracé GPS enregistré</Text>
       </View>
     );
   }
 
   return (
     <View style={[styles.wrap, { height }]} pointerEvents="none">
-      <MapView
+      <WebView
+        originWhitelist={['*']}
+        source={{ html }}
         style={styles.map}
-        initialRegion={region}
         scrollEnabled={false}
-        zoomEnabled={false}
-        rotateEnabled={false}
-        pitchEnabled={false}
-        toolbarEnabled={false}
-        moveOnMarkerPress={false}
-        liteMode={Platform.OS === 'android'}
-      >
-        {pts.length > 1 && (
-          <Polyline coordinates={pts} strokeColor={accentColor} strokeWidth={4} />
-        )}
-        <Marker
-          coordinate={start}
-          pinColor="green"
-          title="Départ"
-          description={originName}
-          tracksViewChanges={false}
-        />
-        {end && (
-          <Marker
-            coordinate={end}
-            pinColor="red"
-            title="Arrivée"
-            description={destinationName}
-            tracksViewChanges={false}
-          />
-        )}
-      </MapView>
+        javaScriptEnabled
+        domStorageEnabled
+        mixedContentMode="always"
+        setSupportMultipleWindows={false}
+        {...(Platform.OS === 'android' ? { androidLayerType: 'hardware' as const } : {})}
+      />
       <View style={styles.legend} pointerEvents="none">
         <Text style={styles.legendStart}>Départ</Text>
         <Text style={styles.legendEnd}>Arrivée</Text>
@@ -126,7 +119,7 @@ const styles = StyleSheet.create({
     position: 'relative',
     backgroundColor: '#1a1a2e',
   },
-  map: { ...StyleSheet.absoluteFillObject },
+  map: { ...StyleSheet.absoluteFillObject, backgroundColor: '#1a1a2e' },
   legend: {
     position: 'absolute',
     left: 8,
@@ -159,4 +152,5 @@ const styles = StyleSheet.create({
   },
   dot: { width: 12, height: 12, borderRadius: 6 },
   schemaText: { color: '#e2e8f0', fontSize: 13, fontWeight: '600', flex: 1 },
+  schemaHint: { color: '#94a3b8', fontSize: 11, marginTop: 4 },
 });

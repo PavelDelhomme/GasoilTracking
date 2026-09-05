@@ -44,19 +44,42 @@ interface ProgressBarProps {
 
 export function ProgressBar({ percent, color, height = 8 }: ProgressBarProps) {
   const { colors } = useTheme();
+  const over = percent > 100;
   const clampedPercent = Math.min(100, Math.max(0, percent));
   const barColor =
     color ??
-    (clampedPercent > 90 ? colors.danger : clampedPercent > 70 ? colors.warning : colors.success);
+    (over || clampedPercent > 90
+      ? colors.danger
+      : clampedPercent > 70
+        ? colors.warning
+        : colors.success);
 
   return (
     <View style={[styles.progressBg, { backgroundColor: colors.border, height }]}>
       <View
         style={[
           styles.progressFill,
-          { width: `${clampedPercent}%`, backgroundColor: barColor, height },
+          {
+            width: `${clampedPercent}%`,
+            backgroundColor: barColor,
+            height,
+            opacity: over ? 1 : 1,
+          },
         ]}
       />
+      {over && (
+        <View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFillObject,
+            {
+              borderWidth: 1.5,
+              borderColor: colors.danger,
+              borderRadius: 4,
+            },
+          ]}
+        />
+      )}
     </View>
   );
 }

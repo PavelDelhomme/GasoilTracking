@@ -9,7 +9,9 @@
     "web": "expo start --web",
     "build:web": "expo export --platform web --output-dir dist",
     "typecheck": "tsc --noEmit",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "build:apk": "bash scripts/build-release-apk.sh",
+    "fetch:keystore": "node scripts/fetch-eas-keystore.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~4.0.1",

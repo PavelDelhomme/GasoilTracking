@@ -21,7 +21,8 @@ import {
   formatEuro,
   getMonthFillStats,
 } from '@/lib/calculations';
-import { formatDateSlash, monthKeyFromDate } from '@/lib/dates';
+import { formatDateSlash, monthKeyFromDate, currentMonthKey } from '@/lib/dates';
+import { ProgressBar } from '@/components/Card';
 import type { FillUp, MonthFillStats } from '@/types';
 
 const PAGE = 25;
@@ -67,7 +68,7 @@ function monthTitleFr(ym: string): string {
 }
 
 export default function FillUpsScreen() {
-  const { activeVehicle, refresh } = useApp();
+  const { activeVehicle, budgetStatuses, refresh } = useApp();
   const { colors } = useTheme();
   const { formatPerLiter, locale } = useLocale();
   const [allFillUps, setAllFillUps] = useState<FillUp[]>([]);
@@ -136,6 +137,27 @@ export default function FillUpsScreen() {
   }, [allFillUps, filtered, selectedMonth]);
 
   const visible = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
+
+  /** Budget mensuel vs dépenses du mois affiché (ou mois courant si « Tout »). */
+  const monthBudgetHint = useMemo(() => {
+    const month = selectedMonth === 'all' ? currentMonthKey() : selectedMonth;
+    const monthly = budgetStatuses.find(
+      (s) =>
+        s.budget.period === 'monthly' &&
+        (s.budget.vehicleId == null || s.budget.vehicleId === activeVehicle?.id)
+    );
+    if (!monthly) return null;
+    // Si on filtre un autre mois, comparer au total de ce mois (pas le spent live du budget)
+    const monthSpent =
+      selectedMonth === 'all'
+        ? monthly.spent
+        : allFillUps
+            .filter((f) => monthKeyFromDate(f.date) === selectedMonth)
+            .reduce((s, f) => s + f.totalCost, 0);
+    const amount = monthly.budget.amount;
+    const pct = amount > 0 ? (monthSpent / amount) * 100 : 0;
+    return { month, amount, spent: monthSpent, pct, name: monthly.budget.name };
+  }, [budgetStatuses, selectedMonth, allFillUps, activeVehicle?.id]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -211,9 +233,56 @@ export default function FillUpsScreen() {
           <Text style={[styles.summaryTitle, { color: colors.text }]}>
             {selectedMonth !== 'all' ? monthTitleFr(selectedMonth) : 'Tous les pleins'}
           </Text>
-          <Text style={[styles.summaryHero, { color: colors.accent }]}>
+          <Text
+            style={[
+              styles.summaryHero,
+              {
+                color:
+                  monthBudgetHint && monthBudgetHint.pct > 100
+                    ? colors.danger
+                    : monthBudgetHint && monthBudgetHint.pct > 80
+                      ? colors.warning
+                      : colors.accent,
+              },
+            ]}
+          >
             {formatEuro(periodStats.totalCost)}
           </Text>
+          {monthBudgetHint && (
+            <View style={{ marginTop: 8 }}>
+              <Text
+                style={{
+                  color:
+                    monthBudgetHint.pct > 100
+                      ? colors.danger
+                      : monthBudgetHint.pct > 80
+                        ? colors.warning
+                        : colors.textSecondary,
+                  fontWeight: '700',
+                  fontSize: 13,
+                }}
+              >
+                {monthBudgetHint.pct > 100
+                  ? `Budget « ${monthBudgetHint.name} » dépassé de ${formatEuro(
+                      monthBudgetHint.spent - monthBudgetHint.amount
+                    )}`
+                  : `Budget « ${monthBudgetHint.name} » : ${formatEuro(monthBudgetHint.spent)} / ${formatEuro(
+                      monthBudgetHint.amount
+                    )} (${monthBudgetHint.pct.toFixed(0)} %)`}
+              </Text>
+              <ProgressBar
+                percent={monthBudgetHint.pct}
+                color={
+                  monthBudgetHint.pct > 100
+                    ? colors.danger
+                    : monthBudgetHint.pct > 80
+                      ? colors.warning
+                      : colors.success
+                }
+                height={8}
+              />
+            </View>
+          )}
           <Text style={[styles.summarySub, { color: colors.textSecondary }]}>
             {periodStats.count} plein{periodStats.count > 1 ? 's' : ''}
             {' · '}

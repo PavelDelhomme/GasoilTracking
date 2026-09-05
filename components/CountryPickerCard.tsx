@@ -27,6 +27,8 @@ export function CountryPickerCard() {
     country,
     countries,
     setCountryCode,
+    detectCountryFromLocation,
+    countryManual,
     refreshRates,
     ratesDate,
     moneySymbol,
@@ -35,6 +37,7 @@ export function CountryPickerCard() {
   } = useLocale();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
+  const [detecting, setDetecting] = useState(false);
 
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase();
@@ -57,6 +60,21 @@ export function CountryPickerCard() {
         ? `${c.nameNative} · données converties en ${c.currency}`
         : `${c.nameNative} · ${c.currency}`
     );
+  };
+
+  const autoDetect = async () => {
+    setDetecting(true);
+    try {
+      const code = await detectCountryFromLocation({ force: true });
+      await refresh();
+      if (code) {
+        notify('Devise auto', `Pays détecté via GPS : ${code}`);
+      } else {
+        notify('Devise auto', 'Impossible de détecter le pays (GPS / réseau).');
+      }
+    } finally {
+      setDetecting(false);
+    }
   };
 
   const pick = (c: EuropeCountry) => {
@@ -94,24 +112,27 @@ export function CountryPickerCard() {
 
   return (
     <>
-      <Pressable
-        onPress={() => setOpen(true)}
-        style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-      >
-        <View style={{ flex: 1 }}>
+      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Pressable onPress={() => setOpen(true)} style={{ flex: 1 }}>
           <Text style={[styles.label, { color: colors.textSecondary }]}>Pays / devise</Text>
           <Text style={[styles.value, { color: colors.text }]}>
             {country.nameNative} · {currency} ({moneySymbol})
           </Text>
           <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
-            Taux FX {ratesDate || '…'} · ex. 1 € ={' '}
-            {currency === 'EUR'
-              ? '1 EUR'
-              : `${(rates[currency] || 0).toFixed(currency === 'ISK' || currency === 'HUF' ? 0 : 2)} ${currency}`}
+            {countryManual ? 'Choix manuel' : 'Auto (locale / GPS)'} · taux FX {ratesDate || '…'}
           </Text>
+        </Pressable>
+        <View style={{ alignItems: 'flex-end', gap: 10, justifyContent: 'center' }}>
+          <Pressable onPress={() => void autoDetect()} disabled={detecting} hitSlop={8}>
+            <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }}>
+              {detecting ? 'GPS…' : 'Auto GPS'}
+            </Text>
+          </Pressable>
+          <Pressable onPress={() => setOpen(true)} hitSlop={8}>
+            <Text style={{ color: colors.accent, fontWeight: '700' }}>Changer</Text>
+          </Pressable>
         </View>
-        <Text style={{ color: colors.accent, fontWeight: '700' }}>Changer</Text>
-      </Pressable>
+      </View>
 
       <Modal visible={open} animationType="slide" transparent>
         <View style={styles.modalBg}>

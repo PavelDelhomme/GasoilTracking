@@ -16,11 +16,19 @@ function cacheKey(lat: number, lon: number): string {
   return `${lat.toFixed(4)},${lon.toFixed(4)}`;
 }
 
-/** Adresse courte lisible depuis des coords GPS. */
-export async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
+type ReverseResult = { label: string; countryCode: string | null };
+
+const reverseCache = new Map<string, ReverseResult>();
+
+/** Géocodage inverse complet (label + pays ISO). */
+export async function reverseGeocodeDetails(
+  lat: number,
+  lon: number
+): Promise<ReverseResult | null> {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   const key = cacheKey(lat, lon);
-  if (cache.has(key)) return cache.get(key)!;
+  if (reverseCache.has(key)) return reverseCache.get(key)!;
+  // Ancien cache label-only : on refetch pour récupérer le pays
 
   try {
     const url =
@@ -30,7 +38,7 @@ export async function reverseGeocode(lat: number, lon: number): Promise<string |
       headers: {
         Accept: 'application/json',
         // Nominatim demande un User-Agent identifiable
-        'User-Agent': 'GasoilTracking/1.1 (personal fuel app)',
+        'User-Agent': 'GasoilTracking/1.4 (personal fuel app)',
       },
     });
     if (!res.ok) return null;
@@ -51,11 +59,27 @@ export async function reverseGeocode(lat: number, lon: number): Promise<string |
         ? parts.join(', ')
         : data.name ||
           (data.display_name ? data.display_name.split(',').slice(0, 3).join(',').trim() : null);
-    if (label) cache.set(key, label);
-    return label;
+    if (!label) return null;
+    const cc = (a.country_code || '').toUpperCase() || null;
+    const result = { label, countryCode: cc };
+    cache.set(key, label);
+    reverseCache.set(key, result);
+    return result;
   } catch {
     return null;
   }
+}
+
+/** Adresse courte lisible depuis des coords GPS. */
+export async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
+  const details = await reverseGeocodeDetails(lat, lon);
+  return details?.label ?? null;
+}
+
+/** Code pays ISO (ex. FR) depuis GPS — pour devise auto. */
+export async function reverseCountryCode(lat: number, lon: number): Promise<string | null> {
+  const details = await reverseGeocodeDetails(lat, lon);
+  return details?.countryCode ?? null;
 }
 
 /** Géocodage direct : ville / adresse → coordonnées (Nominatim). */
