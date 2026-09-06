@@ -28,4 +28,8 @@ export type TripMapProps = {
   plannedRoute?: RouteCoord[];
   /** Marqueur destination */
   destination?: RouteCoord | null;
+  /** Suit le point user (live). Désactiver sur détail historique. */
+  followUser?: boolean;
+  /** Vitesses km/h par point (coloration du tracé) */
+  routeSpeedsKmh?: number[];
 };

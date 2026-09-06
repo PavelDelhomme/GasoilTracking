@@ -581,11 +581,16 @@ export function appendRoutePoint(
 
   const use = verdict.sample || point;
   // Ne pas stocker accuracy sur chaque point (JSON trop gros → OOM sur longs trajets)
-  points.push({
+  // Vitesse device (m/s) arrondie — utile pour min/max sur le détail
+  const entry: RoutePoint = {
     latitude: Math.round(use.latitude * 1e6) / 1e6,
     longitude: Math.round(use.longitude * 1e6) / 1e6,
     timestamp: use.timestamp,
-  });
+  };
+  if (use.speed != null && Number.isFinite(use.speed) && use.speed >= 0) {
+    entry.speed = Math.round(use.speed * 10) / 10;
+  }
+  points.push(entry);
   return JSON.stringify(points);
 }
 

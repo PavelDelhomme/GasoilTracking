@@ -17,6 +17,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
+import { DatePickerField } from '@/components/DatePickerField';
 import { createTrip, addTrackedKm } from '@/lib/database';
 import {
   parseGoogleMapsUrl,
@@ -31,6 +32,7 @@ import {
 } from '@/lib/takeoutImport';
 import { notify } from '@/lib/notify';
 import { formatDistance, formatEuro } from '@/lib/calculations';
+import { toLocalYmd } from '@/lib/dates';
 import type { Vehicle } from '@/types';
 
 type DraftRow = ImportedTripDraft & { vehicleId: number };
@@ -318,18 +320,36 @@ export default function ImportTripsScreen() {
           ))}
         </View>
 
-        <Input
-          label="Filtrer depuis (AAAA-MM-JJ) — optionnel"
-          value={fromDay}
-          onChangeText={setFromDay}
-          placeholder="2026-08-25"
-        />
-        <Input
-          label="Filtrer jusqu’à (AAAA-MM-JJ) — optionnel"
-          value={toDay}
-          onChangeText={setToDay}
-          placeholder="2026-09-04"
-        />
+        {fromDay ? (
+          <>
+            <DatePickerField label="Filtrer depuis" value={fromDay} onChange={setFromDay} />
+            <Pressable onPress={() => setFromDay('')} style={{ marginBottom: 8 }}>
+              <Text style={{ color: colors.textSecondary }}>Effacer date début</Text>
+            </Pressable>
+          </>
+        ) : (
+          <Pressable
+            onPress={() => setFromDay(toLocalYmd(new Date()))}
+            style={{ marginBottom: 12 }}
+          >
+            <Text style={{ color: colors.accent, fontWeight: '700' }}>+ Filtrer depuis une date</Text>
+          </Pressable>
+        )}
+        {toDay ? (
+          <>
+            <DatePickerField label="Filtrer jusqu’à" value={toDay} onChange={setToDay} />
+            <Pressable onPress={() => setToDay('')} style={{ marginBottom: 8 }}>
+              <Text style={{ color: colors.textSecondary }}>Effacer date fin</Text>
+            </Pressable>
+          </>
+        ) : (
+          <Pressable
+            onPress={() => setToDay(toLocalYmd(new Date()))}
+            style={{ marginBottom: 12 }}
+          >
+            <Text style={{ color: colors.accent, fontWeight: '700' }}>+ Filtrer jusqu’à une date</Text>
+          </Pressable>
+        )}
 
         <Button
           title={picking ? 'Ouverture…' : 'Choisir JSON ou ZIP Takeout'}

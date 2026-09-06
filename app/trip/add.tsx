@@ -6,6 +6,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { DatePickerField } from '@/components/DatePickerField';
+import { TimePickerField } from '@/components/TimePickerField';
 import { PlaceSuggestField } from '@/components/PlaceSuggestField';
 import {
   createTrip,
@@ -218,8 +219,8 @@ export default function AddTripScreen() {
       />
 
       <DatePickerField label="Date du trajet" value={dateLocal} onChange={setDateLocal} />
-      <Input label="Heure départ (HH:MM)" value={startTime} onChangeText={setStartTime} />
-      <Input label="Heure arrivée (HH:MM)" value={endTime} onChangeText={setEndTime} />
+      <TimePickerField label="Heure de départ" value={startTime} onChange={setStartTime} />
+      <TimePickerField label="Heure d’arrivée" value={endTime} onChange={setEndTime} />
       <Input
         label="Distance (km)"
         value={distanceKm}

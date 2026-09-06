@@ -5,10 +5,11 @@ import { Card } from '@/components/Card';
 import { TripMiniMap } from '@/components/TripMiniMap';
 import { useTheme } from '@/hooks/useTheme';
 import { formatDistance, formatEuro, parseRoutePoints } from '@/lib/calculations';
+import { formatDurationMinutes } from '@/lib/consumptionModel';
 import { formatDateSlash } from '@/lib/dates';
 import { tripPlaceLabel, tripSourceLabel } from '@/lib/geocode';
-import { getTripDisplayRoute } from '@/lib/routeGeometry';
 import { getPlaces } from '@/lib/database';
+import { getCachedTripRoute, resolveTripRouteCached } from '@/lib/tripMapCache';
 import type { Trip } from '@/types';
 import type { RouteCoord } from '@/components/TripMap.types';
 
@@ -16,13 +17,25 @@ type Props = {
   trip: Trip;
   onPress: (trip: Trip) => void;
   onDelete: (trip: Trip) => void;
+  /** Afficher la mini-carte (désactiver hors viewport pour fluidité) */
+  showMap?: boolean;
 };
 
+function tripDurationMinutes(trip: Trip): number {
+  if (!trip.endTime) return 0;
+  const ms = new Date(trip.endTime).getTime() - new Date(trip.startTime).getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return 0;
+  return ms / 60000;
+}
+
 /** Carte historique : mini-carte du trajet réalisé + adresses. */
-export function TripHistoryCard({ trip, onPress, onDelete }: Props) {
+export function TripHistoryCard({ trip, onPress, onDelete, showMap = true }: Props) {
   const { colors } = useTheme();
   const stored = useMemo(() => parseRoutePoints(trip.routePoints), [trip.routePoints]);
-  const [displayPts, setDisplayPts] = useState<RouteCoord[]>(stored);
+  const cached = getCachedTripRoute(trip.id);
+  const [displayPts, setDisplayPts] = useState<RouteCoord[]>(
+    cached && cached.length ? cached : stored
+  );
 
   const start = displayPts[0] || stored[0] || null;
   const end =
@@ -34,22 +47,25 @@ export function TripHistoryCard({ trip, onPress, onDelete }: Props) {
 
   const origin = tripPlaceLabel(trip.originName, start, 'origin');
   const dest = tripPlaceLabel(trip.destinationName, end, 'destination');
+  const durationMin = tripDurationMinutes(trip);
 
   useEffect(() => {
+    if (!showMap) return;
     let cancelled = false;
     (async () => {
       try {
         const places = await getPlaces();
-        const pts = await getTripDisplayRoute(trip, places);
-        if (!cancelled && pts.length) setDisplayPts(pts);
+        const pts = await resolveTripRouteCached(trip, places);
+        if (cancelled || !pts.length) return;
+        setDisplayPts(pts);
       } catch {
-        /* keep stored */
+        /* keep stored / cache */
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [trip.id, trip.routePoints, trip.originName, trip.destinationName]);
+  }, [showMap, trip.id, trip.routePoints, trip.originName, trip.destinationName]);
 
   const timeLabel = (() => {
     try {
@@ -66,13 +82,19 @@ export function TripHistoryCard({ trip, onPress, onDelete }: Props) {
   return (
     <Pressable onPress={() => onPress(trip)}>
       <Card style={styles.card}>
-        <TripMiniMap
-          routePoints={displayPts}
-          originName={origin}
-          destinationName={dest}
-          accentColor={colors.accent}
-          height={152}
-        />
+        {showMap ? (
+          <TripMiniMap
+            routePoints={displayPts}
+            originName={origin}
+            destinationName={dest}
+            accentColor={colors.accent}
+            height={148}
+          />
+        ) : (
+          <View style={[styles.mapPlaceholder, { backgroundColor: colors.background }]}>
+            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Carte…</Text>
+          </View>
+        )}
 
         <View style={styles.ends}>
           <View style={styles.endCol}>
@@ -133,6 +155,13 @@ export function TripHistoryCard({ trip, onPress, onDelete }: Props) {
               </Text>
             </View>
           )}
+          {durationMin > 0 && (
+            <View style={[styles.chip, { backgroundColor: colors.background, borderColor: colors.border }]}>
+              <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 12 }}>
+                {formatDurationMinutes(durationMin)}
+              </Text>
+            </View>
+          )}
         </View>
       </Card>
     </Pressable>
@@ -141,6 +170,13 @@ export function TripHistoryCard({ trip, onPress, onDelete }: Props) {
 
 const styles = StyleSheet.create({
   card: { marginTop: 12, overflow: 'hidden' },
+  mapPlaceholder: {
+    height: 56,
+    borderRadius: 12,
+    marginBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   ends: {
     flexDirection: 'row',
     alignItems: 'flex-start',

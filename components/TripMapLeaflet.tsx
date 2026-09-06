@@ -12,10 +12,12 @@ function buildHtml(
   accent: string,
   paused: boolean,
   planned: RouteCoord[],
-  dest: RouteCoord | null | undefined
+  dest: RouteCoord | null | undefined,
+  speeds: number[] | null
 ): string {
   const routeJson = JSON.stringify(route.map((p) => [p.latitude, p.longitude]));
   const plannedJson = JSON.stringify(planned.map((p) => [p.latitude, p.longitude]));
+  const speedsJson = JSON.stringify(speeds || []);
   const userJson = user ? JSON.stringify([user.latitude, user.longitude]) : 'null';
   const destJson = dest ? JSON.stringify([dest.latitude, dest.longitude]) : 'null';
   const accentSafe = String(accent || '#e94560').replace(/[^#a-fA-F0-9]/g, '');
@@ -45,17 +47,51 @@ function buildHtml(
     var routeLayer = null;
     var plannedLayer = null;
     var startMarker = null;
+    var endMarker = null;
     var userMarker = null;
     var destMarker = null;
+    var fittedOnce = false;
 
-    function setRoute(pts) {
+    function speedColor(kmh, minV, maxV) {
+      if (!(maxV > minV) || !(kmh > 0)) return accent;
+      var t = Math.max(0, Math.min(1, (kmh - minV) / (maxV - minV)));
+      var r = Math.round(34 + t * (239 - 34));
+      var g = Math.round(197 + t * (68 - 197));
+      var b = Math.round(94 + t * (68 - 94));
+      return 'rgb('+r+','+g+','+b+')';
+    }
+
+    function setRoute(pts, speeds) {
       if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
       if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+      if (endMarker) { map.removeLayer(endMarker); endMarker = null; }
       if (!pts || pts.length === 0) return;
-      routeLayer = L.polyline(pts, { color: accent, weight: 5, opacity: 0.9 }).addTo(map);
+      var group = L.layerGroup().addTo(map);
+      routeLayer = group;
+      var spd = speeds || [];
+      var vals = spd.filter(function(v){ return v >= 3; });
+      var minV = vals.length ? Math.min.apply(null, vals) : 0;
+      var maxV = vals.length ? Math.max.apply(null, vals) : 0;
+      if (pts.length === 1 || vals.length < 2) {
+        L.polyline(pts, { color: accent, weight: 5, opacity: 0.92 }).addTo(group);
+      } else {
+        for (var i = 1; i < pts.length; i++) {
+          var kmh = spd[i] || spd[i-1] || 0;
+          L.polyline([pts[i-1], pts[i]], {
+            color: speedColor(kmh, minV, maxV),
+            weight: 5,
+            opacity: 0.95
+          }).addTo(group);
+        }
+      }
       startMarker = L.circleMarker(pts[0], {
-        radius: 7, color: '#fff', weight: 2, fillColor: '#22c55e', fillOpacity: 1
+        radius: 8, color: '#fff', weight: 2, fillColor: '#22c55e', fillOpacity: 1
       }).addTo(map).bindPopup('Départ');
+      if (pts.length > 1) {
+        endMarker = L.circleMarker(pts[pts.length-1], {
+          radius: 8, color: '#fff', weight: 2, fillColor: '#ef4444', fillOpacity: 1
+        }).addTo(map).bindPopup('Arrivée');
+      }
     }
 
     function setPlanned(pts) {
@@ -90,20 +126,21 @@ function buildHtml(
       }).addTo(map).bindPopup('Destination');
     }
 
-    function fit(pts) {
+    function fit(pts, force) {
       if (!pts || pts.length === 0) return;
-      if (pts.length === 1) { map.setView(pts[0], 15); return; }
-      map.fitBounds(pts, { padding: [40, 40] });
+      if (fittedOnce && !force) return;
+      if (pts.length === 1) { map.setView(pts[0], 15); fittedOnce = true; return; }
+      map.fitBounds(pts, { padding: [48, 48], maxZoom: 15 });
+      fittedOnce = true;
     }
 
-    setRoute(${routeJson});
+    setRoute(${routeJson}, ${speedsJson});
     setPlanned(${plannedJson});
     setUser(${userJson}, ${paused ? 'true' : 'false'});
     setDest(${destJson});
     var all = ${routeJson}.slice().concat(${plannedJson});
-    if (${userJson}) all.push(${userJson});
     if (${destJson}) all.push(${destJson});
-    if (all.length) fit(all);
+    if (all.length) fit(all, true);
     else map.setView([${lat}, ${lon}], ${zoom});
 
     function onMsg(raw) {
@@ -111,13 +148,14 @@ function buildHtml(
         var msg = typeof raw === 'string' ? JSON.parse(raw) : raw;
         if (!msg || !msg.type) return;
         if (msg.type === 'update') {
-          setRoute(msg.route || []);
+          setRoute(msg.route || [], msg.speeds || []);
           setPlanned(msg.planned || []);
           setUser(msg.user || null, !!msg.paused);
           setDest(msg.dest || null);
           if (msg.follow && msg.user) map.panTo(msg.user);
+          if (msg.refit && msg.route && msg.route.length) fit(msg.route, true);
         }
-        if (msg.type === 'fit' && msg.route && msg.route.length) fit(msg.route);
+        if (msg.type === 'fit' && msg.route && msg.route.length) fit(msg.route, true);
         if (msg.type === 'center' && msg.lat != null) map.setView([msg.lat, msg.lon], msg.zoom || map.getZoom());
       } catch (e) {}
     }
@@ -130,10 +168,21 @@ function buildHtml(
 }
 
 const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
-  { region, routePoints, accentColor, userLocation, paused, plannedRoute = [], destination },
+  {
+    region,
+    routePoints,
+    accentColor,
+    userLocation,
+    paused,
+    plannedRoute = [],
+    destination,
+    followUser = true,
+    routeSpeedsKmh,
+  },
   ref
 ) {
   const webRef = useRef<WebView>(null);
+  const didBootFit = useRef(false);
   const zoom = Math.max(
     10,
     Math.min(16, Math.round(Math.log2(360 / Math.max(region.latitudeDelta || 0.05, 0.005))))
@@ -146,11 +195,12 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
         region.longitude,
         zoom,
         routePoints,
-        userLocation,
+        followUser ? userLocation : null,
         accentColor,
         !!paused,
         plannedRoute,
-        destination
+        destination,
+        routeSpeedsKmh || null
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
@@ -172,17 +222,21 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
     inject(webRef, {
       type: 'update',
       route: routePoints.map((p) => [p.latitude, p.longitude]),
+      speeds: routeSpeedsKmh || [],
       planned: (plannedRoute || []).map((p) => [p.latitude, p.longitude]),
-      user: userLocation ? [userLocation.latitude, userLocation.longitude] : null,
+      user: followUser && userLocation ? [userLocation.latitude, userLocation.longitude] : null,
       dest: destination ? [destination.latitude, destination.longitude] : null,
       paused: !!paused,
-      follow: true,
+      follow: !!followUser,
+      refit: !followUser && routePoints.length > 1 && !didBootFit.current,
     });
-  }, [routePoints, userLocation, paused, plannedRoute, destination]);
+    if (!followUser && routePoints.length > 1) didBootFit.current = true;
+  }, [routePoints, userLocation, paused, plannedRoute, destination, followUser, routeSpeedsKmh]);
 
+  // Remount une fois hors Paris par défaut — mais avec region déjà = bbox trajet
   const [bootKey, setBootKey] = useState(0);
   useEffect(() => {
-    if (Math.abs(region.latitude - 48.8566) > 0.2 || Math.abs(region.longitude - 2.3522) > 0.2) {
+    if (Math.abs(region.latitude - 48.8566) > 0.15 || Math.abs(region.longitude - 2.3522) > 0.15) {
       setBootKey((k) => (k === 0 ? 1 : k));
     }
   }, [region.latitude, region.longitude]);
@@ -194,11 +248,12 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
         region.longitude,
         zoom,
         routePoints,
-        userLocation,
+        followUser ? userLocation : null,
         accentColor,
         !!paused,
         plannedRoute,
-        destination
+        destination,
+        routeSpeedsKmh || null
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [bootKey]

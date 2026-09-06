@@ -93,6 +93,60 @@ export function averageMovingSpeedKmh(distanceKm: number, points: PointLike[]): 
   return (distanceKm / mins) * 60;
 }
 
+export type RouteSpeedStats = {
+  avgKmh: number;
+  maxKmh: number;
+  minKmh: number;
+  /** Vitesse estimée au point i (0 au départ) */
+  pointSpeedsKmh: number[];
+};
+
+/**
+ * Vitesses segment par segment (device `speed` ou haversine/dt).
+ * Ignore arrêt / outliers.
+ */
+export function computeRouteSpeedStats(
+  points: Array<PointLike & { speed?: number }>
+): RouteSpeedStats {
+  const pointSpeedsKmh = points.map(() => 0);
+  const samples: number[] = [];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    let kmh = 0;
+    if (b.speed != null && Number.isFinite(b.speed) && b.speed >= 0) {
+      kmh = b.speed * 3.6;
+    } else {
+      const dt = b.timestamp - a.timestamp;
+      if (!Number.isFinite(dt) || dt <= 0 || dt > 180_000) continue;
+      const dKm = haversineKm(a.latitude, a.longitude, b.latitude, b.longitude);
+      kmh = dKm / (dt / 3_600_000);
+    }
+    if (kmh < 3 || kmh > 200) continue;
+    pointSpeedsKmh[i] = Math.round(kmh * 10) / 10;
+    samples.push(kmh);
+  }
+  if (!samples.length) {
+    return { avgKmh: 0, maxKmh: 0, minKmh: 0, pointSpeedsKmh };
+  }
+  const sum = samples.reduce((a, b) => a + b, 0);
+  return {
+    avgKmh: Math.round((sum / samples.length) * 10) / 10,
+    maxKmh: Math.round(Math.max(...samples) * 10) / 10,
+    minKmh: Math.round(Math.min(...samples) * 10) / 10,
+    pointSpeedsKmh,
+  };
+}
+
+/** Affichage durée trajet (minutes → « 42 min » / « 1 h 05 »). */
+export function formatDurationMinutes(mins: number): string {
+  const m = Math.max(0, Math.round(mins));
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  return r ? `${h} h ${String(r).padStart(2, '0')}` : `${h} h`;
+}
+
 export async function fetchElevationAscentM(points: PointLike[]): Promise<number> {
   if (points.length < 2) return 0;
   const step = Math.max(1, Math.ceil(points.length / 40));

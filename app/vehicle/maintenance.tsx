@@ -4,6 +4,7 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Button } from '@/components/Button';
+import { DatePickerField } from '@/components/DatePickerField';
 import { Input } from '@/components/Input';
 import { Card } from '@/components/Card';
 import {
@@ -13,7 +14,7 @@ import {
   updateMaintenance,
 } from '@/lib/database';
 import { formatEuro } from '@/lib/calculations';
-import { formatDateSlash } from '@/lib/dates';
+import { formatDateSlash, toLocalYmd } from '@/lib/dates';
 import { confirm, notify } from '@/lib/notify';
 import { refreshVehicleReminders } from '@/lib/reminders';
 import {
@@ -45,7 +46,7 @@ export default function VehicleMaintenanceScreen() {
   const [kind, setKind] = useState<MaintenanceKind>('controle_technique');
   const [title, setTitle] = useState('Contrôle technique');
   const [amount, setAmount] = useState('');
-  const [doneAt, setDoneAt] = useState('');
+  const [doneAt, setDoneAt] = useState(toLocalYmd(new Date()));
   const [dueDate, setDueDate] = useState('');
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
@@ -260,18 +261,22 @@ export default function VehicleMaintenanceScreen() {
         keyboardType="numeric"
         placeholder="63"
       />
-      <Input
-        label="Date réalisée (AAAA-MM-JJ)"
-        value={doneAt}
-        onChangeText={setDoneAt}
-        placeholder="2026-08-05"
-      />
-      <Input
-        label="Échéance rappel (AAAA-MM-JJ)"
-        value={dueDate}
-        onChangeText={setDueDate}
-        placeholder="2026-10-05"
-      />
+      <DatePickerField label="Date réalisée" value={doneAt} onChange={setDoneAt} />
+      {dueDate ? (
+        <>
+          <DatePickerField label="Échéance rappel" value={dueDate} onChange={setDueDate} />
+          <Pressable onPress={() => setDueDate('')} style={{ marginBottom: 12 }}>
+            <Text style={{ color: colors.textSecondary, fontWeight: '600' }}>Effacer l’échéance</Text>
+          </Pressable>
+        </>
+      ) : (
+        <Pressable
+          onPress={() => setDueDate(toLocalYmd(new Date()))}
+          style={{ marginBottom: 16 }}
+        >
+          <Text style={{ color: colors.accent, fontWeight: '700' }}>+ Ajouter une échéance</Text>
+        </Pressable>
+      )}
       <Input label="Note" value={note} onChangeText={setNote} />
       <Button title="Enregistrer" onPress={save} loading={loading} />
       <Button

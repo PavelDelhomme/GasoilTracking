@@ -5,9 +5,28 @@
 import { parseRoutePoints, type RoutePoint } from '@/lib/calculations';
 import { buildDrivingPoints, SIM_HOME, SIM_WORK, SIM_VIA } from '@/lib/gpsCarSimulator';
 import { fetchDrivingRoute } from '@/lib/roadDistance';
+import { forwardGeocode } from '@/lib/geocode';
 import type { Place, Trip } from '@/types';
 
 export type LatLng = { latitude: number; longitude: number };
+
+const geocodeCache = new Map<string, LatLng | null>();
+
+async function geocodeLabel(label: string | null | undefined): Promise<LatLng | null> {
+  const q = (label || '').trim();
+  if (q.length < 3) return null;
+  const key = q.toLowerCase();
+  if (geocodeCache.has(key)) return geocodeCache.get(key)!;
+  try {
+    const hit = await forwardGeocode(q);
+    const pt = hit ? { latitude: hit.latitude, longitude: hit.longitude } : null;
+    geocodeCache.set(key, pt);
+    return pt;
+  } catch {
+    geocodeCache.set(key, null);
+    return null;
+  }
+}
 
 /** Downsample en gardant début/fin (forme du trajet). */
 export function downsampleRoute(pts: LatLng[], max = 160): LatLng[] {
@@ -104,16 +123,34 @@ export async function getTripDisplayRoute(
   if (stored.length >= 2) {
     return downsampleRoute(
       stored.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
-      180
+      120
     );
   }
-  const ends = resolveTripEndpoints(trip, places);
+
+  let ends = resolveTripEndpoints(trip, places);
+  if (!ends) {
+    // Dernier recours : géocoder les libellés départ / arrivée
+    const [fromG, toG] = await Promise.all([
+      geocodeLabel(trip.originName),
+      geocodeLabel(trip.destinationName),
+    ]);
+    if (fromG && toG) ends = { from: fromG, to: toG };
+    else if (stored.length === 1 && toG) ends = { from: stored[0], to: toG };
+    else if (stored.length === 1 && fromG) ends = { from: fromG, to: stored[0] };
+  }
   if (!ends) return stored.length === 1 ? [stored[0]] : [];
+
+  // Évite un segment trop court (marqueurs « collés »)
+  const dLat = Math.abs(ends.from.latitude - ends.to.latitude);
+  const dLon = Math.abs(ends.from.longitude - ends.to.longitude);
+  if (dLat < 1e-5 && dLon < 1e-5) {
+    return [ends.from, { latitude: ends.from.latitude + 0.002, longitude: ends.from.longitude + 0.002 }];
+  }
 
   try {
     const route = await fetchDrivingRoute(ends.from, ends.to);
     if (route.coordinates.length >= 2) {
-      return downsampleRoute(route.coordinates, 180);
+      return downsampleRoute(route.coordinates, 120);
     }
   } catch {
     /* fallback sim */
@@ -125,7 +162,7 @@ export async function getTripDisplayRoute(
   });
   return downsampleRoute(
     sim.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
-    180
+    120
   );
 }
 

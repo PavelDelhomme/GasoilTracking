@@ -13,6 +13,10 @@ import {
   formatEuro,
   parseRoutePoints,
 } from '@/lib/calculations';
+import {
+  computeRouteSpeedStats,
+  formatDurationMinutes,
+} from '@/lib/consumptionModel';
 import { formatDateSlash } from '@/lib/dates';
 import { reverseGeocode, tripPlaceLabel, tripSourceLabel } from '@/lib/geocode';
 import { notify, confirm } from '@/lib/notify';
@@ -28,6 +32,7 @@ export default function TripDetailScreen() {
   const { colors } = useTheme();
   const { activeVehicle, refresh } = useApp();
   const mapRef = useRef<TripMapRef>(null);
+  const fittedRef = useRef(false);
   const [trip, setTrip] = useState<Trip | null>(null);
   const [loading, setLoading] = useState(true);
   const [originLabel, setOriginLabel] = useState('');
@@ -41,6 +46,7 @@ export default function TripDetailScreen() {
       setLoading(false);
       return;
     }
+    fittedRef.current = false;
     const t = await getTripById(tripId);
     setTrip(t);
     setLoading(false);
@@ -73,31 +79,60 @@ export default function TripDetailScreen() {
     void load();
   }, [load]);
 
+  const rawPts = useMemo(
+    () => (trip ? parseRoutePoints(trip.routePoints) : []),
+    [trip]
+  );
+
   const points = useMemo(() => {
     if (displayPoints.length) return displayPoints;
-    return trip ? parseRoutePoints(trip.routePoints) : [];
-  }, [trip, displayPoints]);
+    return rawPts;
+  }, [displayPoints, rawPts]);
+
+  const speedStats = useMemo(() => computeRouteSpeedStats(rawPts), [rawPts]);
+
+  const mapPoints = useMemo(() => {
+    // Préférer le GPS stocké (timestamps/vitesses) pour coloration
+    if (rawPts.length >= 2) return rawPts;
+    return points;
+  }, [rawPts, points]);
+
+  /** Région = bbox du trajet (pas le point de départ). */
+  const region = useMemo(() => {
+    const pts = mapPoints.length ? mapPoints : points;
+    if (pts.length < 1) {
+      return {
+        latitude: 48.8566,
+        longitude: 2.3522,
+        latitudeDelta: 0.08,
+        longitudeDelta: 0.08,
+      };
+    }
+    const lats = pts.map((p) => p.latitude);
+    const lons = pts.map((p) => p.longitude);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLon = Math.min(...lons);
+    const maxLon = Math.max(...lons);
+    return {
+      latitude: (minLat + maxLat) / 2,
+      longitude: (minLon + maxLon) / 2,
+      latitudeDelta: Math.max((maxLat - minLat) * 1.4, 0.025),
+      longitudeDelta: Math.max((maxLon - minLon) * 1.4, 0.025),
+    };
+  }, [mapPoints, points]);
 
   useEffect(() => {
-    if (points.length > 0) {
-      setTimeout(() => {
-        mapRef.current?.fitToCoordinates(
-          points.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
-          { edgePadding: { top: 40, right: 40, bottom: 40, left: 40 }, animated: true }
-        );
-      }, 400);
-    }
-  }, [points]);
-
-  const region = useMemo(() => {
-    const p = points[0] || { latitude: 48.8566, longitude: 2.3522 };
-    return {
-      latitude: p.latitude,
-      longitude: p.longitude,
-      latitudeDelta: 0.08,
-      longitudeDelta: 0.08,
-    };
-  }, [points]);
+    if (mapPoints.length < 2 || fittedRef.current) return;
+    const t = setTimeout(() => {
+      mapRef.current?.fitToCoordinates(
+        mapPoints.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
+        { edgePadding: { top: 48, right: 48, bottom: 48, left: 48 }, animated: false }
+      );
+      fittedRef.current = true;
+    }, 450);
+    return () => clearTimeout(t);
+  }, [mapPoints]);
 
   const stats =
     trip && activeVehicle
@@ -145,7 +180,12 @@ export default function TripDetailScreen() {
     );
   }
 
-  const endPt = points.length > 1 ? points[points.length - 1] : null;
+  const avgShown =
+    speedStats.avgKmh > 0
+      ? speedStats.avgKmh
+      : stats?.movingSpeedKmh
+        ? Math.round(stats.movingSpeedKmh * 10) / 10
+        : 0;
 
   return (
     <>
@@ -155,10 +195,18 @@ export default function TripDetailScreen() {
           <TripMap
             ref={mapRef}
             region={region}
-            routePoints={points}
+            routePoints={mapPoints}
             accentColor={colors.accent}
-            userLocation={endPt}
+            followUser={false}
+            userLocation={null}
             paused={false}
+            routeSpeedsKmh={
+              rawPts.length >= 2 &&
+              mapPoints === rawPts &&
+              speedStats.maxKmh > 0
+                ? speedStats.pointSpeedsKmh
+                : undefined
+            }
           />
         </View>
 
@@ -206,9 +254,31 @@ export default function TripDetailScreen() {
             <StatCard label="Coût" value={formatEuro(trip.estimatedCost)} />
             <StatCard
               label="Durée"
-              value={`${Math.floor(stats?.durationMinutes ?? 0)} min`}
+              value={formatDurationMinutes(stats?.durationMinutes ?? 0)}
             />
           </View>
+
+          {(avgShown > 0 || speedStats.maxKmh > 0) && (
+            <>
+              <Text style={[styles.speedHint, { color: colors.textSecondary }]}>
+                Tracé coloré : vert = plus lent → rouge = plus rapide
+              </Text>
+              <View style={styles.statsRow}>
+                <StatCard label="Vitesse moy." value={avgShown > 0 ? `${avgShown} km/h` : '—'} />
+                <StatCard
+                  label="Vitesse max"
+                  value={speedStats.maxKmh > 0 ? `${speedStats.maxKmh} km/h` : '—'}
+                />
+              </View>
+              <View style={styles.statsRow}>
+                <StatCard
+                  label="Vitesse min"
+                  value={speedStats.minKmh > 0 ? `${speedStats.minKmh} km/h` : '—'}
+                />
+                <StatCard label="Points GPS" value={`${rawPts.length || points.length}`} />
+              </View>
+            </>
+          )}
 
           {!!trip.note && (
             <Card style={{ marginBottom: 12 }}>
@@ -216,10 +286,6 @@ export default function TripDetailScreen() {
               <Text style={{ color: colors.text, marginTop: 4 }}>{trip.note}</Text>
             </Card>
           )}
-
-          <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 12 }}>
-            {points.length} point(s) GPS enregistrés — tracé coloré sur la carte.
-          </Text>
 
           <Button title="Supprimer ce trajet" variant="danger" onPress={onDelete} />
         </ScrollView>
@@ -236,4 +302,5 @@ const styles = StyleSheet.create({
   section: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
   place: { fontSize: 16, fontWeight: '700', marginTop: 4, lineHeight: 22 },
   statsRow: { flexDirection: 'row', gap: 12, marginVertical: 8 },
+  speedHint: { fontSize: 12, marginTop: 4, marginBottom: 0 },
 });

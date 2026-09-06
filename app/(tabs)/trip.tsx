@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Linking,
   ScrollView,
+  FlatList,
   TouchableOpacity,
   Pressable,
   Platform,
@@ -72,6 +73,7 @@ import { TripHistoryCard } from '@/components/TripHistoryCard';
 import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
 import { evaluateGpsSample } from '@/lib/gpsTracking';
 import { formatDateSlash } from '@/lib/dates';
+import { preloadHistoryMaps } from '@/lib/tripMapCache';
 import type { SinceLastFillStats } from '@/types';
 import type { RoutePoint } from '@/lib/calculations';
 
@@ -117,6 +119,21 @@ export default function TripScreen() {
   const [pending, setPending] = useState<Trip[]>([]);
   const [sinceFill, setSinceFill] = useState<SinceLastFillStats | null>(null);
   const [historyFilter, setHistoryFilter] = useState<'all' | 'sinceFill'>('all');
+  const [mapVisibleIds, setMapVisibleIds] = useState<Set<number>>(() => new Set());
+  const onHistoryViewable = useRef(
+    ({ viewableItems }: { viewableItems: Array<{ item: Trip; index: number | null }> }) => {
+      const ids = new Set<number>();
+      for (const v of viewableItems) {
+        if (v.item?.id != null) ids.add(v.item.id);
+      }
+      // Toujours garder les 2 premiers (au-dessus du fold)
+      setMapVisibleIds(ids);
+    }
+  ).current;
+  const historyViewConfig = useRef({
+    itemVisiblePercentThreshold: 12,
+    minimumViewTime: 60,
+  }).current;
   const [userLocation, setUserLocation] = useState<GeoCoords | null>(null);
   const [currentRegion, setCurrentRegion] = useState({
     latitude: 48.8566,
@@ -127,6 +144,14 @@ export default function TripScreen() {
   const [liveOriginLabel, setLiveOriginLabel] = useState('');
   const [liveDestLabel, setLiveDestLabel] = useState('');
   const lastMapGps = useRef<RoutePoint | null>(null);
+  const filteredHistory = useMemo(() => {
+    const fillDate = sinceFill?.lastFill?.date;
+    if (historyFilter === 'sinceFill' && fillDate) {
+      return history.filter((t) => t.startTime >= fillDate);
+    }
+    return history;
+  }, [history, historyFilter, sinceFill?.lastFill?.date]);
+
   const isWeb = Platform.OS === 'web';
 
   const loadLists = useCallback(async () => {
@@ -142,11 +167,14 @@ export default function TripScreen() {
       getSinceLastFillStats(activeVehicle.id),
       getPlaces(),
     ]);
-    setHistory(trips.filter((t) => !t.isActive).slice(0, 50));
+    const hist = trips.filter((t) => !t.isActive).slice(0, 50);
+    setHistory(hist);
     setPending(pend);
     setSinceFill(since);
     setPlaces(pl);
-  }, [activeVehicle]);
+    // Précharge géométrie + images mini-cartes (ne bloque pas l’UI)
+    void preloadHistoryMaps(hist.slice(0, 8), pl, colors.accent);
+  }, [activeVehicle, colors.accent]);
 
   useFocusEffect(
     useCallback(() => {
@@ -1181,15 +1209,27 @@ export default function TripScreen() {
             )}
           </ScrollView>
         </>
+      ) : !activeVehicle ? (
+        <View style={[styles.panel, styles.panelContent]}>
+          <Card>
+            <Text style={[styles.warning, { color: colors.warning }]}>
+              Sélectionnez un véhicule pour l’historique.
+            </Text>
+          </Card>
+        </View>
       ) : (
-        <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
-          {!activeVehicle ? (
-            <Card>
-              <Text style={[styles.warning, { color: colors.warning }]}>
-                Sélectionnez un véhicule pour l’historique.
-              </Text>
-            </Card>
-          ) : (
+        <FlatList
+          style={styles.panel}
+          contentContainerStyle={styles.panelContent}
+          data={filteredHistory}
+          keyExtractor={(t) => String(t.id)}
+          initialNumToRender={3}
+          maxToRenderPerBatch={2}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS === 'android'}
+          onViewableItemsChanged={onHistoryViewable}
+          viewabilityConfig={historyViewConfig}
+          ListHeaderComponent={
             <>
               {pending.length > 0 && (
                 <View style={{ marginBottom: 16 }}>
@@ -1378,37 +1418,28 @@ export default function TripScreen() {
                 </Pressable>
               </View>
               <Text style={[styles.hint, { color: colors.textSecondary }]}>
-                Adresses départ / arrivée · touchez pour le détail carte.
+                Adresses · durée · touchez pour le détail (carte + vitesses).
               </Text>
-              {(() => {
-                const fillDate = sinceFill?.lastFill?.date;
-                const list =
-                  historyFilter === 'sinceFill' && fillDate
-                    ? history.filter((t) => t.startTime >= fillDate)
-                    : history;
-                if (list.length === 0) {
-                  return (
-                    <Card style={{ marginTop: 12 }}>
-                      <Text style={{ color: colors.textSecondary, textAlign: 'center' }}>
-                        {historyFilter === 'sinceFill'
-                          ? 'Aucun trajet depuis le dernier plein.'
-                          : 'Aucun trajet terminé.'}
-                      </Text>
-                    </Card>
-                  );
-                }
-                return list.map((t) => (
-                  <TripHistoryCard
-                    key={t.id}
-                    trip={t}
-                    onPress={openDetail}
-                    onDelete={handleDeleteTrip}
-                  />
-                ));
-              })()}
+              {filteredHistory.length === 0 && (
+                <Card style={{ marginTop: 12 }}>
+                  <Text style={{ color: colors.textSecondary, textAlign: 'center' }}>
+                    {historyFilter === 'sinceFill'
+                      ? 'Aucun trajet depuis le dernier plein.'
+                      : 'Aucun trajet terminé.'}
+                  </Text>
+                </Card>
+              )}
             </>
+          }
+          renderItem={({ item: t, index }) => (
+            <TripHistoryCard
+              trip={t}
+              onPress={openDetail}
+              onDelete={handleDeleteTrip}
+              showMap={mapVisibleIds.has(t.id) || index < 2}
+            />
           )}
-        </ScrollView>
+        />
       )}
     </View>
   );
