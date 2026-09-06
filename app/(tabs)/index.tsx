@@ -124,7 +124,7 @@ export default function HomeScreen() {
       await syncNow();
       showToast('Synchronisation manuelle réussie');
     } catch {
-      /* offline */
+      showToast('Hors ligne — données locales affichées');
     }
     try {
       await checkNow();
@@ -240,9 +240,9 @@ export default function HomeScreen() {
               onPress={() => router.push('/vehicle/add')}
               style={{ marginTop: 16 }}
             />
-            {vehicles.length === 0 && (
+            {vehicles.length === 0 && __DEV__ && (
               <Button
-                title="Charger un exemple (trajets + pleins)"
+                title="Charger un exemple (données de démo)"
                 variant="outline"
                 loading={seeding}
                 onPress={loadDemo}
@@ -466,6 +466,28 @@ export default function HomeScreen() {
               </Card>
             )}
 
+            {(fuelTone === 'warn' || fuelTone === 'critical') && (
+              <Card
+                style={{
+                  marginBottom: 16,
+                  borderColor: fuelColor,
+                  borderWidth: 1.5,
+                }}
+              >
+                <Text style={{ color: fuelColor, fontWeight: '800', fontSize: 15 }}>
+                  {fuelTone === 'critical' ? 'Réservoir critique' : 'Carburant bas'}
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 4, marginBottom: 10 }}>
+                  Pensez à faire le plein bientôt
+                  {sinceFill?.rangeKm
+                    ? ` · ~${formatDistance(sinceFill.rangeKm)} d’autonomie`
+                    : ''}
+                  .
+                </Text>
+                <Button title="Nouveau plein" onPress={() => router.push('/fillup/add')} />
+              </Card>
+            )}
+
             <View style={styles.statsRow}>
               <StatCard
                 label="Total dépensé"
@@ -649,7 +671,7 @@ export default function HomeScreen() {
             icon: 'gas-pump',
             onPress: () => {
               if (!activeVehicle) {
-                notify('Véhicule', 'Sélectionnez un véhicule d’abord.');
+                router.push('/(tabs)/vehicles' as never);
                 return;
               }
               router.push('/fillup/add');
@@ -661,7 +683,7 @@ export default function HomeScreen() {
             icon: 'navigate',
             onPress: () => {
               if (!activeVehicle) {
-                notify('Véhicule', 'Sélectionnez un véhicule d’abord.');
+                router.push('/(tabs)/vehicles' as never);
                 return;
               }
               router.push('/(tabs)/trip');

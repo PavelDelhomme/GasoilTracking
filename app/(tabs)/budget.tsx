@@ -957,6 +957,32 @@ export default function BudgetScreen() {
               Aucune station trouvée dans cette zone. Essayez une autre ville ou « Ma position ».
             </Text>
           )}
+          {stations.length > 0 && (
+            <Button
+              title="Y aller · station la moins chère"
+              onPress={() => {
+                const s = stations[0];
+                const fuelKey =
+                  activeVehicle?.fuelType === 'diesel'
+                    ? 'gazole'
+                    : activeVehicle?.fuelType === 'gpl'
+                      ? 'gplc'
+                      : 'e10';
+                router.push({
+                  pathname: '/fillup/station' as never,
+                  params: {
+                    name: s.name,
+                    address: `${s.address} ${s.city}`.trim(),
+                    lat: String(s.latitude),
+                    lon: String(s.longitude),
+                    price: String(s.prices[fuelKey] ?? ''),
+                    fuelKey,
+                  },
+                } as never);
+              }}
+              style={{ marginBottom: 10 }}
+            />
+          )}
           {stations.map((s, idx) => {
             const fuelKey =
               activeVehicle?.fuelType === 'diesel'

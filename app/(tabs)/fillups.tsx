@@ -24,7 +24,7 @@ import {
 } from '@/lib/calculations';
 import { formatDateSlash, monthKeyFromDate, currentMonthKey, formatMonthChip, formatMonthLabel } from '@/lib/dates';
 import { ProgressBar } from '@/components/Card';
-import { notify } from '@/lib/notify';
+import { Button } from '@/components/Button';
 import type { FillUp, MonthFillStats } from '@/types';
 
 const PAGE = 25;
@@ -39,11 +39,18 @@ export default function FillUpsScreen() {
   const [visibleCount, setVisibleCount] = useState(PAGE);
   const [initialized, setInitialized] = useState(false);
   const [loadingList, setLoadingList] = useState(true);
+  const [listError, setListError] = useState('');
 
   const loadFillUps = useCallback(async () => {
-    const data = await getFillUps(activeVehicle?.id);
-    setAllFillUps(data);
-    return data;
+    try {
+      const data = await getFillUps(activeVehicle?.id);
+      setAllFillUps(data);
+      setListError('');
+      return data;
+    } catch (e) {
+      setListError(e instanceof Error ? e.message : 'Impossible de charger les pleins.');
+      return [] as FillUp[];
+    }
   }, [activeVehicle?.id]);
 
   useEffect(() => {
@@ -306,11 +313,26 @@ export default function FillUpsScreen() {
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
               {!activeVehicle
                 ? 'Sélectionnez un véhicule pour voir les pleins'
-                : allFillUps.length === 0
-                  ? 'Aucun plein enregistré'
-                  : 'Aucun plein pour cette période'}
+                : listError
+                  ? listError
+                  : allFillUps.length === 0
+                    ? 'Aucun plein enregistré'
+                    : 'Aucun plein pour cette période'}
             </Text>
-            {activeVehicle && allFillUps.length === 0 && (
+            {!activeVehicle && (
+              <View style={{ marginTop: 12, alignSelf: 'stretch' }}>
+                <Button
+                  title="Voir les véhicules"
+                  onPress={() => router.push('/(tabs)/vehicles' as never)}
+                />
+              </View>
+            )}
+            {!!listError && activeVehicle && (
+              <Pressable onPress={() => void loadFillUps()} style={{ marginTop: 10 }}>
+                <Text style={{ color: colors.accent, fontWeight: '700' }}>Réessayer</Text>
+              </Pressable>
+            )}
+            {activeVehicle && allFillUps.length === 0 && !listError && (
               <Pressable
                 onPress={() => router.push('/fillup/add' as never)}
                 style={{
@@ -364,7 +386,7 @@ export default function FillUpsScreen() {
                       fontWeight: '700',
                     }}
                   >
-                    {fill.isFull ? 'Complet' : 'Partiel'}
+                    {fill.isFull ? 'Plein' : 'Partiel'}
                   </Text>
                 </View>
               </View>
@@ -377,6 +399,26 @@ export default function FillUpsScreen() {
               {fill.liters.toFixed(2)} L
               <Text style={{ color: colors.textSecondary }}> · </Text>
               {formatPerLiter(fill.pricePerLiter)}
+              {(() => {
+                const idx = allFillUps.findIndex((f) => f.id === fill.id);
+                const prev = idx >= 0 ? allFillUps[idx + 1] : null;
+                if (!prev || !(prev.pricePerLiter > 0) || !(fill.pricePerLiter > 0)) return null;
+                const deltaCt = Math.round((fill.pricePerLiter - prev.pricePerLiter) * 1000) / 10;
+                if (Math.abs(deltaCt) < 0.05) return null;
+                const up = deltaCt > 0;
+                return (
+                  <Text
+                    style={{
+                      color: up ? colors.danger : colors.success,
+                      fontWeight: '700',
+                    }}
+                  >
+                    {' '}
+                    ({up ? '+' : ''}
+                    {deltaCt.toFixed(1)} ct/L)
+                  </Text>
+                );
+              })()}
             </Text>
 
             <View style={styles.fillFoot}>
@@ -399,7 +441,7 @@ export default function FillUpsScreen() {
         icon="gas-pump"
         onPress={() => {
           if (!activeVehicle) {
-            notify('Véhicule', 'Sélectionnez un véhicule d’abord.');
+            router.push('/(tabs)/vehicles' as never);
             return;
           }
           router.push('/fillup/add');

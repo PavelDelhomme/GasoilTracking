@@ -66,7 +66,7 @@ export default function VehiclesScreen() {
                 textAlign: 'center',
               }}
             >
-              Ou depuis l&apos;accueil : « Charger un exemple »
+              Ou depuis l&apos;accueil (mode démo développeur)
             </Text>
           </View>
         }

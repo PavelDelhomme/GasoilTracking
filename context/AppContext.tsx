@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import type { BudgetStatus, Trip, Vehicle } from '@/types';
 import {
   getActiveVehicle,
@@ -35,6 +35,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [activeTrip, setActiveTrip] = useState<Trip | null>(null);
   const [budgetStatuses, setBudgetStatuses] = useState<BudgetStatus[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  /** Évite repairTripHistory à chaque poll 90s — seulement au boot / changement véhicule. */
+  const repairedForVehicle = useRef<number | 'none' | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -47,10 +49,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setActiveVehicleState(active);
       setActiveTrip(trip);
 
-      try {
-        await repairTripHistory(active?.id);
-      } catch (e) {
-        console.warn('repairTripHistory', e);
+      const repairKey = active?.id ?? 'none';
+      if (repairedForVehicle.current !== repairKey) {
+        try {
+          await repairTripHistory(active?.id);
+          repairedForVehicle.current = repairKey;
+        } catch (e) {
+          console.warn('repairTripHistory', e);
+        }
       }
 
       await ensureDefaultBudgets(vehicleList);

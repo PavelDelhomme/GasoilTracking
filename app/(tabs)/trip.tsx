@@ -10,6 +10,7 @@ import {
   Pressable,
   Platform,
   AppState,
+  RefreshControl,
   type AppStateStatus,
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -162,6 +163,7 @@ export default function TripScreen() {
       true;
   const [history, setHistory] = useState<Trip[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyRefreshing, setHistoryRefreshing] = useState(false);
   const [pending, setPending] = useState<Trip[]>([]);
   const [sinceFill, setSinceFill] = useState<SinceLastFillStats | null>(null);
   const [historyFilter, setHistoryFilter] = useState<'all' | 'sinceFill'>('all');
@@ -217,7 +219,7 @@ export default function TripScreen() {
       getSinceLastFillStats(activeVehicle.id),
       getPlaces(),
     ]);
-    const hist = trips.filter((t) => !t.isActive).slice(0, 50);
+    const hist = trips.filter((t) => !t.isActive).slice(0, 80);
     setHistory(hist);
     setPending(pend);
     setSinceFill(since);
@@ -846,7 +848,13 @@ export default function TripScreen() {
         speed > 0 ? `Vitesse moy. ${speed.toFixed(0)} km/h` : null,
         ascentM > 20 ? `D+ ${ascentM} m` : null,
         priceAtTrip > 0
-          ? `Essence ~${priceAtTrip.toFixed(3)} €/L · ${formatEuro(cost)}`
+          ? `${
+              activeVehicle?.fuelType === 'diesel'
+                ? 'Gasoil'
+                : activeVehicle?.fuelType === 'gpl'
+                  ? 'GPL'
+                  : 'Essence'
+            } ~${priceAtTrip.toFixed(3)} €/L · ${formatEuro(cost)}`
           : null,
         endFuel != null ? `Jauge arrivée ~${endFuel.toFixed(1)} L` : null,
       ].filter(Boolean);
@@ -1024,26 +1032,33 @@ export default function TripScreen() {
       activeTrip?.destinationName?.trim() ||
       liveDestLabel?.trim() ||
       '';
-    if (destCoords) {
-      await launchGoogleMapsNavigation({
-        destination: destCoords,
-        origin: userLocation,
-        waypoints: mapsWaypointsForRoute(selectedRoute),
-        label: label || 'Destination',
-      });
-      return;
+    let opened = false;
+    try {
+      if (destCoords) {
+        opened = await launchGoogleMapsNavigation({
+          destination: destCoords,
+          origin: userLocation,
+          waypoints: mapsWaypointsForRoute(selectedRoute),
+          label: label || 'Destination',
+        });
+      } else if (label) {
+        await Linking.openURL(openGoogleMapsSearch(label));
+        opened = true;
+      } else {
+        const loc = userLocation || (await getCurrentLocation())?.coords;
+        if (loc) {
+          opened = await launchGoogleMapsNavigation({
+            destination: { latitude: loc.latitude + 0.01, longitude: loc.longitude + 0.01 },
+            origin: loc,
+            label: 'Destination',
+          });
+        }
+      }
+    } catch {
+      opened = false;
     }
-    if (label) {
-      await Linking.openURL(openGoogleMapsSearch(label));
-      return;
-    }
-    const loc = userLocation || (await getCurrentLocation())?.coords;
-    if (loc) {
-      await launchGoogleMapsNavigation({
-        destination: { latitude: loc.latitude + 0.01, longitude: loc.longitude + 0.01 },
-        origin: loc,
-        label: 'Destination',
-      });
+    if (!opened) {
+      notify('Google Maps', 'Impossible d’ouvrir Maps. Vérifiez qu’il est installé.');
     }
   };
 
@@ -2000,6 +2015,11 @@ export default function TripScreen() {
             <Text style={[styles.warning, { color: colors.warning }]}>
               Sélectionnez un véhicule pour l’historique.
             </Text>
+            <Button
+              title="Aller aux véhicules"
+              onPress={() => router.push('/(tabs)/vehicles' as never)}
+              style={{ marginTop: 12 }}
+            />
           </Card>
         </View>
       ) : (
@@ -2014,6 +2034,22 @@ export default function TripScreen() {
           removeClippedSubviews={Platform.OS === 'android'}
           onViewableItemsChanged={onHistoryViewable}
           viewabilityConfig={historyViewConfig}
+          refreshControl={
+            <RefreshControl
+              refreshing={historyRefreshing}
+              onRefresh={() => {
+                void (async () => {
+                  setHistoryRefreshing(true);
+                  try {
+                    await loadLists();
+                  } finally {
+                    setHistoryRefreshing(false);
+                  }
+                })();
+              }}
+              tintColor={colors.accent}
+            />
+          }
           ListHeaderComponent={
             <>
               {pending.length > 0 && (
