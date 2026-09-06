@@ -89,9 +89,13 @@ import {
 import { computeNavGuidance, headingFromTrail } from '@/lib/navGuidance';
 import {
   computeDestinationHabitStats,
-  computeSimilarTripStats,
   type SimilarTripStats,
 } from '@/lib/similarTrips';
+import {
+  commuteHintLabel,
+  suggestTripsForNow,
+  type SmartSuggestion,
+} from '@/lib/smartSuggestions';
 import type { SinceLastFillStats } from '@/types';
 import type { RoutePoint } from '@/lib/calculations';
 
@@ -132,6 +136,7 @@ export default function TripScreen() {
   const [routesLoading, setRoutesLoading] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [nearDestination, setNearDestination] = useState(false);
+  const [smartDismissed, setSmartDismissed] = useState(false);
   const arrivalPromptedRef = useRef(false);
   const [isStopping, setIsStopping] = useState(false);
   const [tripStartFuelLiters, setTripStartFuelLiters] = useState<number | null>(null);
@@ -1239,6 +1244,17 @@ export default function TripScreen() {
     return computeDestinationHabitStats(history, destination.trim(), destCoords);
   }, [destination, destCoords, history]);
 
+  const smartSuggestions = useMemo((): SmartSuggestion[] => {
+    if (activeTrip || smartDismissed) return [];
+    return suggestTripsForNow({
+      places,
+      trips: history,
+      userLocation,
+    });
+  }, [activeTrip, smartDismissed, places, history, userLocation]);
+
+  const smartHint = useMemo(() => commuteHintLabel(), [tab, activeTrip?.id]);
+
   // Quand la position arrive après le choix d’une destination
   useEffect(() => {
     if (activeTrip || !destCoords || !userLocation) return;
@@ -1554,6 +1570,79 @@ export default function TripScreen() {
               </>
             ) : (
               <>
+                {smartSuggestions.length > 0 && (
+                  <Card style={{ marginBottom: 10 }}>
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        marginBottom: 8,
+                      }}
+                    >
+                      <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>
+                        {smartHint || 'Suggestion du moment'}
+                      </Text>
+                      <Pressable onPress={() => setSmartDismissed(true)} hitSlop={10}>
+                        <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Plus tard</Text>
+                      </Pressable>
+                    </View>
+                    <Text
+                      style={{
+                        color: colors.textSecondary,
+                        fontSize: 12,
+                        marginBottom: 10,
+                        lineHeight: 17,
+                      }}
+                    >
+                      Proposition selon l’heure et vos trajets réguliers — optionnel.
+                    </Text>
+                    {smartSuggestions.map((s) => (
+                      <Pressable
+                        key={s.id}
+                        onPress={() => {
+                          setSmartDismissed(true);
+                          applyDestination(s.label, s.latitude, s.longitude);
+                        }}
+                        style={[
+                          styles.smartRow,
+                          {
+                            borderColor: colors.accent,
+                            backgroundColor: colors.accent + '14',
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name={
+                            s.kind === 'commute_to_home'
+                              ? 'home'
+                              : s.kind === 'commute_to_work'
+                                ? 'briefcase'
+                                : 'navigate'
+                          }
+                          size={20}
+                          color={colors.accent}
+                        />
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={{ color: colors.text, fontWeight: '800' }} numberOfLines={1}>
+                            {s.title}
+                          </Text>
+                          <Text
+                            style={{ color: colors.textSecondary, fontSize: 12 }}
+                            numberOfLines={1}
+                          >
+                            {s.subtitle}
+                            {s.habitCount > 0 ? ` · ${s.habitCount} trajets` : ''}
+                          </Text>
+                        </View>
+                        <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 12 }}>
+                          Préparer
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </Card>
+                )}
+
                 <Card>
                   <Text style={[styles.sectionTitle, { color: colors.text }]}>
                     Mode de démarrage
@@ -1669,26 +1758,44 @@ export default function TripScreen() {
                 {startMode === 'nav' && destinationHabit && destinationHabit.count >= 1 && (
                   <Card style={{ marginBottom: 10 }}>
                     <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700' }}>
-                      MOYENNE SUR CE TRAJET ({destinationHabit.count}×)
+                      HABITUDE SUR CE TRAJET · {destinationHabit.count}×
                     </Text>
-                    <Text
-                      style={{
-                        color: colors.textSecondary,
-                        fontSize: 12,
-                        marginTop: 6,
-                        lineHeight: 18,
-                      }}
-                    >
-                      {destinationHabit.avgDistanceKm.toFixed(1)} km ·{' '}
-                      {destinationHabit.avgFuelL.toFixed(1)} L ·{' '}
-                      {formatEuro(destinationHabit.avgCost)}
-                      {destinationHabit.avgDurationMin > 0
-                        ? ` · ${destinationHabit.avgDurationMin} min`
-                        : ''}
-                      {destinationHabit.avgL100 > 0
-                        ? ` · ${destinationHabit.avgL100.toFixed(1)} L/100`
-                        : ''}
-                    </Text>
+                    <View style={styles.habitStatsRow}>
+                      <View style={styles.habitStat}>
+                        <Text style={[styles.habitStatVal, { color: colors.text }]}>
+                          {destinationHabit.avgDistanceKm.toFixed(1)}
+                        </Text>
+                        <Text style={{ color: colors.textSecondary, fontSize: 10 }}>km</Text>
+                      </View>
+                      <View style={styles.habitStat}>
+                        <Text style={[styles.habitStatVal, { color: colors.text }]}>
+                          {destinationHabit.avgFuelL.toFixed(1)}
+                        </Text>
+                        <Text style={{ color: colors.textSecondary, fontSize: 10 }}>L</Text>
+                      </View>
+                      <View style={styles.habitStat}>
+                        <Text style={[styles.habitStatVal, { color: colors.text }]}>
+                          {formatEuro(destinationHabit.avgCost)}
+                        </Text>
+                        <Text style={{ color: colors.textSecondary, fontSize: 10 }}>coût</Text>
+                      </View>
+                      {destinationHabit.avgDurationMin > 0 && (
+                        <View style={styles.habitStat}>
+                          <Text style={[styles.habitStatVal, { color: colors.text }]}>
+                            {destinationHabit.avgDurationMin}
+                          </Text>
+                          <Text style={{ color: colors.textSecondary, fontSize: 10 }}>min</Text>
+                        </View>
+                      )}
+                      {destinationHabit.avgL100 > 0 && (
+                        <View style={styles.habitStat}>
+                          <Text style={[styles.habitStatVal, { color: colors.accent }]}>
+                            {destinationHabit.avgL100.toFixed(1)}
+                          </Text>
+                          <Text style={{ color: colors.textSecondary, fontSize: 10 }}>L/100</Text>
+                        </View>
+                      )}
+                    </View>
                     {destinationHabit.avgL100 > 0 && (
                       <View
                         style={[
@@ -1701,7 +1808,8 @@ export default function TripScreen() {
                         ]}
                       >
                         <Text style={{ color: colors.text, fontSize: 12, fontWeight: '600' }}>
-                          Habitude : {destinationHabit.avgL100.toFixed(1)} L/100 km
+                          Référence conso : {destinationHabit.avgL100.toFixed(1)} L/100 km sur ce
+                          parcours
                         </Text>
                       </View>
                     )}
@@ -2061,6 +2169,24 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 6,
+  },
+  habitStatsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 10,
+  },
+  habitStat: { minWidth: 52, alignItems: 'center' },
+  habitStatVal: { fontSize: 15, fontWeight: '800' },
+  smartRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginBottom: 8,
   },
   routePicker: {
     position: 'absolute',
