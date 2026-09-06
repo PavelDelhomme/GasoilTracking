@@ -2,6 +2,11 @@ import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, use
 import { Platform, StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import type { TripMapRef, TripMapProps, RouteCoord } from './TripMap.types';
+import { downsampleRoute } from '@/lib/routeGeometry';
+
+function ptsForMap(pts: RouteCoord[] | undefined, max = 140): RouteCoord[] {
+  return downsampleRoute(pts || [], max);
+}
 
 function buildHtml(
   lat: number,
@@ -16,10 +21,10 @@ function buildHtml(
   speeds: number[] | null,
   alternates: RouteCoord[][]
 ): string {
-  const routeJson = JSON.stringify(route.map((p) => [p.latitude, p.longitude]));
-  const plannedJson = JSON.stringify(planned.map((p) => [p.latitude, p.longitude]));
+  const routeJson = JSON.stringify(ptsForMap(route).map((p) => [p.latitude, p.longitude]));
+  const plannedJson = JSON.stringify(ptsForMap(planned).map((p) => [p.latitude, p.longitude]));
   const altsJson = JSON.stringify(
-    (alternates || []).map((alt) => alt.map((p) => [p.latitude, p.longitude]))
+    (alternates || []).map((alt) => ptsForMap(alt, 80).map((p) => [p.latitude, p.longitude]))
   );
   const speedsJson = JSON.stringify(speeds || []);
   const userJson = user ? JSON.stringify([user.latitude, user.longitude]) : 'null';
@@ -246,11 +251,11 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
   useEffect(() => {
     inject(webRef, {
       type: 'update',
-      route: routePoints.map((p) => [p.latitude, p.longitude]),
+      route: ptsForMap(routePoints).map((p) => [p.latitude, p.longitude]),
       speeds: routeSpeedsKmh || [],
-      planned: (plannedRoute || []).map((p) => [p.latitude, p.longitude]),
+      planned: ptsForMap(plannedRoute).map((p) => [p.latitude, p.longitude]),
       alts: (alternateRoutes || []).map((alt) =>
-        alt.map((p) => [p.latitude, p.longitude])
+        ptsForMap(alt, 80).map((p) => [p.latitude, p.longitude])
       ),
       user: followUser && userLocation ? [userLocation.latitude, userLocation.longitude] : null,
       dest: destination ? [destination.latitude, destination.longitude] : null,

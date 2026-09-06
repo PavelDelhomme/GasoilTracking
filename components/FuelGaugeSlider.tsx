@@ -1,5 +1,7 @@
 /**
  * Jauge visuelle réglable (glisser / taper) — niveau essence.
+ * Le curseur et le remplissage ignorent les touches : pageX vs piste,
+ * sinon un tap sur le curseur renvoyait locationX ≈ 0 → jauge qui recule.
  */
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
@@ -11,6 +13,7 @@ import {
   Pressable,
 } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
+import { gaugeFractionFromTouch, gaugeMarkLabel } from '@/lib/fuelGaugeMath';
 
 const MARKS = [
   { f: 0, label: 'Vide' },
@@ -54,21 +57,40 @@ export function FuelGaugeSlider({
   const radius = compact ? 9 : 14;
 
   const [trackW, setTrackW] = useState(0);
+  const [dragging, setDragging] = useState(false);
   const trackWRef = useRef(0);
+  const trackPageXRef = useRef(0);
+  const trackRef = useRef<View>(null);
   const liveRef = useRef(valueL);
   liveRef.current = valueL;
 
-  const applyX = useCallback(
-    (x: number, commit: boolean) => {
-      if (disabled || trackWRef.current <= 0) return;
-      const f = Math.max(0, Math.min(1, x / trackWRef.current));
-      const next = Math.round(capacity * f * 10) / 10;
+  const commitLiters = useCallback(
+    (next: number, commit: boolean) => {
       liveRef.current = next;
       onChange(next);
       if (commit) onChangeEnd?.(next);
     },
-    [capacity, disabled, onChange, onChangeEnd]
+    [onChange, onChangeEnd]
   );
+
+  const applyPageX = useCallback(
+    (pageX: number, commit: boolean) => {
+      if (disabled || trackWRef.current <= 0) return;
+      const f = gaugeFractionFromTouch(pageX, trackPageXRef.current, trackWRef.current);
+      const next = Math.round(capacity * f * 10) / 10;
+      commitLiters(next, commit);
+    },
+    [capacity, commitLiters, disabled]
+  );
+
+  const measureTrack = useCallback(() => {
+    trackRef.current?.measureInWindow((x, _y, width) => {
+      if (width > 0) {
+        trackPageXRef.current = x;
+        trackWRef.current = width;
+      }
+    });
+  }, []);
 
   const pan = useMemo(
     () =>
@@ -77,28 +99,34 @@ export function FuelGaugeSlider({
         onMoveShouldSetPanResponder: () => !disabled,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: (evt) => {
-          applyX(evt.nativeEvent.locationX, false);
+          setDragging(true);
+          measureTrack();
+          applyPageX(evt.nativeEvent.pageX, false);
         },
         onPanResponderMove: (evt) => {
-          applyX(evt.nativeEvent.locationX, false);
+          applyPageX(evt.nativeEvent.pageX, false);
         },
         onPanResponderRelease: (evt) => {
-          applyX(evt.nativeEvent.locationX, true);
+          applyPageX(evt.nativeEvent.pageX, true);
+          setDragging(false);
         },
         onPanResponderTerminate: () => {
           onChangeEnd?.(liveRef.current);
+          setDragging(false);
         },
       }),
-    [applyX, disabled, onChangeEnd]
+    [applyPageX, disabled, measureTrack, onChangeEnd]
   );
 
   const onLayout = (e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
     trackWRef.current = w;
     setTrackW(w);
+    measureTrack();
   };
 
   const thumbLeft = Math.max(0, Math.min(trackW - thumb, fraction * trackW - thumb / 2));
+  const mark = gaugeMarkLabel(fraction);
 
   return (
     <View
@@ -106,11 +134,14 @@ export function FuelGaugeSlider({
       pointerEvents={disabled ? 'none' : 'auto'}
       accessibilityRole="adjustable"
       accessibilityLabel="Niveau de carburant"
+      accessibilityHint="Touchez l’endroit voulu sur la barre : Vide, 1/4, 1/2, 3/4 ou Plein"
       accessibilityValue={{
         min: 0,
         max: Math.round(capacity),
         now: Math.round(valueL),
-        text: known ? `${valueL.toFixed(1)} litres sur ${capacity.toFixed(0)}` : 'Niveau inconnu',
+        text: known
+          ? `${mark} · ${valueL.toFixed(1)} litres sur ${capacity.toFixed(0)}`
+          : 'Niveau inconnu — glissez pour régler',
       }}
     >
       <View style={[styles.valueRow, compact && { marginBottom: 4 }]}>
@@ -123,11 +154,13 @@ export function FuelGaugeSlider({
           {known ? `${valueL.toFixed(1)} L` : 'Régler…'}
         </Text>
         <Text style={{ color: colors.textSecondary, fontSize: compact ? 11 : 12 }}>
-          / {capacity.toFixed(0)} L
+          {mark} · / {capacity.toFixed(0)} L
         </Text>
       </View>
 
       <View
+        ref={trackRef}
+        collapsable={false}
         style={[
           styles.track,
           {
@@ -141,6 +174,7 @@ export function FuelGaugeSlider({
         {...pan.panHandlers}
       >
         <View
+          pointerEvents="none"
           style={[
             styles.fill,
             {
@@ -215,11 +249,20 @@ export function FuelGaugeSlider({
         ))}
       </View>
 
-      {!compact && (
-        <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }}>
-          Glissez la barre ou touchez Vide → Plein
-        </Text>
-      )}
+      <Text
+        style={{
+          color: dragging ? fillColor : colors.textSecondary,
+          fontSize: 11,
+          marginTop: 4,
+          fontWeight: dragging ? '700' : '400',
+        }}
+      >
+        {dragging
+          ? `Niveau à cet endroit : ${mark} · ${valueL.toFixed(1)} L`
+          : compact
+            ? 'Touchez la barre à l’endroit du niveau (Vide → Plein)'
+            : 'Touchez ou glissez exactement où est la jauge — le libellé (Vide, 1/2, Plein…) indique le niveau chargé'}
+      </Text>
     </View>
   );
 }

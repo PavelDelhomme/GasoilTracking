@@ -25,6 +25,8 @@ import { seedDemoData } from '@/lib/seedDemo';
 import { seedTodayCommuteAndFillUp } from '@/lib/seedToday';
 import { notify } from '@/lib/notify';
 import { getPlaces, getMaintenances, getTrips, reconcileTrackedKmFromTrips } from '@/lib/database';
+import { isPayloadTooLargeError } from '@/lib/api';
+import { computeBudgetOutlook } from '@/lib/budgetOutlook';
 import { fuelRemainingTone, fuelToneColor, setFuelLiters } from '@/lib/fuelLevel';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
 import type { ConsumptionStats, Place, SinceLastFillStats, Trip, VehicleMaintenance } from '@/types';
@@ -126,8 +128,12 @@ export default function HomeScreen() {
       if (result === 'pulled') showToast('Cloud téléchargé');
       else if (result === 'pushed') showToast('Sauvegarde envoyée au cloud');
       else showToast('Synchronisation à jour');
-    } catch {
-      showToast('Hors ligne — données locales affichées');
+    } catch (e) {
+      if (isPayloadTooLargeError(e)) {
+        showToast('Sauvegarde trop lourde — tracés compressés, réessayez');
+      } else {
+        showToast('Hors ligne — données locales affichées');
+      }
     }
     try {
       await checkNow();
@@ -198,6 +204,16 @@ export default function HomeScreen() {
   const homePlace = places.find((p) => p.kind === 'home');
   const workPlace = places.find((p) => p.kind === 'work');
   const favoritePlaces = places.filter((p) => p.kind === 'other' || p.kind === 'station');
+  const budgetOutlook = mainBudget
+    ? computeBudgetOutlook({
+        allocation: mainBudget.budget.amount,
+        spent: mainBudget.spent,
+        startDate: mainBudget.budget.startDate,
+        endDate: mainBudget.budget.endDate,
+        vehicles,
+        plannedMonthSpend: 0,
+      })
+    : null;
 
   const todayKm = todayTrips.reduce((s, t) => s + t.distanceKm, 0);
   const todayFuel = todayTrips.reduce((s, t) => s + t.estimatedFuelUsed, 0);
@@ -570,6 +586,20 @@ export default function HomeScreen() {
                   <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 8 }}>
                     {formatEuro(mainBudget.spent)} dépensés sur {formatEuro(mainBudget.budget.amount)}
                   </Text>
+                  {budgetOutlook && budgetOutlook.rangeKm > 0 && (
+                    <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 6, lineHeight: 17 }}>
+                      Autonomie ~{formatDistance(budgetOutlook.rangeKm)}
+                      {budgetOutlook.fuelStockValue > 0
+                        ? ` (stock ${formatEuro(budgetOutlook.fuelStockValue)})`
+                        : ''}
+                      {' · '}
+                      {Math.ceil(budgetOutlook.remainingDays)} j. restants
+                      {' · '}
+                      {budgetOutlook.adjustedRemaining >= 0
+                        ? `reste estimé ${formatEuro(budgetOutlook.adjustedRemaining)}`
+                        : `manque estimé ${formatEuro(Math.abs(budgetOutlook.adjustedRemaining))}`}
+                    </Text>
+                  )}
                   <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700', marginTop: 8 }}>
                     Voir le budget →
                   </Text>

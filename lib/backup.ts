@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fetchSync, getToken, pushSync } from '@/lib/api';
+import { fetchSync, getToken, isPayloadTooLargeError, pushSync } from '@/lib/api';
 import {
   applySnapshot,
   collectSnapshot,
@@ -8,6 +8,7 @@ import {
   type AppDataSnapshot,
 } from '@/lib/dataSnapshot';
 import { repairFillUpVehiclesAndBudgets } from '@/lib/repairFillUpVehicles';
+import { prepareSnapshotForPush, slimSnapshotAggressive } from '@/lib/syncPayload';
 
 const BACKUP_KEY = 'gasoil_local_backup_v1';
 const PENDING_UPDATE_KEY = 'gasoil_pending_update_v1';
@@ -45,7 +46,7 @@ export async function prepareDataForUpdate(): Promise<{
   const token = await getToken();
   if (token) {
     try {
-      await pushSync(snapshot);
+      await pushSyncSafe(snapshot);
       cloudSynced = true;
     } catch {
       cloudSynced = false;
@@ -126,12 +127,23 @@ export async function recoverDataAfterUpdateIfNeeded(): Promise<'ok' | 'restored
   return 'empty';
 }
 
+/** Pousse le snapshot en compactant les tracés GPS (évite HTTP 413). */
+async function pushSyncSafe(snapshot: AppDataSnapshot): Promise<void> {
+  const prepared = prepareSnapshotForPush(snapshot);
+  try {
+    await pushSync(prepared);
+  } catch (e) {
+    if (!isPayloadTooLargeError(e)) throw e;
+    await pushSync(slimSnapshotAggressive(prepared));
+  }
+}
+
 /** Sync cloud complète (tous les objets) + backup local. */
 export async function syncFullBackup(): Promise<boolean> {
   const token = await getToken();
   const snap = await saveLocalBackup();
   if (!token) return false;
-  await pushSync(snap);
+  await pushSyncSafe(snap);
   return true;
 }
 
@@ -204,7 +216,7 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
     await saveLocalBackup(await collectSnapshot());
     return 'pulled';
   }
-  await pushSync(local);
+  await pushSyncSafe(local);
   await saveLocalBackup(local);
   return 'pushed';
 }

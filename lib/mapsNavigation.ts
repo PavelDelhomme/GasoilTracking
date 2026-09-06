@@ -1,7 +1,7 @@
 /**
  * Lance Google Maps en navigation guidée.
- * Android : si waypoints (itinéraire alternatif / éco) → classique saddr/daddr d’abord,
- * sinon google.navigation: (fiable Blackview).
+ * Jamais d’arrêt intermédiaire : les points « via » sont des passages (via:),
+ * pas des destinations (sinon Maps ajoute un stop au milieu du trajet).
  */
 import { Linking, Platform } from 'react-native';
 
@@ -11,37 +11,42 @@ function fmt(p: MapsLatLng): string {
   return `${Number(p.latitude).toFixed(6)},${Number(p.longitude).toFixed(6)}`;
 }
 
-/** Waypoints « via » pour biaiser l’itinéraire. */
+/** Passage sans arrêt (préfixe Google Maps `via:`). */
+export function formatViaPassThrough(p: MapsLatLng): string {
+  return `via:${fmt(p)}`;
+}
+
+/**
+ * Waypoints pour biaiser Maps. Uniquement des via explicites (OSRM alternatif).
+ * On n’injecte plus un point à 40 % du tracé : ça créait un arrêt fantôme.
+ */
 export function buildViaWaypoints(
-  routeCoords: MapsLatLng[] | undefined,
+  _routeCoords: MapsLatLng[] | undefined,
   explicitVia?: MapsLatLng[]
 ): MapsLatLng[] {
   if (explicitVia?.length) return explicitVia.slice(0, 2);
-  if (!routeCoords || routeCoords.length < 8) return [];
-  const n = routeCoords.length;
-  return [routeCoords[Math.floor(n * 0.4)]].filter(Boolean);
+  return [];
 }
 
-/** URL HTTPS directions (web / iOS / fallback). */
+/** URL HTTPS directions (web / iOS / fallback) — via = passage, pas stop. */
 export function buildGoogleMapsDirUrl(opts: {
   destination: MapsLatLng;
   origin?: MapsLatLng | null;
   waypoints?: MapsLatLng[];
   navigate?: boolean;
 }): string {
-  if (opts.origin || (opts.waypoints && opts.waypoints.length)) {
-    const segs: string[] = [];
-    if (opts.origin) segs.push(fmt(opts.origin));
-    else segs.push('Current+Location');
-    for (const w of (opts.waypoints || []).slice(0, 2)) segs.push(fmt(w));
-    segs.push(fmt(opts.destination));
-    return `https://www.google.com/maps/dir/${segs.join('/')}`;
-  }
   const parts = [
     'api=1',
     `destination=${fmt(opts.destination)}`,
     'travelmode=driving',
   ];
+  if (opts.origin) {
+    parts.push(`origin=${fmt(opts.origin)}`);
+  }
+  const wps = (opts.waypoints || []).slice(0, 2);
+  if (wps.length) {
+    parts.push(`waypoints=${wps.map(formatViaPassThrough).join('|')}`);
+  }
   if (opts.navigate && Platform.OS !== 'android') {
     parts.push('dir_action=navigate');
   }
@@ -59,6 +64,7 @@ async function tryOpen(url: string): Promise<boolean> {
 
 /**
  * Ouvre Google Maps et démarre la navigation si possible.
+ * Destination seule en priorité (pas d’arrêt ajouté).
  */
 export async function launchGoogleMapsNavigation(opts: {
   destination: MapsLatLng;
@@ -67,20 +73,16 @@ export async function launchGoogleMapsNavigation(opts: {
   label?: string;
 }): Promise<boolean> {
   const dest = fmt(opts.destination);
-  const wps = opts.waypoints || [];
+  const wps = (opts.waypoints || []).slice(0, 2);
   const hasVia = wps.length > 0;
 
   if (Platform.OS === 'android') {
-    // Avec via (éco / alternatif) : ouvrir l’itinéraire guidé avec passages
-    // avant le schéma navigation simple (qui ignore les waypoints).
-    if (hasVia) {
-      const origin = opts.origin ? fmt(opts.origin) : 'Current+Location';
-      const via = wps.map((p) => fmt(p)).join('+to:');
-      const classic =
-        `https://maps.google.com/maps?saddr=${origin}` +
-        `&daddr=${via}+to:${dest}&dirflg=d`;
-      if (await tryOpen(classic)) return true;
+    // Navigation native : destination uniquement (fiable, sans stop).
+    if (await tryOpen(`google.navigation:q=${dest}&mode=d`)) {
+      return true;
+    }
 
+    if (hasVia) {
       const pathUrl = buildGoogleMapsDirUrl({
         destination: opts.destination,
         origin: opts.origin,
@@ -90,11 +92,6 @@ export async function launchGoogleMapsNavigation(opts: {
       if (await tryOpen(pathUrl)) return true;
     }
 
-    // Sans via (ou fallback) : navigation turn-by-turn native
-    if (await tryOpen(`google.navigation:q=${dest}&mode=d`)) {
-      return true;
-    }
-
     const classic = `https://maps.google.com/maps?daddr=${dest}&dirflg=d`;
     if (await tryOpen(classic)) return true;
 
@@ -102,15 +99,6 @@ export async function launchGoogleMapsNavigation(opts: {
   }
 
   if (Platform.OS === 'ios') {
-    if (hasVia && opts.origin) {
-      const pathUrl = buildGoogleMapsDirUrl({
-        destination: opts.destination,
-        origin: opts.origin,
-        waypoints: wps,
-        navigate: true,
-      });
-      if (await tryOpen(pathUrl)) return true;
-    }
     const gmaps = `comgooglemaps://?daddr=${dest}&directionsmode=driving`;
     if (await tryOpen(gmaps)) return true;
   }
@@ -119,7 +107,7 @@ export async function launchGoogleMapsNavigation(opts: {
     buildGoogleMapsDirUrl({
       destination: opts.destination,
       origin: opts.origin,
-      waypoints: wps,
+      waypoints: hasVia ? wps : undefined,
       navigate: true,
     })
   );

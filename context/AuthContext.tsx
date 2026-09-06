@@ -16,6 +16,7 @@ import {
 } from '@/lib/api';
 import { applySnapshot, hasLocalUserData, normalizeSnapshot } from '@/lib/dataSnapshot';
 import { saveLocalBackup, refreshFromCloud, syncPreferNewer } from '@/lib/backup';
+import { getActiveTrip } from '@/lib/database';
 
 type AuthContextType = {
   user: AuthUser | null;
@@ -92,7 +93,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         void refreshMe();
-        void syncPreferNewer().catch(() => {});
+        void (async () => {
+          try {
+            const live = await getActiveTrip();
+            // Ne pas sync pendant un trajet GPS (payload + Maps = 413 / OOM)
+            if (live?.isActive && !live.isPaused) return;
+            await syncPreferNewer();
+          } catch {
+            /* ignore */
+          }
+        })();
       }
     });
     return () => sub.remove();

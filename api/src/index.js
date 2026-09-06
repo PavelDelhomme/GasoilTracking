@@ -260,7 +260,8 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: '256kb' }));
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
 function clientIp(req) {
   return (
@@ -1267,7 +1268,7 @@ app.put('/api/sync', auth, syncLimiter, (req, res) => {
     return res.status(400).json({ error: 'Payload sync invalide' });
   }
   const payload = JSON.stringify(body);
-  if (payload.length > 2_000_000) {
+  if (payload.length > 12_000_000) {
     return res.status(413).json({ error: 'Payload trop volumineux' });
   }
   const now = new Date().toISOString();
@@ -1759,6 +1760,20 @@ app.post('/api/admin/releases', auth, requireAdmin, upload.single('apk'), (req, 
   const notes = req.body?.releaseNotes || '';
   const force = req.body?.forceUpdate === '1' || req.body?.forceUpdate === true;
   res.status(201).json(saveRelease({ version, notes, force, file: req.file }));
+});
+
+app.use((err, _req, res, next) => {
+  if (!err) return next();
+  const tooLarge =
+    err.status === 413 ||
+    err.type === 'entity.too.large' ||
+    err.name === 'PayloadTooLargeError';
+  if (tooLarge) {
+    return res.status(413).json({ error: 'Payload trop volumineux' });
+  }
+  console.error('api error', err);
+  if (res.headersSent) return next(err);
+  return res.status(500).json({ error: 'Erreur serveur' });
 });
 
 app.listen(PORT, '0.0.0.0', () => {

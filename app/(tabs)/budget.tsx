@@ -17,7 +17,8 @@ import { useTheme } from '@/hooks/useTheme';
 import { Card, ProgressBar } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
-import { formatEuro, getActiveMonthlyAllocation } from '@/lib/calculations';
+import { formatEuro, getActiveMonthlyAllocation, formatDistance } from '@/lib/calculations';
+import { computeBudgetOutlook, plannedMonthSpendFromRoutes } from '@/lib/budgetOutlook';
 import { currentMonthKey, formatMonthChip, formatMonthLabel, monthKeyFromDate, formatDateSlash, formatRelativeDay } from '@/lib/dates';
 import {
   deleteBudget,
@@ -367,6 +368,14 @@ export default function BudgetScreen() {
     : currentMonthSpent > monthlyAllocation * 0.8 && monthlyAllocation > 0
       ? colors.warning
       : colors.success;
+  const outlook = computeBudgetOutlook({
+    allocation: monthlyAllocation,
+    spent: currentMonthSpent,
+    startDate: globalStatus?.budget.startDate,
+    endDate: globalStatus?.budget.endDate,
+    vehicles,
+    plannedMonthSpend: plannedMonthSpendFromRoutes(routes, vehicles),
+  });
 
   const vehicleName = (id: number) => vehicles.find((v) => v.id === id)?.name || `Véhicule #${id}`;
 
@@ -406,6 +415,26 @@ export default function BudgetScreen() {
               color={statusColor}
               height={12}
             />
+            {outlook.rangeKm > 0 && (
+              <View style={{ marginTop: 10, gap: 4 }}>
+                <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>
+                  Autonomie ~{formatDistance(outlook.rangeKm)}
+                  {outlook.fuelStockValue > 0
+                    ? ` · stock ${formatEuro(outlook.fuelStockValue)} (${outlook.fuelStockLiters.toFixed(1)} L)`
+                    : ''}
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 17 }}>
+                  Encore ~{Math.ceil(outlook.remainingDays)} j. ce mois
+                  {outlook.plannedRemainingSpend > 0
+                    ? ` · trajets prévus ~${formatEuro(outlook.plannedRemainingSpend)}`
+                    : ''}
+                  {'. '}
+                  {outlook.adjustedRemaining >= 0
+                    ? `Reste estimé après autonomie : ${formatEuro(outlook.adjustedRemaining)}`
+                    : `Manque estimé après autonomie : ${formatEuro(Math.abs(outlook.adjustedRemaining))}`}
+                </Text>
+              </View>
+            )}
             {currentMonthSpent <= 0 && lastSpendMonth !== calendarMonth && (
               <Text style={{ color: colors.textSecondary, marginTop: 8, fontSize: 13 }}>
                 Pas encore de plein en {formatMonthLabel(calendarMonth).toLowerCase()}. Dernier mois

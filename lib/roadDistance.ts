@@ -33,11 +33,23 @@ type RawRoute = {
   via?: Geo[];
 };
 
+function downsampleGeo(pts: Geo[], max = 160): Geo[] {
+  if (pts.length <= max) return pts;
+  const out: Geo[] = [pts[0]];
+  const step = (pts.length - 1) / (max - 1);
+  for (let i = 1; i < max - 1; i++) {
+    out.push(pts[Math.round(i * step)]);
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
 function toCoords(geometry?: { coordinates?: [number, number][] }): Geo[] {
-  return (geometry?.coordinates || []).map(([lon, lat]) => ({
+  const raw = (geometry?.coordinates || []).map(([lon, lat]) => ({
     latitude: lat,
     longitude: lon,
   }));
+  return downsampleGeo(raw, 160);
 }
 
 async function osrmRoute(points: Geo[], maxAlternatives: number): Promise<RawRoute[]> {
@@ -108,11 +120,6 @@ function corridorOffsetVias(from: Geo, to: Geo): Geo[] {
     }
   }
   return out;
-}
-
-function midViaFromGeometry(coords: Geo[]): Geo | null {
-  if (coords.length < 8) return null;
-  return coords[Math.floor(coords.length * 0.45)] || null;
 }
 
 function dedupeRoutes(collected: RawRoute[], max = 6): RawRoute[] {
@@ -191,8 +198,6 @@ export async function fetchDrivingRouteAlternatives(
     const fp = routeFingerprint(r);
     if (used.has(fp)) return false;
     used.add(fp);
-    const via =
-      r.via?.length ? r.via : midViaFromGeometry(r.coordinates) ? [midViaFromGeometry(r.coordinates)!] : undefined;
     pick.push({
       id: `${kind}-${fp}`,
       label,
@@ -200,7 +205,8 @@ export async function fetchDrivingRouteAlternatives(
       distanceKm: r.distanceKm,
       durationMinutes: r.durationMinutes,
       coordinates: r.coordinates,
-      via: kind === 'fastest' && !r.via?.length ? undefined : via,
+      // Uniquement un via OSRM réel — jamais un point milieu (ça devient un stop Maps)
+      via: r.via?.length ? r.via : undefined,
       source: 'osrm',
     });
     return true;

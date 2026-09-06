@@ -350,6 +350,114 @@ test('A/R total ~80–100 km', () => {
   assert.ok(total >= 70 && total <= 100, `total=${total}`);
 });
 
+console.log('\n=== 7. Jauge / Maps via / budget autonomie / sync slim ===');
+
+function gaugeFractionFromTouch(pageX, trackPageX, trackWidth) {
+  if (!(trackWidth > 0)) return 0;
+  return Math.max(0, Math.min(1, (pageX - trackPageX) / trackWidth));
+}
+function gaugeMarkLabel(f) {
+  if (f <= 0.03) return 'Vide';
+  if (Math.abs(f - 0.5) <= 0.04) return '1/2';
+  if (f >= 0.97) return 'Plein';
+  return `${Math.round(f * 100)} %`;
+}
+function formatViaPassThrough(p) {
+  return `via:${Number(p.latitude).toFixed(6)},${Number(p.longitude).toFixed(6)}`;
+}
+function buildGoogleMapsDirUrl(opts) {
+  const fmt = (p) => `${Number(p.latitude).toFixed(6)},${Number(p.longitude).toFixed(6)}`;
+  const parts = ['api=1', `destination=${fmt(opts.destination)}`, 'travelmode=driving'];
+  if (opts.origin) parts.push(`origin=${fmt(opts.origin)}`);
+  const wps = (opts.waypoints || []).slice(0, 2);
+  if (wps.length) parts.push(`waypoints=${wps.map(formatViaPassThrough).join('|')}`);
+  return `https://www.google.com/maps/dir/?${parts.join('&')}`;
+}
+function computeBudgetOutlook(opts) {
+  const now = opts.now || new Date('2026-09-16T12:00:00Z');
+  const start = new Date(opts.startDate);
+  const end = new Date(opts.endDate);
+  const msDay = 86400000;
+  const totalDays = Math.max(1, (end - start) / msDay);
+  const remainingDays = Math.max(0, (end - now) / msDay);
+  let liters = 0;
+  let value = 0;
+  let rangeKm = 0;
+  for (const v of opts.vehicles) {
+    if (v.estimatedFuelLiters == null) continue;
+    liters += v.estimatedFuelLiters;
+    value += v.estimatedFuelLiters * (v.defaultFuelPrice || 0);
+    const l100 = v.consumptionPer100 || 7.5;
+    rangeKm += (v.estimatedFuelLiters / l100) * 100;
+  }
+  const remainingCash = Math.max(0, opts.allocation - opts.spent);
+  const plannedRemainingSpend = opts.plannedMonthSpend * (remainingDays / totalDays);
+  const stillToBuy = Math.max(0, plannedRemainingSpend - value);
+  return {
+    remainingCash,
+    rangeKm,
+    fuelStockValue: value,
+    plannedRemainingSpend,
+    adjustedRemaining: remainingCash - stillToBuy,
+  };
+}
+
+test('tap milieu de piste → 50 % (pas un recul vers vide)', () => {
+  const f = gaugeFractionFromTouch(150, 50, 200);
+  assert.ok(Math.abs(f - 0.5) < 0.001, `f=${f}`);
+  assert.equal(gaugeMarkLabel(f), '1/2');
+});
+test('tap curseur (pageX piste, pas locationX thumb) → niveau conservé', () => {
+  // Ancien bug : locationX relatif au thumb 22 px → fraction ~0
+  const wrong = gaugeFractionFromTouch(11, 0, 200);
+  assert.ok(wrong < 0.1, `wrong=${wrong}`);
+  const right = gaugeFractionFromTouch(50 + 160, 50, 200); // 80 %
+  assert.ok(Math.abs(right - 0.8) < 0.001, `right=${right}`);
+});
+test('URL Maps via: n’ajoute pas un stop +to:', () => {
+  const url = buildGoogleMapsDirUrl({
+    destination: { latitude: 47.94, longitude: -1.23 },
+    origin: { latitude: 48.14, longitude: -1.58 },
+    waypoints: [{ latitude: 48.04867, longitude: -1.50282 }],
+  });
+  assert.ok(url.includes('via:48.048670,-1.502820'), url);
+  assert.equal(url.includes('+to:'), false);
+  assert.equal(/\/48\.048/.test(url.replace('via:', '')), false);
+});
+test('budget : stock carburant réduit le reste à acheter', () => {
+  const o = computeBudgetOutlook({
+    allocation: 250,
+    spent: 100,
+    startDate: '2026-09-01',
+    endDate: '2026-09-30',
+    now: new Date('2026-09-16T12:00:00Z'),
+    vehicles: [{ estimatedFuelLiters: 40, defaultFuelPrice: 1.8, consumptionPer100: 8 }],
+    plannedMonthSpend: 200,
+  });
+  assert.ok(o.rangeKm > 400 && o.rangeKm < 600, `range=${o.rangeKm}`);
+  assert.ok(o.fuelStockValue > 70, `stock=${o.fuelStockValue}`);
+  assert.ok(o.remainingCash === 150, `cash=${o.remainingCash}`);
+  // planned remaining ~ half month * 200 ≈ 100, stock 72 → stillToBuy ~28 → adjusted ~122
+  assert.ok(o.adjustedRemaining > 100 && o.adjustedRemaining < 150, `adj=${o.adjustedRemaining}`);
+});
+test('slim GPS : 600 points → 72', () => {
+  const pts = Array.from({ length: 600 }, (_, i) => ({
+    latitude: 48 + i * 0.0001,
+    longitude: -1.5,
+    timestamp: i * 1000,
+    accuracy: 8,
+  }));
+  const max = 72;
+  const out = [pts[0]];
+  const step = (pts.length - 1) / (max - 1);
+  for (let i = 1; i < max - 1; i++) out.push(pts[Math.round(i * step)]);
+  out.push(pts[pts.length - 1]);
+  const slim = JSON.stringify(out.map((p) => ({ latitude: p.latitude, longitude: p.longitude, timestamp: p.timestamp })));
+  const raw = JSON.stringify(pts);
+  assert.ok(out.length <= 72, `n=${out.length}`);
+  assert.ok(slim.length < raw.length / 5, `slim=${slim.length} raw=${raw.length}`);
+});
+
 console.log(`\n=== Résultat : ${passed} OK, ${failed} KO ===`);
 if (failed) {
   console.error(errors);

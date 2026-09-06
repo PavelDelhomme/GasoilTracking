@@ -108,8 +108,11 @@ export function VehicleCard({
         </View>
       </View>
 
-      <View
+      <Pressable
         style={styles.fuelBlock}
+        onPress={(e) => {
+          e.stopPropagation?.();
+        }}
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => true}
       >
@@ -134,7 +137,7 @@ export function VehicleCard({
             Autonomie est. ~{Math.round((draftLiters / vehicle.consumptionPer100) * 100)} km
           </Text>
         )}
-      </View>
+      </Pressable>
 
       <View style={styles.actions}>
         {!isActive && onSelect && (

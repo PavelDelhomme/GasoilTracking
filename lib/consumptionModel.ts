@@ -172,10 +172,13 @@ export async function fetchElevationAscentM(points: PointLike[]): Promise<number
   const sample = points.filter((_, i) => i % step === 0 || i === points.length - 1);
   const lats = sample.map((p) => p.latitude.toFixed(5)).join(',');
   const lons = sample.map((p) => p.longitude.toFixed(5)).join(',');
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = setTimeout(() => ctrl?.abort(), 4000);
   try {
     const url = `https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lons}`;
     const res = await fetch(url, {
       headers: { Accept: 'application/json', 'User-Agent': 'GasoilTracking/1.4' },
+      signal: ctrl?.signal,
     });
     if (!res.ok) return 0;
     const data = (await res.json()) as { elevation?: number[] };
@@ -189,6 +192,8 @@ export async function fetchElevationAscentM(points: PointLike[]): Promise<number
     return Math.round(ascent);
   } catch {
     return 0;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

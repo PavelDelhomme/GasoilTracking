@@ -46,7 +46,7 @@ import {
   getCurrentLocation,
   openGoogleMapsSearch,
 } from '@/lib/locationService';
-import { launchGoogleMapsNavigation, buildViaWaypoints } from '@/lib/mapsNavigation';
+import { launchGoogleMapsNavigation } from '@/lib/mapsNavigation';
 import {
   appendRoutePoint,
   calculateRouteDistance,
@@ -83,6 +83,7 @@ import { TripHistoryCard } from '@/components/TripHistoryCard';
 import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
 import { evaluateGpsSample } from '@/lib/gpsTracking';
 import { formatDateSlash, formatRelativeDay } from '@/lib/dates';
+import { downsampleRoute } from '@/lib/routeGeometry';
 import { preloadHistoryMaps } from '@/lib/tripMapCache';
 import {
   getRecentDestinations,
@@ -118,10 +119,9 @@ function smartWindowKey(): string {
 
 type GeoCoords = { latitude: number; longitude: number };
 
-/** Waypoints pour biaiser Google Maps vers l’itinéraire choisi. */
-function mapsWaypointsForRoute(route: DrivingRoute | null | undefined): GeoCoords[] {
-  if (!route) return [];
-  return buildViaWaypoints(route.coordinates, route.via);
+/** Pas de waypoint Maps : un via géométrie créait un arrêt fantôme (et plantait éco). */
+function mapsWaypointsForRoute(_route: DrivingRoute | null | undefined): GeoCoords[] {
+  return [];
 }
 
 export default function TripScreen() {
@@ -153,6 +153,7 @@ export default function TripScreen() {
   const [smartDismissed, setSmartDismissed] = useState(false);
   const arrivalPromptedRef = useRef(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [stopConfirm, setStopConfirm] = useState(false);
   const [tripStartFuelLiters, setTripStartFuelLiters] = useState<number | null>(null);
   const [simRunning, setSimRunning] = useState(false);
   const [simProgress, setSimProgress] = useState('');
@@ -468,10 +469,11 @@ export default function TripScreen() {
 
   const applyRouteSelection = useCallback((route: DrivingRoute) => {
     setSelectedRouteId(route.id);
-    setPlannedRoute(route.coordinates);
-    if (route.coordinates.length >= 2) {
-      const lats = route.coordinates.map((p) => p.latitude);
-      const lons = route.coordinates.map((p) => p.longitude);
+    const coords = downsampleRoute(route.coordinates, 160);
+    setPlannedRoute(coords);
+    if (coords.length >= 2) {
+      const lats = coords.map((p) => p.latitude);
+      const lons = coords.map((p) => p.longitude);
       setCurrentRegion({
         latitude: (Math.min(...lats) + Math.max(...lats)) / 2,
         longitude: (Math.min(...lons) + Math.max(...lons)) / 2,
@@ -538,6 +540,9 @@ export default function TripScreen() {
     // Capturer l’itinéraire choisi avant les await (évite state stale)
     let routeForNav: DrivingRoute | null =
       routeOptions.find((r) => r.id === selectedRouteId) || routeOptions[0] || null;
+    let mapsDest: GeoCoords | null = coordsOverride ?? null;
+    let mapsOrigin: GeoCoords | null = null;
+    let mapsLabel = destLabel;
 
     try {
       const gauge = await askFuelGaugeApprox(
@@ -565,10 +570,11 @@ export default function TripScreen() {
         : [];
 
       if (loc) {
-        setUserLocation({
+        mapsOrigin = {
           latitude: loc.coords.latitude,
           longitude: loc.coords.longitude,
-        });
+        };
+        setUserLocation(mapsOrigin);
       }
 
       let resolvedDest = coordsOverride ?? null;
@@ -580,12 +586,16 @@ export default function TripScreen() {
         }
       }
       if (destLabel) setDestination(destLabel);
-      if (resolvedDest) setDestCoords(resolvedDest);
+      if (resolvedDest) {
+        setDestCoords(resolvedDest);
+        mapsDest = resolvedDest;
+      }
+      mapsLabel = destLabel;
 
       if (loc && resolvedDest) {
         try {
           if (routeForNav && routeForNav.coordinates.length >= 2) {
-            setPlannedRoute(routeForNav.coordinates);
+            setPlannedRoute(downsampleRoute(routeForNav.coordinates, 160));
           } else {
             const alts = await fetchDrivingRouteAlternatives(
               { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
@@ -599,7 +609,7 @@ export default function TripScreen() {
               null;
             if (routeForNav) {
               setSelectedRouteId(routeForNav.id);
-              setPlannedRoute(routeForNav.coordinates);
+              setPlannedRoute(downsampleRoute(routeForNav.coordinates, 160));
             } else {
               setPlannedRoute([
                 { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
@@ -622,7 +632,7 @@ export default function TripScreen() {
 
       const destName = mode === 'nav' ? destLabel : undefined;
 
-      const tripId = await createTrip({
+      await createTrip({
         vehicleId: activeVehicle.id,
         startTime: new Date().toISOString(),
         endTime: null,
@@ -664,24 +674,28 @@ export default function TripScreen() {
 
       await refresh();
       await loadLists();
+    } catch {
+      notify('Erreur', 'Impossible de démarrer le trajet.');
+      setIsStarting(false);
+      return;
+    }
 
-      // Navigation Maps APRÈS démarrage suivi — avec l’itinéraire réellement choisi
-      if (mode === 'nav' && destName && resolvedDest) {
+    // Maps APRÈS le suivi — hors du try principal (un échec Maps ne doit pas
+    // faire croire que le trajet a échoué, ni tuer le GPS). Destination seule
+    // : pas d’arrêt intermédiaire.
+    try {
+      if (mode === 'nav' && mapsLabel && mapsDest) {
         void pushRecentDestination({
-          label: destName,
-          latitude: resolvedDest.latitude,
-          longitude: resolvedDest.longitude,
+          label: mapsLabel,
+          latitude: mapsDest.latitude,
+          longitude: mapsDest.longitude,
         }).then(() => getRecentDestinations(6).then(setRecentDests));
 
-        const origin = loc
-          ? { latitude: loc.coords.latitude, longitude: loc.coords.longitude }
-          : userLocation || undefined;
-        const wps = mapsWaypointsForRoute(routeForNav);
         const opened = await launchGoogleMapsNavigation({
-          destination: resolvedDest,
-          origin: origin || null,
-          waypoints: wps,
-          label: destName,
+          destination: mapsDest,
+          origin: mapsOrigin,
+          waypoints: [],
+          label: mapsLabel,
         });
         if (!opened) {
           notify(
@@ -689,10 +703,12 @@ export default function TripScreen() {
             'Impossible d’ouvrir la navigation. Le suivi GPS continue dans l’app.'
           );
         }
-        void tripId;
       }
     } catch {
-      notify('Erreur', 'Impossible de démarrer le trajet.');
+      notify(
+        'Google Maps',
+        'Maps n’a pas pu s’ouvrir. Le suivi GPS continue dans l’app.'
+      );
     } finally {
       setIsStarting(false);
     }
@@ -759,13 +775,20 @@ export default function TripScreen() {
   const finishTripCore = useCallback(
     async (opts?: { openRecap?: boolean; skipGauge?: boolean }) => {
       if (!activeTrip) return;
-      await stopBackgroundTracking();
-      await stopActiveTrips();
+      const trip = activeTrip;
+      const finishedId = trip.id;
+      const vehicleSnapshot = activeVehicle;
 
-      const pts = parseRoutePoints(activeTrip.routePoints);
+      try {
+        await stopBackgroundTracking();
+      } catch {
+        /* GPS déjà arrêté */
+      }
+
+      const pts = parseRoutePoints(compactRoutePointsJson(trip.routePoints || '[]'));
       const last = pts.length > 0 ? pts[pts.length - 1] : userLocation;
 
-      let destName = activeTrip.destinationName?.trim();
+      let destName = trip.destinationName?.trim();
       if (!destName && last) {
         destName =
           (await reverseGeocode(last.latitude, last.longitude).catch(() => null)) ||
@@ -773,7 +796,7 @@ export default function TripScreen() {
       }
       if (!destName) destName = 'Lieu d’arrivée';
 
-      let originName = activeTrip.originName?.trim();
+      let originName = trip.originName?.trim();
       if (!originName && pts[0]) {
         originName =
           (await reverseGeocode(pts[0].latitude, pts[0].longitude).catch(() => null)) ||
@@ -781,15 +804,16 @@ export default function TripScreen() {
       }
 
       const vehicle =
-        (activeVehicle && (await getVehicleById(activeVehicle.id))) || activeVehicle;
-      const ascentM = await fetchElevationAscentM(pts);
+        (vehicleSnapshot && (await getVehicleById(vehicleSnapshot.id).catch(() => null))) ||
+        vehicleSnapshot;
+      const ascentM = await fetchElevationAscentM(pts).catch(() => 0);
       const fuelUsed = vehicle
-        ? estimateTripFuelLiters(vehicle, activeTrip.distanceKm, {
+        ? estimateTripFuelLiters(vehicle, trip.distanceKm, {
             ascentM,
             learnedFactor: vehicle.consumptionLearnFactor,
           })
-        : activeTrip.estimatedFuelUsed;
-      const fills = vehicle ? await getFillUps(vehicle.id) : [];
+        : trip.estimatedFuelUsed;
+      const fills = vehicle ? await getFillUps(vehicle.id).catch(() => []) : [];
       const lastFill = [...fills].sort((a, b) => b.date.localeCompare(a.date))[0];
       const priceAtTrip =
         lastFill?.pricePerLiter && lastFill.pricePerLiter > 0
@@ -800,60 +824,68 @@ export default function TripScreen() {
       const liveStats = vehicle
         ? calculateTripStats(
             vehicle,
-            activeTrip.distanceKm,
-            activeTrip.startTime,
+            trip.distanceKm,
+            trip.startTime,
             new Date().toISOString(),
-            activeTrip.routePoints
+            trip.routePoints
           )
         : null;
       const speed =
         liveStats && liveStats.movingSpeedKmh > 0
           ? liveStats.movingSpeedKmh
           : liveStats
-            ? (activeTrip.distanceKm / Math.max(liveStats.durationMinutes, 0.01)) * 60
+            ? (trip.distanceKm / Math.max(liveStats.durationMinutes, 0.01)) * 60
             : 0;
 
       let endFuel: number | null = null;
       if (vehicle) {
-        if (opts?.skipGauge) {
-          if (activeTrip.distanceKm > 0) {
-            await applyTripFuelBurn(vehicle, activeTrip.distanceKm, ascentM);
+        const isFree = !trip.destinationName;
+        // Suivi libre : pas de modal jauge (Alert+Modal = crash Android).
+        if (opts?.skipGauge || isFree) {
+          if (trip.distanceKm > 0) {
+            await applyTripFuelBurn(vehicle, trip.distanceKm, ascentM).catch(() => null);
           }
         } else {
-          const gauge = await askFuelGaugeApprox(
-            vehicle,
-            'Niveau d’essence à l’arrivée',
-            'Comparez avec la jauge pour corriger les prochaines estimations.',
-            { softSkip: true }
-          );
-          if (!gauge.skipped) {
-            endFuel = gauge.liters;
-            const startFuel =
-              tripStartFuelLiters ??
-              (vehicle.estimatedFuelLiters != null
-                ? vehicle.estimatedFuelLiters + fuelUsed
-                : null);
-            if (startFuel != null && endFuel != null && startFuel > endFuel) {
-              const drop = startFuel - endFuel;
-              const sample = learnedFactorFromGauge(fuelUsed, drop);
-              await blendConsumptionLearnFactor(vehicle, sample);
+          try {
+            const gauge = await askFuelGaugeApprox(
+              vehicle,
+              'Niveau d’essence à l’arrivée',
+              'Comparez avec la jauge pour corriger les prochaines estimations.',
+              { softSkip: true }
+            );
+            if (!gauge.skipped) {
+              endFuel = gauge.liters;
+              const startFuel =
+                tripStartFuelLiters ??
+                (vehicle.estimatedFuelLiters != null
+                  ? vehicle.estimatedFuelLiters + fuelUsed
+                  : null);
+              if (startFuel != null && endFuel != null && startFuel > endFuel) {
+                const drop = startFuel - endFuel;
+                const sample = learnedFactorFromGauge(fuelUsed, drop);
+                await blendConsumptionLearnFactor(vehicle, sample);
+              }
+              await updateVehicle(vehicle.id, { estimatedFuelLiters: endFuel });
+            } else if (trip.distanceKm > 0) {
+              await applyTripFuelBurn(vehicle, trip.distanceKm, ascentM).catch(() => null);
             }
-            await updateVehicle(vehicle.id, { estimatedFuelLiters: endFuel });
-          } else if (activeTrip.distanceKm > 0) {
-            await applyTripFuelBurn(vehicle, activeTrip.distanceKm, ascentM);
+          } catch {
+            if (trip.distanceKm > 0) {
+              await applyTripFuelBurn(vehicle, trip.distanceKm, ascentM).catch(() => null);
+            }
           }
         }
       }
 
       const noteParts = [
-        activeTrip.note,
+        trip.note,
         speed > 0 ? `Vitesse moy. ${speed.toFixed(0)} km/h` : null,
         ascentM > 20 ? `D+ ${ascentM} m` : null,
         priceAtTrip > 0
           ? `${
-              activeVehicle?.fuelType === 'diesel'
+              vehicleSnapshot?.fuelType === 'diesel'
                 ? 'Gasoil'
-                : activeVehicle?.fuelType === 'gpl'
+                : vehicleSnapshot?.fuelType === 'gpl'
                   ? 'GPL'
                   : 'Essence'
             } ~${priceAtTrip.toFixed(3)} €/L · ${formatEuro(cost)}`
@@ -861,20 +893,20 @@ export default function TripScreen() {
         endFuel != null ? `Jauge arrivée ~${endFuel.toFixed(1)} L` : null,
       ].filter(Boolean);
 
-      const finishedId = activeTrip.id;
       await updateTrip(finishedId, {
         isActive: false,
         isPaused: false,
         endTime: new Date().toISOString(),
         status: 'confirmed',
-        originName: originName || activeTrip.originName,
+        originName: originName || trip.originName,
         destinationName: destName,
         estimatedFuelUsed: fuelUsed,
         estimatedCost: cost,
+        routePoints: compactRoutePointsJson(trip.routePoints || '[]'),
         note: noteParts.join(' · ') || undefined,
       });
-      if (activeTrip.distanceKm > 0) {
-        await addTrackedKm(activeTrip.vehicleId, activeTrip.distanceKm);
+      if (trip.distanceKm > 0) {
+        await addTrackedKm(trip.vehicleId, trip.distanceKm).catch(() => undefined);
       }
       setLiveOriginLabel('');
       setLiveDestLabel('');
@@ -885,16 +917,19 @@ export default function TripScreen() {
       setSelectedRouteId(null);
       setTripStartFuelLiters(null);
       setNearDestination(false);
+      setStopConfirm(false);
       arrivalPromptedRef.current = false;
       await refresh();
       await loadLists();
 
       if (opts?.openRecap !== false) {
-        router.push(`/trip/${finishedId}` as never);
+        setTimeout(() => {
+          router.push(`/trip/${finishedId}` as never);
+        }, 80);
       } else {
         setTab('history');
         showToast(
-          `Trajet terminé · ${formatDistance(activeTrip.distanceKm)} · ~${fuelUsed.toFixed(1)} L`
+          `Trajet terminé · ${formatDistance(trip.distanceKm)} · ~${fuelUsed.toFixed(1)} L`
         );
       }
     },
@@ -923,27 +958,27 @@ export default function TripScreen() {
         notify('Erreur', e instanceof Error ? e.message : 'Impossible de terminer le trajet.');
       } finally {
         setIsStopping(false);
+        setStopConfirm(false);
       }
       return;
     }
 
-    confirm(
-      'Terminer le trajet',
-      'Arrêter le suivi GPS et afficher le récap du trajet ?',
-      () => {
-        void (async () => {
-          try {
-            await finishTripCore({ openRecap: true });
-          } catch (e) {
-            notify('Erreur', e instanceof Error ? e.message : 'Impossible de terminer le trajet.');
-          } finally {
-            setIsStopping(false);
-          }
-        })();
-      },
-      'Terminer',
-      () => setIsStopping(false)
-    );
+    // Confirmation in-app (pas d’Alert Android : elle plante avec la jauge / le GPS).
+    setStopConfirm(true);
+    setIsStopping(false);
+  };
+
+  const confirmStopTrip = async () => {
+    if (!activeTrip || isStopping) return;
+    setIsStopping(true);
+    setStopConfirm(false);
+    try {
+      await finishTripCore({ openRecap: true });
+    } catch (e) {
+      notify('Erreur', e instanceof Error ? e.message : 'Impossible de terminer le trajet.');
+    } finally {
+      setIsStopping(false);
+    }
   };
 
   /** Proximité destination pendant un trajet avec nav. */
@@ -1645,12 +1680,42 @@ export default function TripScreen() {
                     />
                   </>
                 )}
-                <Button
-                  title="Terminer le trajet"
-                  variant="danger"
-                  onPress={() => void handleStopTrip()}
-                  disabled={isStopping}
-                />
+                {stopConfirm ? (
+                  <Card
+                    style={{
+                      marginBottom: 8,
+                      borderColor: colors.danger,
+                      borderWidth: 1,
+                    }}
+                  >
+                    <Text style={{ color: colors.text, fontWeight: '800', marginBottom: 6 }}>
+                      Terminer ce trajet ?
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 12 }}>
+                      Le suivi GPS s’arrête et le récap s’affiche. Fonctionne aussi en suivi libre.
+                    </Text>
+                    <Button
+                      title={isStopping ? 'Arrêt…' : 'Oui, terminer'}
+                      variant="danger"
+                      onPress={() => void confirmStopTrip()}
+                      disabled={isStopping}
+                      style={{ marginBottom: 8 }}
+                    />
+                    <Button
+                      title="Continuer le suivi"
+                      variant="outline"
+                      onPress={() => setStopConfirm(false)}
+                      disabled={isStopping}
+                    />
+                  </Card>
+                ) : (
+                  <Button
+                    title="Terminer le trajet"
+                    variant="danger"
+                    onPress={() => void handleStopTrip()}
+                    disabled={isStopping}
+                  />
+                )}
               </>
             ) : (
               <>

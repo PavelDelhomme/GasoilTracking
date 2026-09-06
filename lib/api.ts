@@ -117,7 +117,16 @@ async function request(path: string, options: RequestInit = {}, retried = false)
     if (ok) return request(path, options, true);
   }
 
-  if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`);
+  if (!res.ok) {
+    const msg =
+      (typeof data?.error === 'string' && data.error) ||
+      (res.status === 413
+        ? 'Payload trop volumineux'
+        : `Erreur ${res.status}`);
+    const err = new Error(msg) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
   return data;
 }
 
@@ -282,6 +291,12 @@ export function pushSync(data: unknown) {
     method: 'PUT',
     body: JSON.stringify({ data }),
   });
+}
+
+export function isPayloadTooLargeError(err: unknown): boolean {
+  const status = (err as { status?: number } | null)?.status;
+  const msg = err instanceof Error ? err.message : String(err || '');
+  return status === 413 || /413|volumineux|too large|payload/i.test(msg);
 }
 
 export type AdminOverview = {
