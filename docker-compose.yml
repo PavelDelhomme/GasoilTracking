@@ -71,8 +71,8 @@ services:
 
 networks:
   gasoil-network:
+    external: true
     name: gasoil-network
-    driver: bridge
   web:
     external: true
     name: web
