@@ -137,7 +137,14 @@ export default function AuthScreen() {
             placeholder="••••••••"
           />
         )}
-        {!!error && <Text style={{ color: colors.danger, marginBottom: 12 }}>{error}</Text>}
+        {!!error && (
+          <Text
+            accessibilityRole="alert"
+            style={{ color: colors.danger, marginBottom: 12 }}
+          >
+            {error}
+          </Text>
+        )}
         {!!info && <Text style={{ color: colors.success, marginBottom: 12 }}>{info}</Text>}
         <Button
           title={mode === 'login' ? 'Se connecter' : 'Recevoir l’email de validation'}

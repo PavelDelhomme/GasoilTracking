@@ -179,6 +179,8 @@ export function PlaceSuggestField({
             <Pressable
               key={`q-${p.id}`}
               onPress={() => pickPlace(p)}
+              accessibilityRole="button"
+              accessibilityLabel={`Choisir ${p.name}`}
               style={[styles.chip, { backgroundColor: colors.card, borderColor: colors.border }]}
             >
               <Text style={{ color: colors.text, fontSize: 12, fontWeight: '700' }}>
@@ -195,6 +197,8 @@ export function PlaceSuggestField({
             <Pressable
               key={`p-${p.id}`}
               onPress={() => pickPlace(p)}
+              accessibilityRole="button"
+              accessibilityLabel={`Lieu ${p.name}`}
               style={[styles.row, { borderBottomColor: colors.border }]}
             >
               <Text style={{ color: colors.accent, fontSize: 11, fontWeight: '800' }}>
@@ -212,6 +216,8 @@ export function PlaceSuggestField({
             <Pressable
               key={h.id}
               onPress={() => pickRemote(h)}
+              accessibilityRole="button"
+              accessibilityLabel={`${h.source === 'contact' ? 'Contact' : 'Adresse'} ${h.label}`}
               style={[styles.row, { borderBottomColor: colors.border }]}
             >
               <Text style={{ color: colors.accent, fontSize: 11, fontWeight: '800' }}>

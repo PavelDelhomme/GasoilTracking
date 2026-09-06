@@ -1072,9 +1072,10 @@ export default function BudgetScreen() {
         </Pressable>
         {budgetsOpen && (budgetStatuses.length === 0 ? (
           <Card>
-            <Text style={{ color: colors.textSecondary, textAlign: 'center' }}>
+            <Text style={{ color: colors.textSecondary, textAlign: 'center', marginBottom: 12 }}>
               Aucun budget. Créez-en un pour suivre vos dépenses.
             </Text>
+            <Button title="Nouveau budget" onPress={() => router.push('/budget/add')} />
           </Card>
         ) : (
           budgetStatuses.map((item: BudgetStatus) => {

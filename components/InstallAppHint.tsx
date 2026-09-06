@@ -88,10 +88,20 @@ export function InstallAppHint() {
         </Text>
       </View>
       <View style={styles.actions}>
-        <Pressable onPress={install} style={[styles.btn, { backgroundColor: colors.accent }]}>
+        <Pressable
+          onPress={install}
+          accessibilityRole="button"
+          accessibilityLabel={deferred ? 'Installer' : ios ? 'Guide installation' : 'Ouvrir'}
+          style={[styles.btn, { backgroundColor: colors.accent }]}
+        >
           <Text style={styles.btnText}>{deferred ? 'Installer' : ios ? 'Guide' : 'Ouvrir'}</Text>
         </Pressable>
-        <Pressable onPress={dismiss} hitSlop={8}>
+        <Pressable
+          onPress={dismiss}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Fermer la suggestion d’installation"
+        >
           <Ionicons name="close" size={20} color={colors.textSecondary} />
         </Pressable>
       </View>

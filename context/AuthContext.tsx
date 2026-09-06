@@ -31,7 +31,7 @@ type AuthContextType = {
     inviteCode: string
   ) => Promise<{ ok: boolean; pending?: boolean; message?: string }>;
   logout: () => Promise<void>;
-  syncNow: () => Promise<void>;
+  syncNow: () => Promise<'pulled' | 'pushed' | 'skipped' | void>;
   /** Remplace le local par les données cloud du compte */
   refreshCloudNow: () => Promise<{ ok: boolean; reason: string; updatedAt?: string | null }>;
   applySession: (token: string, user: AuthUser, refreshToken?: string | null) => Promise<void>;
@@ -112,7 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const syncNow = useCallback(async () => {
     const token = await getToken();
     if (!token) return;
-    await syncPreferNewer();
+    return syncPreferNewer();
   }, []);
 
   const refreshCloudNow = useCallback(async () => {

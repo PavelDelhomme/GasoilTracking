@@ -42,10 +42,12 @@ export function HeaderActions() {
     setBusy(true);
     startSpin();
     try {
-      await syncNow();
+      const result = await syncNow();
       await refresh();
       setOffline(false);
-      showToast('Synchronisation manuelle réussie');
+      if (result === 'pulled') showToast('Cloud téléchargé');
+      else if (result === 'pushed') showToast('Sauvegarde envoyée au cloud');
+      else showToast('Synchronisation à jour');
     } catch (e) {
       setOffline(true);
       showToast(e instanceof Error ? e.message : 'Hors ligne — sync impossible');

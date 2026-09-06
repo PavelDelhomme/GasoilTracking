@@ -594,7 +594,14 @@ function finalizeEmailVerification(req, res, raw, platform) {
   );
 }
 
-app.get('/health', (_req, res) => res.type('text').send('ok'));
+app.get('/health', (req, res) => {
+  const accept = String(req.headers.accept || '');
+  res.setHeader('X-App-Version', APP_VERSION);
+  if (accept.includes('application/json')) {
+    return res.json({ status: 'ok', version: APP_VERSION });
+  }
+  res.type('text').send('ok');
+});
 
 /** Taux FX via proxy (évite CORS web : frankfurter.app → 301 sans ACAO). */
 const FX_FALLBACK = {
@@ -907,7 +914,7 @@ app.post('/api/auth/resend-verification', authLimiter, registerLimiter, async (r
     });
   } catch (e) {
     console.error('resend-verification-public', e);
-    res.status(500).json({ error: 'Échec envoi' });
+    res.status(500).json({ error: 'Impossible d’envoyer l’email de vérification. Réessayez plus tard.' });
   }
 });
 
@@ -1188,7 +1195,7 @@ app.post('/api/auth/forgot-password', authLimiter, registerLimiter, async (req, 
     res.json({ ok: true, message: generic, mailed: Boolean(transport) });
   } catch (e) {
     console.error('forgot-password', e);
-    res.status(500).json({ error: 'Échec' });
+    res.status(500).json({ error: 'Impossible de traiter la demande de réinitialisation. Réessayez plus tard.' });
   }
 });
 
@@ -1641,7 +1648,7 @@ app.post('/api/admin/send-download-link', auth, requireManager, async (req, res)
     });
   } catch (e) {
     console.error('send-download-link', e);
-    res.status(500).json({ error: 'Échec envoi' });
+    res.status(500).json({ error: 'Impossible d’envoyer le lien de téléchargement. Réessayez plus tard.' });
   }
 });
 
@@ -1686,7 +1693,7 @@ app.post('/api/admin/resend-verification', auth, requireManager, async (req, res
     });
   } catch (e) {
     console.error('resend-verification', e);
-    res.status(500).json({ error: 'Échec renvoi' });
+    res.status(500).json({ error: 'Impossible de renvoyer l’email de vérification. Réessayez plus tard.' });
   }
 });
 
@@ -1727,7 +1734,7 @@ app.post('/api/admin/approve-pending', auth, requireManager, (req, res) => {
     });
   } catch (e) {
     console.error('approve-pending', e);
-    res.status(500).json({ error: 'Échec validation' });
+    res.status(500).json({ error: 'Impossible de valider le compte en attente. Réessayez plus tard.' });
   }
 });
 

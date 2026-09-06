@@ -2250,11 +2250,12 @@ export default function TripScreen() {
               )}
               {!historyLoading && filteredHistory.length === 0 && (
                 <Card style={{ marginTop: 12 }}>
-                  <Text style={{ color: colors.textSecondary, textAlign: 'center' }}>
+                  <Text style={{ color: colors.textSecondary, textAlign: 'center', marginBottom: 12 }}>
                     {historyFilter === 'sinceFill'
                       ? 'Aucun trajet depuis le dernier plein.'
                       : 'Aucun trajet terminé.'}
                   </Text>
+                  <Button title="Démarrer un trajet" onPress={() => setTab('live')} />
                 </Card>
               )}
             </>

@@ -49,6 +49,8 @@ export function TimePickerField({ label = 'Heure', value, onChange }: Props) {
       {!!label && <Text style={[styles.label, { color: colors.text }]}>{label}</Text>}
       <Pressable
         onPress={() => setOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel={`${label} : ${value || 'non définie'}`}
         style={[styles.field, { backgroundColor: colors.card, borderColor: colors.border }]}
       >
         <Text style={[styles.value, { color: colors.text }]}>{value || '—:—'}</Text>

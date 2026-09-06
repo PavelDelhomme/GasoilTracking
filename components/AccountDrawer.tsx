@@ -38,6 +38,9 @@ function DrawerRow({ icon, label, subtitle, onPress, danger }: RowProps) {
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={subtitle}
       style={({ pressed }) => [
         styles.row,
         { borderBottomColor: colors.border, opacity: pressed ? 0.75 : 1 },
@@ -106,7 +109,12 @@ export function AccountDrawer() {
                 {info?.version ? ` · prod ${info.version}` : ''}
               </Text>
             </View>
-            <Pressable onPress={closeDrawer} hitSlop={10} accessibilityLabel="Fermer le menu">
+            <Pressable
+              onPress={closeDrawer}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Fermer le menu"
+            >
               <Ionicons name="close" size={24} color={colors.text} />
             </Pressable>
           </View>

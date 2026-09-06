@@ -157,7 +157,8 @@
         .then(function (v) {
           document.getElementById('ver').textContent =
             'Version app ' + (v.version || '—') +
-            (v.webUrl ? ' · web live' : '');
+            (v.webUrl ? ' · web live' : '') +
+            (v.buildingVersion ? ' · build ' + v.buildingVersion + ' en cours…' : '');
           var dl = document.getElementById('dl');
           if (v.apkUrl && v.apkAvailable !== false) {
             dl.href = v.apkUrl;
@@ -174,6 +175,11 @@
             /* jamais exposer le code publicement via API — ignore */
           }
           document.getElementById('info').textContent = v.releaseNotes || '';
+          if (v.buildingVersion) {
+            document.getElementById('info').textContent =
+              (v.releaseNotes ? v.releaseNotes + ' · ' : '') +
+              'Build v' + v.buildingVersion + ' en cours…';
+          }
         })
         .catch(function () {
           document.getElementById('ver').textContent = 'API indisponible';

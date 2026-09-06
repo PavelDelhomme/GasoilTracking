@@ -107,7 +107,11 @@ function TripHistoryCardInner({
   const sourceFr = tripSourceLabel(trip.source);
 
   return (
-    <Pressable onPress={() => onPress(trip)}>
+    <Pressable
+      onPress={() => onPress(trip)}
+      accessibilityRole="button"
+      accessibilityLabel={`Trajet ${origin} vers ${dest}, ${timeLabel}`}
+    >
       <Card style={styles.card}>
         {showMap ? (
           <TripMiniMap
