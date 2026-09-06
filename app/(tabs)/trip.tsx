@@ -74,6 +74,12 @@ import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
 import { evaluateGpsSample } from '@/lib/gpsTracking';
 import { formatDateSlash } from '@/lib/dates';
 import { preloadHistoryMaps } from '@/lib/tripMapCache';
+import {
+  getRecentDestinations,
+  pushRecentDestination,
+  type RecentDestination,
+} from '@/lib/recentDestinations';
+import { computeNavGuidance, headingFromTrail } from '@/lib/navGuidance';
 import type { SinceLastFillStats } from '@/types';
 import type { RoutePoint } from '@/lib/calculations';
 
@@ -119,6 +125,7 @@ export default function TripScreen() {
   const [pending, setPending] = useState<Trip[]>([]);
   const [sinceFill, setSinceFill] = useState<SinceLastFillStats | null>(null);
   const [historyFilter, setHistoryFilter] = useState<'all' | 'sinceFill'>('all');
+  const [recentDests, setRecentDests] = useState<RecentDestination[]>([]);
   const [mapVisibleIds, setMapVisibleIds] = useState<Set<number>>(() => new Set());
   const onHistoryViewable = useRef(
     ({ viewableItems }: { viewableItems: Array<{ item: Trip; index: number | null }> }) => {
@@ -174,6 +181,26 @@ export default function TripScreen() {
     setPlaces(pl);
     // Précharge géométrie + images mini-cartes (ne bloque pas l’UI)
     void preloadHistoryMaps(hist.slice(0, 8), pl, colors.accent);
+    void (async () => {
+      const stored = await getRecentDestinations(6);
+      if (stored.length) {
+        setRecentDests(stored);
+        return;
+      }
+      // Amorçage depuis l’historique si rien en cache
+      const fromHist: RecentDestination[] = [];
+      const seen = new Set<string>();
+      for (const t of hist) {
+        const label = (t.destinationName || '').trim();
+        if (label.length < 2) continue;
+        const k = label.toLowerCase();
+        if (seen.has(k)) continue;
+        seen.add(k);
+        fromHist.push({ label, at: Date.now() });
+        if (fromHist.length >= 6) break;
+      }
+      setRecentDests(fromHist);
+    })();
   }, [activeVehicle, colors.accent]);
 
   useFocusEffect(
@@ -463,20 +490,15 @@ export default function TripScreen() {
             ? 'Autorisez la localisation dans le navigateur (Safari / Chrome) pour enregistrer le trajet.'
             : 'Autorisez la localisation « toujours » / arrière-plan pour tracer même hors premier plan.'
         );
-      } else {
-        notify(
-          'Suivi démarré',
-          isWeb
-            ? startMode === 'free'
-              ? 'Suivi en cours — gardez l’onglet ouvert pendant le trajet.'
-              : `Direction : ${destName} — gardez l’app ouverte pour le suivi.`
-            : startMode === 'free'
-              ? 'Suivi en cours (arrière-plan) — km & vitesse enregistrés.'
-              : `Direction : ${destName}`
-        );
       }
+      // Pas d’alerte « Suivi démarré » : l’UI live suffit
 
       if (startMode === 'nav' && destName) {
+        void pushRecentDestination({
+          label: destName,
+          latitude: resolvedDest?.latitude,
+          longitude: resolvedDest?.longitude,
+        }).then(() => getRecentDestinations(6).then(setRecentDests));
         try {
           if (resolvedDest) {
             await Linking.openURL(
@@ -552,14 +574,9 @@ export default function TripScreen() {
     await updateTrip(activeTrip.id, { isPaused: false });
     const ok = await startBackgroundTracking();
     await refresh();
-    notify(
-      ok ? 'Reprise' : 'GPS',
-      ok
-        ? isWeb
-          ? 'Suivi GPS relancé — gardez l’app ouverte.'
-          : 'Suivi GPS relancé (y compris en arrière-plan).'
-        : 'Vérifiez les permissions localisation.'
-    );
+    if (!ok) {
+      notify('GPS', 'Vérifiez les permissions localisation.');
+    }
   };
 
   const handleStopTrip = async () => {
@@ -702,8 +719,19 @@ export default function TripScreen() {
   };
 
   const handleOpenGoogleMaps = async () => {
-    if (destination.trim()) {
-      await Linking.openURL(openGoogleMapsSearch(destination));
+    const label =
+      destination.trim() ||
+      activeTrip?.destinationName?.trim() ||
+      liveDestLabel?.trim() ||
+      '';
+    if (destCoords) {
+      await Linking.openURL(
+        openGoogleMapsNavigation(destCoords.latitude, destCoords.longitude, label || 'Destination')
+      );
+      return;
+    }
+    if (label) {
+      await Linking.openURL(openGoogleMapsSearch(label));
       return;
     }
     const loc = userLocation || (await getCurrentLocation())?.coords;
@@ -905,6 +933,63 @@ export default function TripScreen() {
         ? plannedRoute
         : routePoints;
 
+  const liveHeading = useMemo(
+    () => headingFromTrail(routePoints.length ? routePoints : userLocation ? [userLocation] : []),
+    [routePoints, userLocation]
+  );
+
+  const navGuidance = useMemo(() => {
+    if (!activeTrip) return null;
+    return computeNavGuidance({
+      user: userLocation,
+      destination: destCoords,
+      destinationLabel: activeTrip.destinationName || liveDestLabel,
+      route: plannedRoute.length > 1 ? plannedRoute : mapRoute,
+      headingDeg: liveHeading,
+    });
+  }, [
+    activeTrip,
+    userLocation,
+    destCoords,
+    liveDestLabel,
+    plannedRoute,
+    mapRoute,
+    liveHeading,
+  ]);
+
+  const quickPlaces = useMemo(() => {
+    const home = places.find((p) => p.kind === 'home');
+    const work = places.find((p) => p.kind === 'work');
+    return [home, work].filter(Boolean) as Place[];
+  }, [places]);
+
+  const applyDestination = useCallback(
+    (label: string, lat?: number | null, lon?: number | null) => {
+      setStartMode('nav');
+      setDestination(label);
+      if (lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon)) {
+        const coords = { latitude: lat, longitude: lon };
+        setDestCoords(coords);
+        if (userLocation) {
+          void fetchDrivingRoute(userLocation, coords).then((r) => setPlannedRoute(r.coordinates));
+        }
+      } else {
+        setDestCoords(null);
+        void forwardGeocode(label).then((g) => {
+          if (!g) return;
+          setDestCoords({ latitude: g.latitude, longitude: g.longitude });
+          if (userLocation) {
+            void fetchDrivingRoute(userLocation, {
+              latitude: g.latitude,
+              longitude: g.longitude,
+            }).then((r) => setPlannedRoute(r.coordinates));
+          }
+        });
+      }
+    },
+    [userLocation]
+  );
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.segments, { borderBottomColor: colors.border }]}>
@@ -965,20 +1050,71 @@ export default function TripScreen() {
           </View>
 
           <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
-            <View style={styles.toolbar}>
-              <Button
-                title="Manuel"
-                variant="outline"
-                onPress={() => router.push('/trip/add' as never)}
-                style={{ flex: 1 }}
-              />
-              <Button
-                title="Import"
-                variant="secondary"
-                onPress={() => router.push('/trip/import' as never)}
-                style={{ flex: 1 }}
-              />
-            </View>
+            {activeTrip && navGuidance ? (
+              <Pressable
+                onPress={() => {
+                  if (activeTrip.destinationName) {
+                    void handleOpenGoogleMaps();
+                  }
+                }}
+                style={[
+                  styles.navBar,
+                  {
+                    backgroundColor: colors.card,
+                    borderColor: paused ? colors.warning : colors.accent,
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.navArrowWrap,
+                    { backgroundColor: (paused ? colors.warning : colors.accent) + '22' },
+                  ]}
+                >
+                  <Ionicons
+                    name="navigate"
+                    size={28}
+                    color={paused ? colors.warning : colors.accent}
+                    style={{ transform: [{ rotate: `${navGuidance.arrowRotateDeg}deg` }] }}
+                  />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text
+                    style={{ color: colors.text, fontWeight: '800', fontSize: 16 }}
+                    numberOfLines={1}
+                  >
+                    {navGuidance.title}
+                  </Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13 }} numberOfLines={1}>
+                    {navGuidance.subtitle}
+                  </Text>
+                </View>
+                <Text
+                  style={{
+                    color: paused ? colors.warning : colors.accent,
+                    fontWeight: '800',
+                    fontSize: 15,
+                  }}
+                >
+                  {navGuidance.distanceLabel}
+                </Text>
+              </Pressable>
+            ) : (
+              <View style={styles.toolbar}>
+                <Button
+                  title="Manuel"
+                  variant="outline"
+                  onPress={() => router.push('/trip/add' as never)}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  title="Import"
+                  variant="secondary"
+                  onPress={() => router.push('/trip/import' as never)}
+                  style={{ flex: 1 }}
+                />
+              </View>
+            )}
 
             {!activeVehicle ? (
               <Card>
@@ -1184,6 +1320,69 @@ export default function TripScreen() {
                   loading={isStarting}
                   style={{ marginBottom: 8 }}
                 />
+
+                {(quickPlaces.length > 0 || recentDests.length > 0) && (
+                  <Card style={{ marginTop: 4, marginBottom: 8 }}>
+                    <Text style={{ color: colors.text, fontWeight: '800', marginBottom: 8 }}>
+                      Destinations rapides
+                    </Text>
+                    <Text
+                      style={{
+                        color: colors.textSecondary,
+                        fontSize: 12,
+                        marginBottom: 10,
+                        lineHeight: 17,
+                      }}
+                    >
+                      Touchez une destination pour préparer la navigation (sous le suivi libre).
+                    </Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                      {quickPlaces.map((p) => (
+                        <Pressable
+                          key={`place-${p.id}`}
+                          onPress={() =>
+                            applyDestination(p.address?.trim() || p.name, p.latitude, p.longitude)
+                          }
+                          style={[
+                            styles.destChip,
+                            {
+                              borderColor: colors.accent,
+                              backgroundColor: colors.accent + '18',
+                            },
+                          ]}
+                        >
+                          <Ionicons
+                            name={p.kind === 'home' ? 'home' : 'briefcase'}
+                            size={14}
+                            color={colors.accent}
+                          />
+                          <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }}>
+                            {p.kind === 'home' ? 'Domicile' : p.kind === 'work' ? 'Travail' : p.name}
+                          </Text>
+                        </Pressable>
+                      ))}
+                      {recentDests.map((r) => (
+                        <Pressable
+                          key={`recent-${r.label}-${r.at}`}
+                          onPress={() => applyDestination(r.label, r.latitude, r.longitude)}
+                          style={[
+                            styles.destChip,
+                            { borderColor: colors.border, backgroundColor: colors.background },
+                          ]}
+                        >
+                          <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
+                          <Text
+                            style={{ color: colors.text, fontWeight: '600', fontSize: 13, maxWidth: 160 }}
+                            numberOfLines={1}
+                          >
+                            {r.label}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </Card>
+                )}
+
                 {startMode === 'nav' && (
                   <Button
                     title="Ouvrir Google Maps seulement"
@@ -1463,6 +1662,32 @@ const styles = StyleSheet.create({
   panel: { flex: 1 },
   panelContent: { padding: 16, paddingBottom: 40 },
   toolbar: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  navBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 2,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+  },
+  navArrowWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  destChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
   sectionTitle: { fontSize: 18, fontWeight: '700', marginBottom: 8 },
   description: { fontSize: 14, marginBottom: 12, lineHeight: 20 },
   modeCard: { borderWidth: 2, borderRadius: 14, padding: 14 },
