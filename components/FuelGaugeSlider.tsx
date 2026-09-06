@@ -198,6 +198,8 @@ export function FuelGaugeSlider({
             }}
             hitSlop={compact ? 4 : 6}
             style={styles.markBtn}
+            accessibilityRole="button"
+            accessibilityLabel={`Régler à ${m.label}`}
           >
             <Text
               style={{

@@ -22,7 +22,7 @@ import {
   formatEuro,
   getMonthFillStats,
 } from '@/lib/calculations';
-import { formatDateSlash, monthKeyFromDate, currentMonthKey, formatMonthChip, formatMonthLabel } from '@/lib/dates';
+import { formatDateSlash, monthKeyFromDate, currentMonthKey, formatMonthChip, formatMonthLabel, formatRelativeDay } from '@/lib/dates';
 import { ProgressBar } from '@/components/Card';
 import { Button } from '@/components/Button';
 import type { FillUp, MonthFillStats } from '@/types';
@@ -191,6 +191,7 @@ export default function FillUpsScreen() {
                 onPress={() => pickMonth(key)}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
+                accessibilityLabel={formatMonthLabel(key)}
                 style={[
                   styles.chip,
                   {
@@ -357,6 +358,8 @@ export default function FillUpsScreen() {
         renderItem={({ item: fill }) => (
           <Pressable
             onPress={() => router.push(`/fillup/${fill.id}` as never)}
+            accessibilityRole="button"
+            accessibilityLabel={`Plein du ${formatRelativeDay(fill.date)}, ${fill.liters.toFixed(1)} litres, ${formatEuro(fill.totalCost)}`}
             style={({ pressed }) => [
               styles.fillCard,
               {
@@ -369,7 +372,7 @@ export default function FillUpsScreen() {
             <View style={styles.fillHead}>
               <View style={{ flex: 1, paddingRight: 8 }}>
                 <Text style={[styles.fillDate, { color: colors.text }]}>
-                  {formatDateSlash(fill.date)}
+                  {formatRelativeDay(fill.date)}
                 </Text>
                 <View
                   style={[

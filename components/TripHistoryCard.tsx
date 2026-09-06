@@ -6,7 +6,7 @@ import { TripMiniMap } from '@/components/TripMiniMap';
 import { useTheme } from '@/hooks/useTheme';
 import { formatDistance, formatEuro, parseRoutePoints } from '@/lib/calculations';
 import { formatDurationMinutes } from '@/lib/consumptionModel';
-import { formatDateSlash } from '@/lib/dates';
+import { formatDateSlash, formatRelativeDay } from '@/lib/dates';
 import { tripPlaceLabel, tripSourceLabel } from '@/lib/geocode';
 import { getPlaces } from '@/lib/database';
 import { getCachedTripRoute, resolveTripRouteCached } from '@/lib/tripMapCache';
@@ -98,9 +98,9 @@ function TripHistoryCardInner({
     try {
       const d = new Date(trip.startTime);
       const hm = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-      return `${formatDateSlash(trip.startTime)} · ${hm}`;
+      return `${formatRelativeDay(trip.startTime)} · ${hm}`;
     } catch {
-      return formatDateSlash(trip.startTime);
+      return formatRelativeDay(trip.startTime);
     }
   })();
 

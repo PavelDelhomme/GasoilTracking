@@ -14,6 +14,7 @@ export function HeaderActions() {
   const { refresh } = useApp();
   const { showToast } = useToast();
   const [busy, setBusy] = React.useState(false);
+  const [offline, setOffline] = React.useState(false);
   const spin = useRef(new Animated.Value(0)).current;
   const loop = useRef<Animated.CompositeAnimation | null>(null);
 
@@ -43,9 +44,11 @@ export function HeaderActions() {
     try {
       await syncNow();
       await refresh();
+      setOffline(false);
       showToast('Synchronisation manuelle réussie');
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Échec de synchronisation');
+      setOffline(true);
+      showToast(e instanceof Error ? e.message : 'Hors ligne — sync impossible');
     } finally {
       stopSpin();
       setBusy(false);
@@ -65,14 +68,17 @@ export function HeaderActions() {
           disabled={busy}
           accessibilityRole="button"
           accessibilityLabel="Synchroniser manuellement"
+          accessibilityHint={
+            offline ? 'Hors ligne — dernière synchronisation échouée' : 'Synchroniser avec le cloud'
+          }
           hitSlop={10}
           style={styles.syncBtn}
         >
           <Animated.View style={{ transform: [{ rotate }] }}>
             <Ionicons
-              name="sync-outline"
+              name={offline ? 'cloud-offline-outline' : 'sync-outline'}
               size={22}
-              color={busy ? colors.accent : colors.text}
+              color={busy ? colors.accent : offline ? colors.warning : colors.text}
             />
           </Animated.View>
         </Pressable>

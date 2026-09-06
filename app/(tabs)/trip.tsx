@@ -81,7 +81,7 @@ import { notify, confirm } from '@/lib/notify';
 import { TripHistoryCard } from '@/components/TripHistoryCard';
 import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
 import { evaluateGpsSample } from '@/lib/gpsTracking';
-import { formatDateSlash } from '@/lib/dates';
+import { formatDateSlash, formatRelativeDay } from '@/lib/dates';
 import { preloadHistoryMaps } from '@/lib/tripMapCache';
 import {
   getRecentDestinations,
@@ -2068,12 +2068,12 @@ export default function TripScreen() {
                     let when = '';
                     try {
                       const dt = new Date(t.startTime);
-                      when = `${formatDateSlash(t.startTime)} · ${dt.toLocaleTimeString('fr-FR', {
+                      when = `${formatRelativeDay(t.startTime)} · ${dt.toLocaleTimeString('fr-FR', {
                         hour: '2-digit',
                         minute: '2-digit',
                       })}`;
                     } catch {
-                      when = formatDateSlash(t.startTime);
+                      when = formatRelativeDay(t.startTime);
                     }
                     return (
                       <Card key={t.id} style={{ marginTop: 10 }}>

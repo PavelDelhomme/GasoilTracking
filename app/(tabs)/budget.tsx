@@ -18,7 +18,7 @@ import { Card, ProgressBar } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { formatEuro, getActiveMonthlyAllocation } from '@/lib/calculations';
-import { currentMonthKey, formatMonthChip, formatMonthLabel, monthKeyFromDate } from '@/lib/dates';
+import { currentMonthKey, formatMonthChip, formatMonthLabel, monthKeyFromDate, formatDateSlash } from '@/lib/dates';
 import {
   deleteBudget,
   deleteFillUp,
@@ -550,7 +550,7 @@ export default function BudgetScreen() {
                       style={{ flex: 1 }}
                     >
                       <Text style={{ color: colors.text, fontWeight: '600' }}>
-                        {new Date(f.date).toLocaleDateString(locale)} · {f.liters.toFixed(1)} L ·{' '}
+                        {formatDateSlash(f.date)} · {f.liters.toFixed(1)} L ·{' '}
                         {formatEuro(f.totalCost)}
                       </Text>
                       <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
@@ -563,7 +563,7 @@ export default function BudgetScreen() {
                       onPress={() =>
                         confirm(
                           'Supprimer le plein',
-                          `${new Date(f.date).toLocaleDateString(locale)} · ${formatEuro(f.totalCost)}`,
+                          `${formatDateSlash(f.date)} · ${formatEuro(f.totalCost)}`,
                           async () => {
                             await deleteFillUp(f.id);
                             await loadExtra();

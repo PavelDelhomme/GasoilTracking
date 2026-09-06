@@ -87,3 +87,23 @@ export function formatMonthChip(ym: string): string {
   const [y, m] = ym.split('-').map(Number);
   return `${MONTH_SHORT_FR[(m || 1) - 1] || ym} ${String(y).slice(2)}`;
 }
+
+/** « Aujourd’hui », « Hier », sinon JJ/MM/AAAA */
+export function formatRelativeDay(input: string | Date): string {
+  const d =
+    typeof input === 'string'
+      ? input.includes('T') || input.includes('-')
+        ? new Date(input.includes('T') ? input : `${input}T12:00:00`)
+        : parseLocalYmd(input)
+      : input;
+  if (Number.isNaN(d.getTime())) return '—';
+  const today = new Date();
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const startThat = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startToday - startThat) / 86400000);
+  if (diffDays === 0) return 'Aujourd’hui';
+  if (diffDays === 1) return 'Hier';
+  if (diffDays === -1) return 'Demain';
+  return formatDateSlash(d);
+}
+

@@ -5,12 +5,16 @@ import { useTheme } from '@/hooks/useTheme';
 interface CardProps {
   children: React.ReactNode;
   style?: ViewStyle;
+  accessibilityLabel?: string;
 }
 
-export function Card({ children, style }: CardProps) {
+export function Card({ children, style, accessibilityLabel }: CardProps) {
   const { colors } = useTheme();
   return (
-    <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }, style]}>
+    <View
+      style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }, style]}
+      accessibilityLabel={accessibilityLabel}
+    >
       {children}
     </View>
   );
@@ -26,7 +30,10 @@ interface StatCardProps {
 export function StatCard({ label, value, subtitle, color }: StatCardProps) {
   const { colors } = useTheme();
   return (
-    <Card style={styles.statCard}>
+    <Card
+      style={styles.statCard}
+      accessibilityLabel={`${label} : ${value}${subtitle ? `, ${subtitle}` : ''}`}
+    >
       <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{label}</Text>
       <Text style={[styles.statValue, { color: color ?? colors.text }]}>{value}</Text>
       {subtitle && (
@@ -55,7 +62,11 @@ export function ProgressBar({ percent, color, height = 8 }: ProgressBarProps) {
         : colors.success);
 
   return (
-    <View style={[styles.progressBg, { backgroundColor: colors.border, height }]}>
+    <View
+      style={[styles.progressBg, { backgroundColor: colors.border, height }]}
+      accessibilityRole="progressbar"
+      accessibilityValue={{ min: 0, max: 100, now: Math.round(clampedPercent) }}
+    >
       <View
         style={[
           styles.progressFill,

@@ -28,6 +28,7 @@ export function Input({ label, error, style, passwordToggle, secureTextEntry, ..
       {label && <Text style={[styles.label, { color: colors.text }]}>{label}</Text>}
       <View style={styles.row}>
         <TextInput
+          {...props}
           style={[
             styles.input,
             isPassword && styles.inputWithIcon,
@@ -41,7 +42,7 @@ export function Input({ label, error, style, passwordToggle, secureTextEntry, ..
           placeholderTextColor={colors.textSecondary}
           secureTextEntry={hide}
           autoCapitalize={isPassword ? 'none' : props.autoCapitalize}
-          {...props}
+          accessibilityLabel={props.accessibilityLabel ?? label}
         />
         {isPassword && (
           <TouchableOpacity

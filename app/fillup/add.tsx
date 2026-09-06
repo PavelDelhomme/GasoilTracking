@@ -27,6 +27,7 @@ import {
 } from '@/lib/fuelPrices';
 import { getCurrentLocation } from '@/lib/locationService';
 import { notify } from '@/lib/notify';
+import { useToast } from '@/context/ToastContext';
 import { toLocalYmd } from '@/lib/dates';
 import type { FillUp } from '@/types';
 
@@ -37,6 +38,7 @@ function parseNum(v: string): number {
 
 export default function AddFillUpScreen() {
   const params = useLocalSearchParams<{ tripId?: string; fromTrip?: string }>();
+  const { showToast } = useToast();
   const linkedTripId = params.tripId ? Number(params.tripId) : null;
   const { activeVehicle, budgetStatuses, refresh } = useApp();
   const { colors } = useTheme();
@@ -324,7 +326,7 @@ export default function AddFillUpScreen() {
       if (adapted && adapted.next !== adapted.previous) {
         msg += `\nConso adaptée : ${adapted.previous.toFixed(1)} → ${adapted.next.toFixed(1)} L/100 (mesurée ~${adapted.measured.toFixed(1)}, ${adapted.samples} mesure${adapted.samples > 1 ? 's' : ''}).`;
       }
-      notify('Plein enregistré', msg);
+      showToast(`Plein enregistré — ${msg.replace(/\n/g, ' · ')}`, { durationMs: 3200 });
       router.back();
     } catch (e) {
       notify('Erreur', e instanceof Error ? e.message : 'Impossible d’enregistrer le plein.');

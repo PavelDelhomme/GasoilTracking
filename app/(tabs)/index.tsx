@@ -29,7 +29,7 @@ import { fuelRemainingTone, fuelToneColor, setFuelLiters } from '@/lib/fuelLevel
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
 import type { ConsumptionStats, Place, SinceLastFillStats, Trip, VehicleMaintenance } from '@/types';
 import { MAINTENANCE_KIND_LABELS, maintenanceIsUrgent } from '@/lib/vehicleMaintenance';
-import { formatDateSlash, toLocalYmd } from '@/lib/dates';
+import { formatDateSlash, formatRelativeDay, toLocalYmd } from '@/lib/dates';
 
 export default function HomeScreen() {
   const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles, selectVehicle, isLoading } = useApp();
@@ -439,7 +439,7 @@ export default function HomeScreen() {
                   {sinceFill.tripCount} trajet{sinceFill.tripCount > 1 ? 's' : ''} · ~
                   {formatEuro(sinceFill.costEst)} · ~{sinceFill.fuelUsedEst.toFixed(1)} L
                   {'\n'}
-                  Plein du {formatDateSlash(sinceFill.lastFill.date)} (
+                  Plein du {formatRelativeDay(sinceFill.lastFill.date)} (
                   {formatEuro(sinceFill.lastFill.totalCost)})
                 </Text>
                 {fuelTone !== 'unknown' && (
@@ -502,42 +502,52 @@ export default function HomeScreen() {
             </View>
 
             {mainBudget && (
-              <Card style={styles.budgetCard}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  {mainBudget.budget.name}
-                </Text>
-                <Text
-                  style={{
-                    color:
+              <Pressable
+                onPress={() => router.push('/(tabs)/budget' as never)}
+                accessibilityRole="button"
+                accessibilityLabel={`Budget ${mainBudget.budget.name}, ouvrir le détail`}
+                accessibilityHint="Ouvre l’onglet Budget"
+              >
+                <Card style={styles.budgetCard}>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                    {mainBudget.budget.name}
+                  </Text>
+                  <Text
+                    style={{
+                      color:
+                        mainBudget.percentUsed > 100
+                          ? colors.danger
+                          : mainBudget.percentUsed > 80
+                            ? colors.warning
+                            : colors.success,
+                      fontWeight: '800',
+                      fontSize: 22,
+                      marginBottom: 6,
+                    }}
+                  >
+                    {mainBudget.percentUsed > 100
+                      ? `Dépassé de ${formatEuro(mainBudget.spent - mainBudget.budget.amount)}`
+                      : `Il reste ${formatEuro(mainBudget.remaining)}`}
+                  </Text>
+                  <ProgressBar
+                    percent={Math.min(100, mainBudget.percentUsed)}
+                    color={
                       mainBudget.percentUsed > 100
                         ? colors.danger
                         : mainBudget.percentUsed > 80
                           ? colors.warning
-                          : colors.success,
-                    fontWeight: '800',
-                    fontSize: 22,
-                    marginBottom: 6,
-                  }}
-                >
-                  {mainBudget.percentUsed > 100
-                    ? `Dépassé de ${formatEuro(mainBudget.spent - mainBudget.budget.amount)}`
-                    : `Il reste ${formatEuro(mainBudget.remaining)}`}
-                </Text>
-                <ProgressBar
-                  percent={Math.min(100, mainBudget.percentUsed)}
-                  color={
-                    mainBudget.percentUsed > 100
-                      ? colors.danger
-                      : mainBudget.percentUsed > 80
-                        ? colors.warning
-                        : colors.success
-                  }
-                  height={12}
-                />
-                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 8 }}>
-                  {formatEuro(mainBudget.spent)} dépensés sur {formatEuro(mainBudget.budget.amount)}
-                </Text>
-              </Card>
+                          : colors.success
+                    }
+                    height={12}
+                  />
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 8 }}>
+                    {formatEuro(mainBudget.spent)} dépensés sur {formatEuro(mainBudget.budget.amount)}
+                  </Text>
+                  <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700', marginTop: 8 }}>
+                    Voir le budget →
+                  </Text>
+                </Card>
+              </Pressable>
             )}
 
             {dueMaintenances.length > 0 && (

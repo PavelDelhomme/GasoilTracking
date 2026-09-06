@@ -40,6 +40,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {!!message && (
         <Animated.View
           pointerEvents="none"
+          accessibilityLiveRegion="polite"
+          accessibilityRole="alert"
           style={[
             styles.toast,
             {

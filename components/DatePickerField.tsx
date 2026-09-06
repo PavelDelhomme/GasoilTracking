@@ -44,6 +44,8 @@ export function DatePickerField({
       {!!label && <Text style={[styles.label, { color: colors.text }]}>{label}</Text>}
       <Pressable
         onPress={() => setOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel={`${label} : ${formatDateSlash(value)}`}
         style={[
           styles.field,
           { backgroundColor: colors.card, borderColor: colors.border },
