@@ -14,9 +14,9 @@ import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
-import { getVehicleById, updateVehicle } from '@/lib/database';
+import { getVehicleById, updateVehicle, deleteVehicle } from '@/lib/database';
 import { getConsumptionStats } from '@/lib/calculations';
-import { notify } from '@/lib/notify';
+import { confirm, notify } from '@/lib/notify';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
 import { searchVehicles, type VehiclePreset } from '@/constants/vehicles';
 import { fuelLevelLabel, setFuelFraction } from '@/lib/fuelLevel';
@@ -404,6 +404,24 @@ export default function EditVehicleScreen() {
       </View>
 
       <Button title="Enregistrer les modifications" onPress={handleSave} loading={loading} />
+      <Button
+        title="Supprimer ce véhicule"
+        variant="danger"
+        onPress={() =>
+          confirm(
+            'Supprimer le véhicule',
+            `Supprimer « ${name.trim() || 'ce véhicule'} » et ses données liées ?`,
+            async () => {
+              await deleteVehicle(vehicleId);
+              await refresh();
+              notify('Supprimé', 'Véhicule retiré.');
+              router.back();
+            },
+            'Supprimer'
+          )
+        }
+        style={{ marginTop: 16 }}
+      />
     </ScrollView>
   );
 }

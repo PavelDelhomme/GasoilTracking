@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
@@ -210,20 +211,34 @@ export default function VehicleMaintenanceScreen() {
               {m.note ? (
                 <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>{m.note}</Text>
               ) : null}
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 }}>
                 {m.status !== 'done' && (
-                  <Button title="Marquer fait" variant="secondary" onPress={() => markDone(m)} />
+                  <Button
+                    title="Marquer fait"
+                    variant="secondary"
+                    onPress={() => markDone(m)}
+                    style={{ flex: 1 }}
+                  />
                 )}
-                <Button
-                  title="Suppr."
-                  variant="secondary"
+                <Pressable
                   onPress={() =>
                     confirm('Supprimer', m.title, async () => {
                       await deleteMaintenance(m.id);
                       await reload();
-                    })
+                      void refreshVehicleReminders();
+                    }, 'Supprimer')
                   }
-                />
+                  hitSlop={10}
+                  style={{
+                    borderWidth: 1,
+                    borderColor: colors.danger,
+                    borderRadius: 10,
+                    padding: 10,
+                  }}
+                  accessibilityLabel="Supprimer"
+                >
+                  <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                </Pressable>
               </View>
             </Card>
           );

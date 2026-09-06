@@ -4,8 +4,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
-import { getPlaces, updatePlace } from '@/lib/database';
-import { notify } from '@/lib/notify';
+import { deletePlace, getPlaces, updatePlace } from '@/lib/database';
+import { confirm, notify } from '@/lib/notify';
 import { getCurrentLocation } from '@/lib/locationService';
 import type { Place, PlaceKind } from '@/types';
 
@@ -73,6 +73,19 @@ export default function EditPlaceScreen() {
     }
   };
 
+  const onDelete = () => {
+    confirm(
+      'Supprimer le lieu',
+      `Supprimer « ${name.trim() || place?.name || 'ce lieu'} » ? Les trajets réguliers liés seront aussi retirés.`,
+      async () => {
+        await deletePlace(placeId);
+        notify('Supprimé', 'Lieu retiré.');
+        router.back();
+      },
+      'Supprimer'
+    );
+  };
+
   if (!place) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: 16 }}>
@@ -84,7 +97,7 @@ export default function EditPlaceScreen() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 16 }}
+      contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
       keyboardShouldPersistTaps="handled"
     >
       <Text style={{ color: colors.textSecondary, marginBottom: 12, lineHeight: 18 }}>
@@ -130,6 +143,12 @@ export default function EditPlaceScreen() {
         onPress={() => save(true)}
         loading={loading}
         style={{ marginTop: 10 }}
+      />
+      <Button
+        title="Supprimer ce lieu"
+        variant="danger"
+        onPress={onDelete}
+        style={{ marginTop: 16 }}
       />
     </ScrollView>
   );

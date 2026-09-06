@@ -8,6 +8,7 @@ import { Button } from '@/components/Button';
 import { DatePickerField } from '@/components/DatePickerField';
 import {
   createRecurringRoute,
+  deleteRecurringRoute,
   getPlaces,
   getRecurringRoutes,
   updatePlace,
@@ -19,7 +20,7 @@ import {
   resolvePlaceCoords,
   type SuggestedItinerary,
 } from '@/lib/roadDistance';
-import { notify } from '@/lib/notify';
+import { confirm, notify } from '@/lib/notify';
 import { toLocalYmd } from '@/lib/dates';
 import type { Place } from '@/types';
 
@@ -457,6 +458,25 @@ export default function RouteScreen() {
       )}
 
       <Button title={isEdit ? 'Enregistrer' : 'Ajouter'} onPress={save} loading={loading} />
+      {isEdit && editId != null && (
+        <Button
+          title="Supprimer ce trajet régulier"
+          variant="danger"
+          onPress={() =>
+            confirm(
+              'Supprimer',
+              `Supprimer « ${name.trim() || 'ce trajet'} » ?`,
+              async () => {
+                await deleteRecurringRoute(editId);
+                notify('Supprimé', 'Trajet régulier retiré.');
+                router.back();
+              },
+              'Supprimer'
+            )
+          }
+          style={{ marginTop: 12 }}
+        />
+      )}
     </ScrollView>
   );
 }

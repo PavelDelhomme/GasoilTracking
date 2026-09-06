@@ -20,6 +20,7 @@ import { formatEuro, getActiveMonthlyAllocation } from '@/lib/calculations';
 import { currentMonthKey, formatMonthChip, formatMonthLabel, monthKeyFromDate } from '@/lib/dates';
 import {
   deleteBudget,
+  deleteFillUp,
   deletePlace,
   deleteRecurringRoute,
   getFillUps,
@@ -530,25 +531,51 @@ export default function BudgetScreen() {
                 <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Aucun plein ce mois.</Text>
               ) : (
                 monthFillUps.map((f) => (
-                  <Pressable
+                  <View
                     key={f.id}
-                    onPress={() => router.push(`/fillup/${f.id}` as never)}
                     style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 8,
                       paddingVertical: 8,
                       borderBottomWidth: StyleSheet.hairlineWidth,
                       borderBottomColor: colors.border,
                     }}
                   >
-                    <Text style={{ color: colors.text, fontWeight: '600' }}>
-                      {new Date(f.date).toLocaleDateString(locale)} · {f.liters.toFixed(1)} L ·{' '}
-                      {formatEuro(f.totalCost)}
-                    </Text>
-                    <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                      {formatPerLiter(f.pricePerLiter)}
-                      {f.note ? ` · ${f.note}` : ''}
-                      {' · détails ›'}
-                    </Text>
-                  </Pressable>
+                    <Pressable
+                      onPress={() => router.push(`/fillup/${f.id}` as never)}
+                      style={{ flex: 1 }}
+                    >
+                      <Text style={{ color: colors.text, fontWeight: '600' }}>
+                        {new Date(f.date).toLocaleDateString(locale)} · {f.liters.toFixed(1)} L ·{' '}
+                        {formatEuro(f.totalCost)}
+                      </Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                        {formatPerLiter(f.pricePerLiter)}
+                        {f.note ? ` · ${f.note}` : ''}
+                        {' · détails ›'}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() =>
+                        confirm(
+                          'Supprimer le plein',
+                          `${new Date(f.date).toLocaleDateString(locale)} · ${formatEuro(f.totalCost)}`,
+                          async () => {
+                            await deleteFillUp(f.id);
+                            await loadExtra();
+                            await refresh();
+                          },
+                          'Supprimer'
+                        )
+                      }
+                      hitSlop={10}
+                      style={[styles.trashBtn, { borderColor: colors.danger }]}
+                      accessibilityLabel="Supprimer ce plein"
+                    >
+                      <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                    </Pressable>
+                  </View>
                 ))
               )}
             </View>
@@ -641,15 +668,24 @@ export default function BudgetScreen() {
                 >
                   <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 12 }}>Trajet</Text>
                 </Pressable>
-                <Text style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 12 }}>
-                  <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-                </Text>
+                <Pressable
+                  onPress={() =>
+                    confirm('Supprimer', `Supprimer « ${p.name} » ?`, async () => {
+                      await deletePlace(p.id);
+                      await loadExtra();
+                    }, 'Supprimer')
+                  }
+                  hitSlop={10}
+                  style={[styles.trashBtn, { borderColor: colors.danger }]}
+                  accessibilityLabel={`Supprimer ${p.name}`}
+                >
+                  <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                </Pressable>
               </View>
             ))
           )}
           <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
-            Trajet = navigation depuis votre position. Touchez le nom pour modifier, appui long pour
-            supprimer.
+            Trajet = navigation depuis votre position. Icône poubelle ou appui long pour supprimer.
           </Text>
         </Card>
 
@@ -680,23 +716,25 @@ export default function BudgetScreen() {
               const days = r.workDaysPerWeek || r.timesPerWeek;
               const weekCost = routeWeeklyCost(r);
               return (
-                <Pressable
+                <View
                   key={r.id}
-                  onPress={() =>
-                    router.push({
-                      pathname: '/place/route' as never,
-                      params: { id: String(r.id) },
-                    } as never)
-                  }
-                  onLongPress={() =>
-                    confirm('Supprimer', `Supprimer « ${r.name} » ?`, async () => {
-                      await deleteRecurringRoute(r.id);
-                      await loadExtra();
-                    }, 'Supprimer')
-                  }
                   style={[styles.placeRow, { borderBottomColor: colors.border }]}
                 >
-                  <View style={{ flex: 1 }}>
+                  <Pressable
+                    onPress={() =>
+                      router.push({
+                        pathname: '/place/route' as never,
+                        params: { id: String(r.id) },
+                      } as never)
+                    }
+                    onLongPress={() =>
+                      confirm('Supprimer', `Supprimer « ${r.name} » ?`, async () => {
+                        await deleteRecurringRoute(r.id);
+                        await loadExtra();
+                      }, 'Supprimer')
+                    }
+                    style={{ flex: 1 }}
+                  >
                     <Text style={{ color: colors.text, fontWeight: '700' }}>
                       {r.name}
                       {onVac ? ' · en vacances' : ''}
@@ -711,9 +749,34 @@ export default function BudgetScreen() {
                         ~{formatEuro(weekCost)} / semaine
                       </Text>
                     )}
-                  </View>
-                  <Ionicons name="create-outline" size={18} color={colors.accent} />
-                </Pressable>
+                  </Pressable>
+                  <Pressable
+                    onPress={() =>
+                      router.push({
+                        pathname: '/place/route' as never,
+                        params: { id: String(r.id) },
+                      } as never)
+                    }
+                    hitSlop={8}
+                    style={{ marginRight: 8 }}
+                    accessibilityLabel="Modifier"
+                  >
+                    <Ionicons name="create-outline" size={18} color={colors.accent} />
+                  </Pressable>
+                  <Pressable
+                    onPress={() =>
+                      confirm('Supprimer', `Supprimer « ${r.name} » ?`, async () => {
+                        await deleteRecurringRoute(r.id);
+                        await loadExtra();
+                      }, 'Supprimer')
+                    }
+                    hitSlop={10}
+                    style={[styles.trashBtn, { borderColor: colors.danger }]}
+                    accessibilityLabel={`Supprimer ${r.name}`}
+                  >
+                    <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                  </Pressable>
+                </View>
               );
             })
           )}
@@ -980,6 +1043,24 @@ export default function BudgetScreen() {
                       {vehicleLabel} · {item.budget.period === 'monthly' ? 'Mensuel' : item.budget.period}
                     </Text>
                   </View>
+                  <Pressable
+                    onPress={() =>
+                      confirm(
+                        'Supprimer',
+                        `Supprimer « ${item.budget.name} » ?`,
+                        async () => {
+                          await deleteBudget(item.budget.id);
+                          await refresh();
+                        },
+                        'Supprimer'
+                      )
+                    }
+                    hitSlop={10}
+                    style={[styles.trashBtn, { borderColor: colors.danger }]}
+                    accessibilityLabel={`Supprimer ${item.budget.name}`}
+                  >
+                    <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                  </Pressable>
                 </View>
                 <Text style={{ color: statusColor, fontWeight: '800', fontSize: 24, marginBottom: 4 }}>
                   {item.percentUsed > 100
@@ -991,22 +1072,6 @@ export default function BudgetScreen() {
                   {formatEuro(item.spent)} dépensés sur {formatEuro(item.budget.amount)} (
                   {item.percentUsed.toFixed(0)} %)
                 </Text>
-                <Button
-                  title="Supprimer"
-                  variant="outline"
-                  onPress={() =>
-                    confirm(
-                      'Supprimer',
-                      `Supprimer « ${item.budget.name} » ?`,
-                      async () => {
-                        await deleteBudget(item.budget.id);
-                        await refresh();
-                      },
-                      'Supprimer'
-                    )
-                  }
-                  style={{ marginTop: 10 }}
-                />
               </Card>
             );
           })
@@ -1055,6 +1120,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 8,
   },
+  trashBtn: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 8,
+  },
   stationRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1075,6 +1145,7 @@ const styles = StyleSheet.create({
   budgetHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 8,
   },
   budgetName: { fontSize: 17, fontWeight: '700' },
