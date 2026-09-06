@@ -1,10 +1,11 @@
 name: Deploy Portainer
 
-# Rebuild la stack Portainer à chaque push sur main (nécessite le secret PORTAINER_WEBHOOK_URL)
+# Rebuild la stack Portainer (API + web) — branche prod.
+# Secret GitHub : PORTAINER_WEBHOOK_URL
 
 on:
   push:
-    branches: [main]
+    branches: [prod, main]
   workflow_dispatch:
 
 jobs:

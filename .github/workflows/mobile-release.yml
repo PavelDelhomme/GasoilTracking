@@ -1,6 +1,7 @@
 name: Mobile APK release
 
-# Build APK (EAS) + upload auto vers l'API prod à chaque push sur prod
+# Build APK sur le runner GitHub (eas --local) + upload API prod à chaque push sur prod.
+# --local : ne consomme PAS le quota EAS cloud (Free plan saturé jusqu’au 1er du mois).
 # Secrets GitHub requis : EXPO_TOKEN, RELEASE_UPLOAD_TOKEN
 
 on:
@@ -13,6 +14,7 @@ on:
       - 'context/**'
       - 'hooks/**'
       - 'constants/**'
+      - 'plugins/**'
       - 'app.json'
       - 'package.json'
       - 'eas.json'
@@ -20,19 +22,24 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version APK (ex: 1.0.1)'
+        description: 'Version APK (ex: 1.4.53)'
         required: false
         default: ''
+
+concurrency:
+  group: mobile-apk-prod
+  cancel-in-progress: false
 
 jobs:
   build-upload:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
 
       - name: Install deps
@@ -61,20 +68,17 @@ jobs:
           curl -fsS -X POST "https://gasoil-tracking.delhomme.ovh/api/ci/releases/pending" \
             -H "X-Release-Token: $TOKEN" \
             -H "Content-Type: application/json" \
-            -d "{\"version\":\"$VERSION\",\"releaseNotes\":\"Build EAS en cours (GitHub Actions)\",\"sha\":\"$GITHUB_SHA\"}" \
-            || echo "Annonce pending échouée (API pas encore à jour ?) — on continue"
+            -d "{\"version\":\"$VERSION\",\"releaseNotes\":\"Build APK GitHub Actions (local)\",\"sha\":\"$GITHUB_SHA\"}" \
+            || echo "Annonce pending échouée — on continue"
 
-      - name: Build Android APK (EAS cloud)
-        id: build
+      - name: Build Android APK (EAS local, sans quota cloud)
+        env:
+          EAS_BUILD_NO_EXPO_GO_WARNING: 'true'
         run: |
-          eas build --platform android --profile production --non-interactive --wait --json > /tmp/eas-build.json
-          cat /tmp/eas-build.json
-          URL=$(node -e "const j=require('/tmp/eas-build.json'); const a=Array.isArray(j)?j[0]:j; console.log(a.artifacts?.buildUrl || a.artifact?.url || a.url || '')")
-          echo "apk_url=$URL" >> "$GITHUB_OUTPUT"
-          if [ -z "$URL" ]; then echo "Pas d'URL APK"; exit 1; fi
-
-      - name: Download APK
-        run: curl -fsSL -o /tmp/gasoil.apk "${{ steps.build.outputs.apk_url }}"
+          eas build --platform android --profile production \
+            --non-interactive --local --output /tmp/gasoil.apk
+          ls -lh /tmp/gasoil.apk
+          test -s /tmp/gasoil.apk || { echo "Pas d'APK produit"; exit 1; }
 
       - name: Upload to Gasoil API (prod)
         env:
@@ -84,7 +88,8 @@ jobs:
           curl -fsS -X POST "https://gasoil-tracking.delhomme.ovh/api/ci/releases" \
             -H "X-Release-Token: $TOKEN" \
             -F "version=$VERSION" \
-            -F "releaseNotes=Build automatique GitHub Actions ($GITHUB_SHA)" \
+            -F "forceUpdate=1" \
+            -F "releaseNotes=v$VERSION — trajets/Maps/sync 413/jauge/budget (GitHub Actions $GITHUB_SHA)" \
             -F "apk=@/tmp/gasoil.apk"
           echo "APK $VERSION publié"
           curl -sf "https://gasoil-tracking.delhomme.ovh/api/version" || true
