@@ -13,10 +13,14 @@ function buildHtml(
   paused: boolean,
   planned: RouteCoord[],
   dest: RouteCoord | null | undefined,
-  speeds: number[] | null
+  speeds: number[] | null,
+  alternates: RouteCoord[][]
 ): string {
   const routeJson = JSON.stringify(route.map((p) => [p.latitude, p.longitude]));
   const plannedJson = JSON.stringify(planned.map((p) => [p.latitude, p.longitude]));
+  const altsJson = JSON.stringify(
+    (alternates || []).map((alt) => alt.map((p) => [p.latitude, p.longitude]))
+  );
   const speedsJson = JSON.stringify(speeds || []);
   const userJson = user ? JSON.stringify([user.latitude, user.longitude]) : 'null';
   const destJson = dest ? JSON.stringify([dest.latitude, dest.longitude]) : 'null';
@@ -46,6 +50,7 @@ function buildHtml(
     var accent = '${accentSafe}';
     var routeLayer = null;
     var plannedLayer = null;
+    var altLayers = [];
     var startMarker = null;
     var endMarker = null;
     var userMarker = null;
@@ -59,6 +64,21 @@ function buildHtml(
       var g = Math.round(197 + t * (68 - 197));
       var b = Math.round(94 + t * (68 - 94));
       return 'rgb('+r+','+g+','+b+')';
+    }
+
+    function clearAlts() {
+      altLayers.forEach(function(l){ map.removeLayer(l); });
+      altLayers = [];
+    }
+
+    function setAlts(list) {
+      clearAlts();
+      (list || []).forEach(function(pts) {
+        if (!pts || pts.length < 2) return;
+        altLayers.push(L.polyline(pts, {
+          color: '#94a3b8', weight: 4, opacity: 0.55, dashArray: '6 8'
+        }).addTo(map));
+      });
     }
 
     function setRoute(pts, speeds) {
@@ -98,7 +118,7 @@ function buildHtml(
       if (plannedLayer) { map.removeLayer(plannedLayer); plannedLayer = null; }
       if (!pts || pts.length < 2) return;
       plannedLayer = L.polyline(pts, {
-        color: '#94a3b8', weight: 4, opacity: 0.75, dashArray: '8 10'
+        color: accent, weight: 5, opacity: 0.9
       }).addTo(map);
     }
 
@@ -134,11 +154,13 @@ function buildHtml(
       fittedOnce = true;
     }
 
+    setAlts(${altsJson});
     setRoute(${routeJson}, ${speedsJson});
     setPlanned(${plannedJson});
     setUser(${userJson}, ${paused ? 'true' : 'false'});
     setDest(${destJson});
     var all = ${routeJson}.slice().concat(${plannedJson});
+    (${altsJson}).forEach(function(a){ all = all.concat(a); });
     if (${destJson}) all.push(${destJson});
     if (all.length) fit(all, true);
     else map.setView([${lat}, ${lon}], ${zoom});
@@ -148,6 +170,7 @@ function buildHtml(
         var msg = typeof raw === 'string' ? JSON.parse(raw) : raw;
         if (!msg || !msg.type) return;
         if (msg.type === 'update') {
+          setAlts(msg.alts || []);
           setRoute(msg.route || [], msg.speeds || []);
           setPlanned(msg.planned || []);
           setUser(msg.user || null, !!msg.paused);
@@ -175,6 +198,7 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
     userLocation,
     paused,
     plannedRoute = [],
+    alternateRoutes = [],
     destination,
     followUser = true,
     routeSpeedsKmh,
@@ -200,7 +224,8 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
         !!paused,
         plannedRoute,
         destination,
-        routeSpeedsKmh || null
+        routeSpeedsKmh || null,
+        alternateRoutes
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
@@ -224,6 +249,9 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
       route: routePoints.map((p) => [p.latitude, p.longitude]),
       speeds: routeSpeedsKmh || [],
       planned: (plannedRoute || []).map((p) => [p.latitude, p.longitude]),
+      alts: (alternateRoutes || []).map((alt) =>
+        alt.map((p) => [p.latitude, p.longitude])
+      ),
       user: followUser && userLocation ? [userLocation.latitude, userLocation.longitude] : null,
       dest: destination ? [destination.latitude, destination.longitude] : null,
       paused: !!paused,
@@ -231,7 +259,16 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
       refit: !followUser && routePoints.length > 1 && !didBootFit.current,
     });
     if (!followUser && routePoints.length > 1) didBootFit.current = true;
-  }, [routePoints, userLocation, paused, plannedRoute, destination, followUser, routeSpeedsKmh]);
+  }, [
+    routePoints,
+    userLocation,
+    paused,
+    plannedRoute,
+    alternateRoutes,
+    destination,
+    followUser,
+    routeSpeedsKmh,
+  ]);
 
   // Remount une fois hors Paris par défaut — mais avec region déjà = bbox trajet
   const [bootKey, setBootKey] = useState(0);
@@ -253,7 +290,8 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
         !!paused,
         plannedRoute,
         destination,
-        routeSpeedsKmh || null
+        routeSpeedsKmh || null,
+        alternateRoutes
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [bootKey]

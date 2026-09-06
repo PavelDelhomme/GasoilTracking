@@ -7,10 +7,10 @@ import type { RoutePoint } from '@/lib/calculations';
 export type SimCoord = { latitude: number; longitude: number };
 
 /** Domicile Thorigné → Intermarché La Guerche (~44 km route). */
-export const SIM_HOME: SimCoord = { latitude: 48.1465, longitude: -1.579 };
-export const SIM_WORK: SimCoord = { latitude: 47.9415, longitude: -1.2295 };
-/** Via pour coller à ~44 km réels (pas vol d’oiseau). */
-export const SIM_VIA: SimCoord = { latitude: 48.0, longitude: -1.55 };
+export const SIM_HOME: SimCoord = { latitude: 48.1572, longitude: -1.587 };
+export const SIM_WORK: SimCoord = { latitude: 47.9475, longitude: -1.2238 };
+/** Via Châteaugiron — trajet quotidien habituel (~44 km). */
+export const SIM_VIA: SimCoord = { latitude: 48.04867, longitude: -1.50282 };
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;

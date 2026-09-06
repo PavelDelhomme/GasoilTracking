@@ -66,7 +66,11 @@ import {
   fetchElevationAscentM,
   learnedFactorFromGauge,
 } from '@/lib/consumptionModel';
-import { fetchDrivingRoute } from '@/lib/roadDistance';
+import {
+  fetchDrivingRoute,
+  fetchDrivingRouteAlternatives,
+  type DrivingRoute,
+} from '@/lib/roadDistance';
 import { forwardGeocode } from '@/lib/geocode';
 import { notify, confirm } from '@/lib/notify';
 import { TripHistoryCard } from '@/components/TripHistoryCard';
@@ -89,6 +93,16 @@ type StartMode = 'free' | 'nav';
 
 type GeoCoords = { latitude: number; longitude: number };
 
+/** Waypoints pour biaiser Google Maps vers l’itinéraire choisi. */
+function mapsWaypointsForRoute(route: DrivingRoute | null | undefined): GeoCoords[] {
+  if (!route) return [];
+  if (route.via?.length) return route.via;
+  const coords = route.coordinates;
+  if (coords.length < 5) return [];
+  const mid = coords[Math.floor(coords.length / 2)];
+  return [{ latitude: mid.latitude, longitude: mid.longitude }];
+}
+
 export default function TripScreen() {
   const params = useLocalSearchParams<{
     mode?: string;
@@ -109,6 +123,9 @@ export default function TripScreen() {
   const [destCoords, setDestCoords] = useState<GeoCoords | null>(null);
   const [places, setPlaces] = useState<Place[]>([]);
   const [plannedRoute, setPlannedRoute] = useState<GeoCoords[]>([]);
+  const [routeOptions, setRouteOptions] = useState<DrivingRoute[]>([]);
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  const [routesLoading, setRoutesLoading] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [tripStartFuelLiters, setTripStartFuelLiters] = useState<number | null>(null);
@@ -381,6 +398,64 @@ export default function TripScreen() {
     );
   }, [activeTrip, destination, userLocation]);
 
+  const selectedRoute = useMemo(
+    () => routeOptions.find((r) => r.id === selectedRouteId) || routeOptions[0] || null,
+    [routeOptions, selectedRouteId]
+  );
+
+  const alternateMapRoutes = useMemo(() => {
+    if (!routeOptions.length) return [];
+    return routeOptions
+      .filter((r) => r.id !== selectedRoute?.id)
+      .map((r) => r.coordinates);
+  }, [routeOptions, selectedRoute?.id]);
+
+  const applyRouteSelection = useCallback((route: DrivingRoute) => {
+    setSelectedRouteId(route.id);
+    setPlannedRoute(route.coordinates);
+    if (route.coordinates.length >= 2) {
+      const lats = route.coordinates.map((p) => p.latitude);
+      const lons = route.coordinates.map((p) => p.longitude);
+      setCurrentRegion({
+        latitude: (Math.min(...lats) + Math.max(...lats)) / 2,
+        longitude: (Math.min(...lons) + Math.max(...lons)) / 2,
+        latitudeDelta: Math.max((Math.max(...lats) - Math.min(...lats)) * 1.35, 0.04),
+        longitudeDelta: Math.max((Math.max(...lons) - Math.min(...lons)) * 1.35, 0.04),
+      });
+    }
+  }, []);
+
+  const loadRouteAlternatives = useCallback(
+    async (from: GeoCoords, to: GeoCoords) => {
+      setRoutesLoading(true);
+      try {
+        const alts = await fetchDrivingRouteAlternatives(from, to);
+        setRouteOptions(alts);
+        const prefer =
+          alts.find((a) => a.kind === 'eco') ||
+          alts.find((a) => a.kind === 'alternate' && /château|chateau/i.test(a.label)) ||
+          alts[0];
+        if (prefer) applyRouteSelection(prefer);
+        else {
+          setSelectedRouteId(null);
+          setPlannedRoute([from, to]);
+        }
+      } catch {
+        setRouteOptions([]);
+        setSelectedRouteId(null);
+        try {
+          const r = await fetchDrivingRoute(from, to);
+          setPlannedRoute(r.coordinates);
+        } catch {
+          setPlannedRoute([from, to]);
+        }
+      } finally {
+        setRoutesLoading(false);
+      }
+    },
+    [applyRouteSelection]
+  );
+
   const handleStartTrip = async () => {
     if (!activeVehicle) {
       notify('Erreur', 'Sélectionnez un véhicule avant de démarrer un trajet.');
@@ -434,11 +509,14 @@ export default function TripScreen() {
 
       if (loc && resolvedDest) {
         try {
-          const route = await fetchDrivingRoute(
-            { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
-            resolvedDest
-          );
-          setPlannedRoute(route.coordinates);
+          if (selectedRoute && selectedRoute.coordinates.length >= 2) {
+            setPlannedRoute(selectedRoute.coordinates);
+          } else {
+            await loadRouteAlternatives(
+              { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
+              resolvedDest
+            );
+          }
         } catch {
           setPlannedRoute([
             { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
@@ -501,8 +579,19 @@ export default function TripScreen() {
         }).then(() => getRecentDestinations(6).then(setRecentDests));
         try {
           if (resolvedDest) {
+            const origin = loc
+              ? { latitude: loc.coords.latitude, longitude: loc.coords.longitude }
+              : userLocation || undefined;
             await Linking.openURL(
-              openGoogleMapsNavigation(resolvedDest.latitude, resolvedDest.longitude, destName)
+              openGoogleMapsNavigation(
+                resolvedDest.latitude,
+                resolvedDest.longitude,
+                destName,
+                {
+                  origin: origin || undefined,
+                  waypoints: mapsWaypointsForRoute(selectedRoute),
+                }
+              )
             );
           } else {
             await Linking.openURL(openGoogleMapsSearch(destName));
@@ -698,6 +787,8 @@ export default function TripScreen() {
             setDestination('');
             setDestCoords(null);
             setPlannedRoute([]);
+            setRouteOptions([]);
+            setSelectedRouteId(null);
             setTripStartFuelLiters(null);
             await refresh();
             await loadLists();
@@ -726,7 +817,15 @@ export default function TripScreen() {
       '';
     if (destCoords) {
       await Linking.openURL(
-        openGoogleMapsNavigation(destCoords.latitude, destCoords.longitude, label || 'Destination')
+        openGoogleMapsNavigation(
+          destCoords.latitude,
+          destCoords.longitude,
+          label || 'Destination',
+          {
+            origin: userLocation || undefined,
+            waypoints: mapsWaypointsForRoute(selectedRoute),
+          }
+        )
       );
       return;
     }
@@ -971,24 +1070,38 @@ export default function TripScreen() {
         const coords = { latitude: lat, longitude: lon };
         setDestCoords(coords);
         if (userLocation) {
-          void fetchDrivingRoute(userLocation, coords).then((r) => setPlannedRoute(r.coordinates));
+          void loadRouteAlternatives(userLocation, coords);
+        } else {
+          setPlannedRoute([]);
+          setRouteOptions([]);
         }
       } else {
         setDestCoords(null);
+        setRouteOptions([]);
         void forwardGeocode(label).then((g) => {
           if (!g) return;
-          setDestCoords({ latitude: g.latitude, longitude: g.longitude });
-          if (userLocation) {
-            void fetchDrivingRoute(userLocation, {
-              latitude: g.latitude,
-              longitude: g.longitude,
-            }).then((r) => setPlannedRoute(r.coordinates));
-          }
+          const coords = { latitude: g.latitude, longitude: g.longitude };
+          setDestCoords(coords);
+          if (userLocation) void loadRouteAlternatives(userLocation, coords);
         });
       }
     },
-    [userLocation]
+    [userLocation, loadRouteAlternatives]
   );
+
+  // Quand la position arrive après le choix d’une destination
+  useEffect(() => {
+    if (activeTrip || !destCoords || !userLocation) return;
+    if (routeOptions.length > 0 || routesLoading) return;
+    void loadRouteAlternatives(userLocation, destCoords);
+  }, [
+    activeTrip,
+    destCoords,
+    userLocation,
+    routeOptions.length,
+    routesLoading,
+    loadRouteAlternatives,
+  ]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -1040,11 +1153,69 @@ export default function TripScreen() {
               plannedRoute={
                 activeTrip && routePoints.length > 1 ? plannedRoute : plannedRoute
               }
+              alternateRoutes={
+                activeTrip && routePoints.length > 1 ? [] : alternateMapRoutes
+              }
               destination={destCoords}
             />
             {!userLocation && (
               <View style={styles.mapHint} pointerEvents="none">
                 <Text style={styles.mapHintText}>Localisation…</Text>
+              </View>
+            )}
+            {!activeTrip && routeOptions.length > 0 && (
+              <View style={styles.routePicker} pointerEvents="box-none">
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.routePickerInner}
+                >
+                  {routeOptions.map((r) => {
+                    const selected = r.id === selectedRoute?.id;
+                    return (
+                      <Pressable
+                        key={r.id}
+                        onPress={() => applyRouteSelection(r)}
+                        style={[
+                          styles.routeChip,
+                          {
+                            borderColor: selected ? colors.accent : 'rgba(255,255,255,0.35)',
+                            backgroundColor: selected
+                              ? colors.accent
+                              : 'rgba(15,23,42,0.88)',
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={{
+                            color: selected ? '#fff' : '#e2e8f0',
+                            fontWeight: '800',
+                            fontSize: 12,
+                          }}
+                        >
+                          {r.label}
+                        </Text>
+                        <Text
+                          style={{
+                            color: selected ? 'rgba(255,255,255,0.9)' : '#94a3b8',
+                            fontSize: 11,
+                            marginTop: 2,
+                          }}
+                        >
+                          {r.distanceKm.toFixed(1)} km
+                          {r.durationMinutes != null ? ` · ${r.durationMinutes} min` : ''}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+                {routesLoading ? (
+                  <Text style={styles.routePickerHint}>Calcul des itinéraires…</Text>
+                ) : (
+                  <Text style={styles.routePickerHint}>
+                    Choisissez un trajet — Maps s’ouvrira dessus au démarrage
+                  </Text>
+                )}
               </View>
             )}
           </View>
@@ -1269,16 +1440,19 @@ export default function TripScreen() {
                         onChangeText={(t) => {
                           setDestination(t);
                           setDestCoords(null);
+                          setRouteOptions([]);
+                          setSelectedRouteId(null);
+                          setPlannedRoute([]);
                         }}
                         places={places}
                         onPickPlace={(p) => {
                           if (p.latitude != null && p.longitude != null) {
                             setDestCoords({ latitude: p.latitude, longitude: p.longitude });
                             if (userLocation) {
-                              void fetchDrivingRoute(userLocation, {
+                              void loadRouteAlternatives(userLocation, {
                                 latitude: p.latitude,
                                 longitude: p.longitude,
-                              }).then((r) => setPlannedRoute(r.coordinates));
+                              });
                             }
                           }
                         }}
@@ -1286,10 +1460,10 @@ export default function TripScreen() {
                           if (Number.isFinite(c.latitude) && Number.isFinite(c.longitude)) {
                             setDestCoords({ latitude: c.latitude, longitude: c.longitude });
                             if (userLocation) {
-                              void fetchDrivingRoute(userLocation, {
+                              void loadRouteAlternatives(userLocation, {
                                 latitude: c.latitude,
                                 longitude: c.longitude,
-                              }).then((r) => setPlannedRoute(r.coordinates));
+                              });
                             }
                           } else if (c.label) {
                             setDestination(c.label);
@@ -1297,10 +1471,10 @@ export default function TripScreen() {
                               if (!g) return;
                               setDestCoords({ latitude: g.latitude, longitude: g.longitude });
                               if (userLocation) {
-                                void fetchDrivingRoute(userLocation, {
+                                void loadRouteAlternatives(userLocation, {
                                   latitude: g.latitude,
                                   longitude: g.longitude,
-                                }).then((r) => setPlannedRoute(r.coordinates));
+                                });
                               }
                             });
                           }
@@ -1659,6 +1833,34 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   mapHintText: { color: '#fff', fontSize: 12 },
+  routePicker: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 8,
+    paddingHorizontal: 8,
+  },
+  routePickerInner: {
+    gap: 8,
+    paddingHorizontal: 4,
+    alignItems: 'stretch',
+  },
+  routeChip: {
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minWidth: 108,
+  },
+  routePickerHint: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 10,
+    textAlign: 'center',
+    marginTop: 4,
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
   panel: { flex: 1 },
   panelContent: { padding: 16, paddingBottom: 40 },
   toolbar: { flexDirection: 'row', gap: 8, marginBottom: 12 },

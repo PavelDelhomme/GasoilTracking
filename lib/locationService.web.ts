@@ -157,10 +157,24 @@ export async function getCurrentLocation(opts?: {
 export function openGoogleMapsNavigation(
   destinationLat: number,
   destinationLng: number,
-  destinationName?: string
+  destinationName?: string,
+  opts?: {
+    origin?: { latitude: number; longitude: number };
+    waypoints?: { latitude: number; longitude: number }[];
+  }
 ): string {
-  const label = destinationName ? encodeURIComponent(destinationName) : '';
-  return `https://www.google.com/maps/dir/?api=1&destination=${destinationLat},${destinationLng}&travelmode=driving${label ? `&destination_place_id=${label}` : ''}`;
+  const dest = `${destinationLat},${destinationLng}`;
+  const origin = opts?.origin
+    ? `${opts.origin.latitude},${opts.origin.longitude}`
+    : '';
+  const wps = (opts?.waypoints || [])
+    .slice(0, 8)
+    .map((p) => `${p.latitude},${p.longitude}`)
+    .join('|');
+  let url = `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=driving`;
+  if (origin) url += `&origin=${origin}`;
+  if (wps) url += `&waypoints=${encodeURIComponent(wps)}`;
+  return url;
 }
 
 export function openGoogleMapsSearch(query: string): string {

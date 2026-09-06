@@ -26,6 +26,8 @@ export type TripMapProps = {
   paused?: boolean;
   /** Itinéraire prévu (OSRM) vers la destination */
   plannedRoute?: RouteCoord[];
+  /** Autres propositions (gris) */
+  alternateRoutes?: RouteCoord[][];
   /** Marqueur destination */
   destination?: RouteCoord | null;
   /** Suit le point user (live). Désactiver sur détail historique. */

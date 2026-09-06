@@ -1,20 +1,28 @@
 /**
  * Répare / complète l’historique trajet :
  * - crée l’aller manquant si un retour domicile existe le même jour
- * - remplit routePoints vides quand on peut reconstruire le tracé
+ * - remplit routePoints vides (via Châteaugiron pour le trajet travail)
+ * - purge micro-trajets inutiles (0 km)
  */
 import {
   addTrackedKm,
   createTrip,
+  deleteTrip,
   getPlaces,
+  getRecurringRoutes,
   getTrips,
   getVehicleById,
+  updateRecurringRoute,
   updateTrip,
 } from '@/lib/database';
-import { estimateTripFuelLiters } from '@/lib/consumptionModel';
-import { parseRoutePoints } from '@/lib/calculations';
+import {
+  computeRouteSpeedStats,
+  estimateTripFuelLiters,
+  fetchElevationAscentM,
+} from '@/lib/consumptionModel';
+import { parseRoutePoints, haversineDistance } from '@/lib/calculations';
 import { SIM_HOME, SIM_WORK } from '@/lib/gpsCarSimulator';
-import { fetchDrivingRoute } from '@/lib/roadDistance';
+import { fetchDrivingRoute, VIA_CHATEAUGIRON } from '@/lib/roadDistance';
 import {
   buildStoredRouteJson,
   resolveTripEndpoints,
@@ -22,7 +30,9 @@ import {
 import type { Place, Trip } from '@/types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const REPAIR_KEY = 'gasoil_route_repair_v2';
+const REPAIR_KEY = 'gasoil_route_repair_v4';
+const TINY_PURGE_KEY = 'gasoil_tiny_purge_v1';
+const SPEED_FIX_KEY = 'gasoil_speed_fix_v1';
 
 function dayKey(iso: string): string {
   return iso.slice(0, 10);
@@ -36,10 +46,49 @@ function isWorkLabel(s: string | null | undefined): boolean {
   return /travail|bureau|inter|guerche|vitré|vitre|faubourg/i.test(s || '');
 }
 
+function isCommutePair(a: string | null | undefined, b: string | null | undefined): boolean {
+  return (isHomeLabel(a) && isWorkLabel(b)) || (isWorkLabel(a) && isHomeLabel(b));
+}
+
 function localIsoOnDay(ymd: string, hour: number, minute: number): string {
   const [y, m, d] = ymd.split('-').map(Number);
   const dt = new Date(y, m - 1, d, hour, minute, 0, 0);
   return dt.toISOString();
+}
+
+/** Vitesse max brute (sans plafond) pour détecter timestamps absurdes. */
+function rawMaxSpeedKmh(
+  pts: Array<{ latitude: number; longitude: number; timestamp: number }>
+): number {
+  let max = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const dt = pts[i].timestamp - pts[i - 1].timestamp;
+    if (!Number.isFinite(dt) || dt <= 0 || dt > 180_000) continue;
+    const dKm = haversineDistance(
+      pts[i - 1].latitude,
+      pts[i - 1].longitude,
+      pts[i].latitude,
+      pts[i].longitude
+    );
+    if (dKm > 0.4 && dt < 3000) continue;
+    const kmh = dKm / (dt / 3_600_000);
+    if (kmh > max) max = kmh;
+  }
+  return max;
+}
+
+function stampRouteAtSpeed(
+  coords: Array<{ latitude: number; longitude: number }>,
+  startTs: number,
+  durationMinutes: number
+): Array<{ latitude: number; longitude: number; timestamp: number }> {
+  const n = coords.length;
+  const durationMs = Math.max(10, durationMinutes) * 60_000;
+  return coords.map((c, i) => ({
+    latitude: c.latitude,
+    longitude: c.longitude,
+    timestamp: startTs + Math.round((i / Math.max(1, n - 1)) * durationMs),
+  }));
 }
 
 async function fillEmptyRoute(trip: Trip, places: Place[]): Promise<boolean> {
@@ -48,130 +97,292 @@ async function fillEmptyRoute(trip: Trip, places: Place[]): Promise<boolean> {
   const ends = resolveTripEndpoints(trip, places);
   if (!ends) return false;
 
-  let coords = (await fetchDrivingRoute(ends.from, ends.to)).coordinates;
-  if (coords.length < 2) {
-    const built = buildStoredRouteJson(ends.from, ends.to, Date.parse(trip.startTime) || Date.now());
-    await updateTrip(trip.id, { routePoints: built.json });
-    return true;
+  const commute = isCommutePair(trip.originName, trip.destinationName);
+  let distanceKm = trip.distanceKm;
+  let routeJson = trip.routePoints;
+  try {
+    const route = await fetchDrivingRoute(ends.from, ends.to, {
+      via: commute ? VIA_CHATEAUGIRON : undefined,
+    });
+    if (route.coordinates.length >= 2) {
+      const startTs = new Date(trip.startTime).getTime() || Date.now();
+      const built = buildStoredRouteJson(ends.from, ends.to, startTs, { speedKmh: 68 });
+      // Préférer géométrie OSRM réelle + timestamps réalistes
+      const n = route.coordinates.length;
+      const durationMs = (route.durationMinutes ?? Math.max(30, distanceKm * 1.1)) * 60_000;
+      const stamped = route.coordinates.map((c, i) => ({
+        latitude: c.latitude,
+        longitude: c.longitude,
+        timestamp: startTs + Math.round((i / Math.max(1, n - 1)) * durationMs),
+      }));
+      routeJson = JSON.stringify(stamped);
+      distanceKm = route.distanceKm || built.distanceHintKm;
+    }
+  } catch {
+    const startTs = new Date(trip.startTime).getTime() || Date.now();
+    const built = buildStoredRouteJson(ends.from, ends.to, startTs, { speedKmh: 68 });
+    routeJson = built.json;
+    distanceKm = built.distanceHintKm;
   }
-  const startTs = Date.parse(trip.startTime) || Date.now();
-  const endTs = trip.endTime ? Date.parse(trip.endTime) : startTs + coords.length * 4000;
-  const span = Math.max(endTs - startTs, coords.length * 1000);
-  const routePoints = JSON.stringify(
-    coords.map((c, i) => ({
-      latitude: c.latitude,
-      longitude: c.longitude,
-      timestamp: Math.round(startTs + (span * i) / Math.max(1, coords.length - 1)),
-    }))
-  );
-  await updateTrip(trip.id, { routePoints });
+
+  const vehicle = await getVehicleById(trip.vehicleId);
+  const elevPts = parseRoutePoints(routeJson);
+  const ascent = await fetchElevationAscentM(elevPts);
+  const speeds = computeRouteSpeedStats(elevPts);
+  const fuel = vehicle
+    ? estimateTripFuelLiters(vehicle, distanceKm, {
+        ascentM: ascent,
+        learnedFactor: vehicle.consumptionLearnFactor,
+        avgSpeedKmh: speeds.avgKmh || 68,
+      })
+    : trip.estimatedFuelUsed;
+  const cost = vehicle ? Math.round(fuel * vehicle.defaultFuelPrice * 100) / 100 : trip.estimatedCost;
+
+  await updateTrip(trip.id, {
+    routePoints: routeJson,
+    distanceKm,
+    estimatedFuelUsed: Math.round(fuel * 100) / 100,
+    estimatedCost: cost,
+  });
   return true;
 }
 
-/**
- * Si un retour travail→domicile existe un jour sans aller, crée l’aller avec tracé.
- * Cible notamment le 2026-09-05 demandé par l’utilisateur.
- */
 async function ensureOutboundForDay(
   vehicleId: number,
   ymd: string,
   places: Place[],
   trips: Trip[]
 ): Promise<boolean> {
-  const dayTrips = trips.filter(
-    (t) => dayKey(t.startTime) === ymd && t.status !== 'rejected' && !t.isActive
-  );
-  const hasOut = dayTrips.some(
+  const dayTrips = trips.filter((t) => dayKey(t.startTime) === ymd);
+  const hasOutbound = dayTrips.some(
     (t) => isHomeLabel(t.originName) && isWorkLabel(t.destinationName)
   );
-  const hasBack = dayTrips.some(
+  const hasReturn = dayTrips.some(
     (t) => isWorkLabel(t.originName) && isHomeLabel(t.destinationName)
   );
-  if (hasOut || !hasBack) return false;
+  if (hasOutbound || !hasReturn) return false;
 
   const vehicle = await getVehicleById(vehicleId);
   if (!vehicle) return false;
 
-  const home = places.find((p) => p.kind === 'home');
-  const work = places.find((p) => p.kind === 'work');
+  const home = places.find((p) => p.kind === 'home') || {
+    latitude: SIM_HOME.latitude,
+    longitude: SIM_HOME.longitude,
+    name: 'Domicile',
+  };
+  const work = places.find((p) => p.kind === 'work') || {
+    latitude: SIM_WORK.latitude,
+    longitude: SIM_WORK.longitude,
+    name: 'Travail',
+  };
   const from = {
-    latitude: home?.latitude ?? SIM_HOME.latitude,
-    longitude: home?.longitude ?? SIM_HOME.longitude,
+    latitude: home.latitude ?? SIM_HOME.latitude,
+    longitude: home.longitude ?? SIM_HOME.longitude,
   };
   const to = {
-    latitude: work?.latitude ?? SIM_WORK.latitude,
-    longitude: work?.longitude ?? SIM_WORK.longitude,
+    latitude: work.latitude ?? SIM_WORK.latitude,
+    longitude: work.longitude ?? SIM_WORK.longitude,
   };
-
-  const start = localIsoOnDay(ymd, 7, 35);
-  const startMs = Date.parse(start);
-  let distanceKm = 44;
-  let routeJson: string;
-  try {
-    const route = await fetchDrivingRoute(from, to);
-    if (route.coordinates.length >= 2) {
-      distanceKm = route.distanceKm || distanceKm;
-      const endMs = startMs + (route.durationMinutes || 45) * 60_000;
-      routeJson = JSON.stringify(
-        route.coordinates.map((c, i) => ({
-          latitude: c.latitude,
-          longitude: c.longitude,
-          timestamp: Math.round(
-            startMs + ((endMs - startMs) * i) / Math.max(1, route.coordinates.length - 1)
-          ),
-        }))
-      );
-    } else {
-      const built = buildStoredRouteJson(from, to, startMs);
-      routeJson = built.json;
-      distanceKm = built.distanceHintKm || distanceKm;
-    }
-  } catch {
-    const built = buildStoredRouteJson(from, to, startMs);
-    routeJson = built.json;
-    distanceKm = built.distanceHintKm || distanceKm;
-  }
-
-  const fuel = estimateTripFuelLiters(vehicle, distanceKm);
-  const price = vehicle.defaultFuelPrice || 1.7;
-  const end = localIsoOnDay(ymd, 8, 25);
+  const startTime = localIsoOnDay(ymd, 7, 25);
+  const startTs = new Date(startTime).getTime();
+  const route = await fetchDrivingRoute(from, to, { via: VIA_CHATEAUGIRON });
+  const durationMin = route.durationMinutes ?? 50;
+  const endTime = new Date(startTs + durationMin * 60_000).toISOString();
+  const n = route.coordinates.length;
+  const stamped = route.coordinates.map((c, i) => ({
+    latitude: c.latitude,
+    longitude: c.longitude,
+    timestamp: startTs + Math.round((i / Math.max(1, n - 1)) * durationMin * 60_000),
+  }));
+  const distanceKm = route.distanceKm;
+  const elev = await fetchElevationAscentM(stamped);
+  const speeds = computeRouteSpeedStats(stamped);
+  const fuel = estimateTripFuelLiters(vehicle, distanceKm, {
+    ascentM: elev,
+    learnedFactor: vehicle.consumptionLearnFactor,
+    avgSpeedKmh: speeds.avgKmh || 68,
+  });
+  const cost = Math.round(fuel * vehicle.defaultFuelPrice * 100) / 100;
 
   await createTrip({
     vehicleId,
-    startTime: start,
-    endTime: end,
+    startTime,
+    endTime,
     distanceKm,
     estimatedFuelUsed: Math.round(fuel * 100) / 100,
-    estimatedCost: Math.round(fuel * price * 100) / 100,
-    routePoints: routeJson,
-    originName: home?.name || 'Domicile',
-    destinationName: work?.name || 'Travail (Intermarché)',
+    estimatedCost: cost,
     isActive: false,
+    isPaused: false,
+    originName: 'Domicile — Thorigné-Fouillard',
+    destinationName: 'Intermarché La Guerche de Bretagne',
+    routePoints: JSON.stringify(stamped),
     status: 'confirmed',
     source: 'manual',
     fillUpId: null,
-    note: 'Aller complété automatiquement (manquant le 05/09) — tracé reconstruit',
+    note: 'Aller complété (via Châteaugiron) — tracé reconstruit',
   });
   await addTrackedKm(vehicleId, distanceKm);
   return true;
 }
 
-/** À appeler au refresh app (idempotent via AsyncStorage). */
+/** Supprime les micro-trajets (0 km / quelques mètres) inutiles. */
+export async function purgeTinyTrips(vehicleId?: number): Promise<number> {
+  const trips = await getTrips(vehicleId, { includeRejected: true });
+  let n = 0;
+  for (const t of trips) {
+    if (t.isActive) continue;
+    const mins =
+      t.endTime && t.startTime
+        ? (new Date(t.endTime).getTime() - new Date(t.startTime).getTime()) / 60000
+        : 99;
+    if (t.distanceKm < 0.25 && mins < 8) {
+      await deleteTrip(t.id);
+      n += 1;
+    }
+  }
+  return n;
+}
+
+/** Aligne les trajets réguliers domicile↔travail sur ~44 km (via Châteaugiron). */
+export async function alignCommuteRecurringRoutes(): Promise<number> {
+  const places = await getPlaces();
+  const home = places.find((p) => p.kind === 'home');
+  const work = places.find((p) => p.kind === 'work');
+  if (!home?.latitude || !work?.latitude) return 0;
+  const routes = await getRecurringRoutes();
+  let n = 0;
+  for (const r of routes) {
+    const isHw =
+      (r.fromPlaceId === home.id && r.toPlaceId === work.id) ||
+      (r.fromPlaceId === work.id && r.toPlaceId === home.id);
+    if (!isHw) continue;
+    if (r.distanceKm > 42 && r.distanceKm < 46) continue;
+    const from =
+      r.fromPlaceId === home.id
+        ? { latitude: home.latitude!, longitude: home.longitude! }
+        : { latitude: work.latitude!, longitude: work.longitude! };
+    const to =
+      r.fromPlaceId === home.id
+        ? { latitude: work.latitude!, longitude: work.longitude! }
+        : { latitude: home.latitude!, longitude: home.longitude! };
+    try {
+      const route = await fetchDrivingRoute(from, to, { via: VIA_CHATEAUGIRON });
+      await updateRecurringRoute(r.id, { distanceKm: route.distanceKm });
+      n += 1;
+    } catch {
+      await updateRecurringRoute(r.id, { distanceKm: 43.7 });
+      n += 1;
+    }
+  }
+  return n;
+}
+
+/**
+ * Corrige timestamps / conso des trajets reconstruits avec vitesses absurdes,
+ * et ré-aligne les trajets domicile↔travail trop longs (route rapide ~49 km).
+ */
+export async function fixImplausibleTripSpeeds(vehicleId?: number): Promise<number> {
+  const done = await AsyncStorage.getItem(SPEED_FIX_KEY);
+  if (done === '1') return 0;
+
+  const places = await getPlaces();
+  const trips = await getTrips(vehicleId, { includeRejected: true });
+  let n = 0;
+
+  for (const t of trips) {
+    if (t.isActive) continue;
+    // Ne pas écraser un vrai tracé GPS
+    if (t.source === 'gps') continue;
+
+    const pts = parseRoutePoints(t.routePoints);
+    const commute = isCommutePair(t.originName, t.destinationName);
+    const crazy = pts.length >= 2 && rawMaxSpeedKmh(pts) >= 145;
+    const wrongHwy = commute && t.distanceKm > 46.5;
+    if (!crazy && !wrongHwy) continue;
+
+    const ends = resolveTripEndpoints(t, places);
+    if (!ends) continue;
+
+    try {
+      const route = await fetchDrivingRoute(ends.from, ends.to, {
+        via: commute ? VIA_CHATEAUGIRON : undefined,
+      });
+      if (route.coordinates.length < 2) continue;
+      const startTs = new Date(t.startTime).getTime() || Date.now();
+      const mins =
+        route.durationMinutes ??
+        Math.max(35, Math.round((route.distanceKm / 68) * 60));
+      const stamped = stampRouteAtSpeed(route.coordinates, startTs, mins);
+      const distanceKm = route.distanceKm;
+      const vehicle = await getVehicleById(t.vehicleId);
+      const ascent = await fetchElevationAscentM(stamped);
+      const speeds = computeRouteSpeedStats(stamped);
+      const fuel = vehicle
+        ? estimateTripFuelLiters(vehicle, distanceKm, {
+            ascentM: ascent,
+            learnedFactor: vehicle.consumptionLearnFactor,
+            avgSpeedKmh: speeds.avgKmh || 68,
+          })
+        : t.estimatedFuelUsed;
+      const cost = vehicle
+        ? Math.round(fuel * vehicle.defaultFuelPrice * 100) / 100
+        : t.estimatedCost;
+      const endTs = stamped[stamped.length - 1]?.timestamp;
+      await updateTrip(t.id, {
+        routePoints: JSON.stringify(stamped),
+        distanceKm,
+        estimatedFuelUsed: Math.round(fuel * 100) / 100,
+        estimatedCost: cost,
+        endTime: t.endTime || (endTs ? new Date(endTs).toISOString() : t.endTime),
+        note: commute
+          ? `${t.note || ''} · via Châteaugiron (corrigé)`.trim()
+          : t.note,
+      });
+      n += 1;
+    } catch {
+      /* ignore one */
+    }
+  }
+
+  await AsyncStorage.setItem(SPEED_FIX_KEY, '1');
+  return n;
+}
+
+/** À appeler au refresh app. */
 export async function repairTripHistory(vehicleId?: number): Promise<{
   routesFilled: number;
   outboundAdded: boolean;
+  tinyPurged: number;
+  routesAligned: number;
+  speedsFixed: number;
 }> {
-  const flag = await AsyncStorage.getItem(REPAIR_KEY);
   const places = await getPlaces();
   const trips = await getTrips(vehicleId, { includeRejected: true });
   let routesFilled = 0;
   let outboundAdded = false;
 
-  if (flag === '1') {
-    return { routesFilled: 0, outboundAdded: false };
+  const tinyPurged = await purgeTinyTrips(vehicleId);
+  if (tinyPurged) await AsyncStorage.setItem(TINY_PURGE_KEY, '1');
+
+  let routesAligned = 0;
+  try {
+    routesAligned = await alignCommuteRecurringRoutes();
+  } catch {
+    /* ignore */
   }
 
-  // Remplir tracés vides (limité pour perf / Nominatim-OSRM)
+  let speedsFixed = 0;
+  try {
+    speedsFixed = await fixImplausibleTripSpeeds(vehicleId);
+  } catch {
+    /* ignore */
+  }
+
+  const flag = await AsyncStorage.getItem(REPAIR_KEY);
+  if (flag === '1') {
+    return { routesFilled: 0, outboundAdded: false, tinyPurged, routesAligned, speedsFixed };
+  }
+
   const empty = trips.filter((t) => parseRoutePoints(t.routePoints).length < 2).slice(0, 30);
   for (const t of empty) {
     try {
@@ -200,10 +411,9 @@ export async function repairTripHistory(vehicleId?: number): Promise<{
   }
 
   await AsyncStorage.setItem(REPAIR_KEY, '1');
-  return { routesFilled, outboundAdded };
+  return { routesFilled, outboundAdded, tinyPurged, routesAligned, speedsFixed };
 }
 
-/** Force une nouvelle passe (tests). */
 export async function resetTripHistoryRepairFlag(): Promise<void> {
-  await AsyncStorage.removeItem(REPAIR_KEY);
+  await AsyncStorage.multiRemove([REPAIR_KEY, SPEED_FIX_KEY]);
 }

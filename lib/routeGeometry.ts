@@ -4,11 +4,16 @@
  */
 import { parseRoutePoints, type RoutePoint } from '@/lib/calculations';
 import { buildDrivingPoints, SIM_HOME, SIM_WORK, SIM_VIA } from '@/lib/gpsCarSimulator';
-import { fetchDrivingRoute } from '@/lib/roadDistance';
+import { fetchDrivingRoute, VIA_CHATEAUGIRON } from '@/lib/roadDistance';
 import { forwardGeocode } from '@/lib/geocode';
 import type { Place, Trip } from '@/types';
 
 export type LatLng = { latitude: number; longitude: number };
+
+function looksLikeCommute(trip: Trip): boolean {
+  const o = `${trip.originName || ''} ${trip.destinationName || ''}`.toLowerCase();
+  return /thorign|domicile|maison|guerche|inter|travail|vitré|vitre/.test(o);
+}
 
 const geocodeCache = new Map<string, LatLng | null>();
 
@@ -148,7 +153,9 @@ export async function getTripDisplayRoute(
   }
 
   try {
-    const route = await fetchDrivingRoute(ends.from, ends.to);
+    const route = await fetchDrivingRoute(ends.from, ends.to, {
+      via: looksLikeCommute(trip) ? VIA_CHATEAUGIRON : undefined,
+    });
     if (route.coordinates.length >= 2) {
       return downsampleRoute(route.coordinates, 120);
     }

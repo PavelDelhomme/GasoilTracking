@@ -49,7 +49,20 @@ export type ConsumptionContext = {
   ascentM?: number;
   gears?: number | null;
   learnedFactor?: number;
+  /** Vitesse moyenne en mouvement (km/h) — impact conso */
+  avgSpeedKmh?: number;
 };
+
+/** Surconso vs vitesse : ville lente / autoroute rapide. */
+export function speedConsumptionFactor(avgKmh: number): number {
+  if (!Number.isFinite(avgKmh) || avgKmh <= 0) return 1;
+  if (avgKmh < 35) return 1.16;
+  if (avgKmh < 55) return 1.08;
+  if (avgKmh < 95) return 1;
+  if (avgKmh < 115) return 1.1;
+  if (avgKmh < 130) return 1.2;
+  return 1.28;
+}
 
 export function estimateTripFuelLiters(
   vehicle: Vehicle,
@@ -67,7 +80,8 @@ export function estimateTripFuelLiters(
         ? vehicle.consumptionLearnFactor
         : 1;
   const elev = elevationFactor(ctx.ascentM ?? 0, distanceKm);
-  const l100 = base * age * gear * REAL_WORLD_MARGIN * learned * elev;
+  const speed = speedConsumptionFactor(ctx.avgSpeedKmh ?? 0);
+  const l100 = base * age * gear * REAL_WORLD_MARGIN * learned * elev * speed;
   return Math.round(((distanceKm * l100) / 100) * 100) / 100;
 }
 
@@ -101,9 +115,12 @@ export type RouteSpeedStats = {
   pointSpeedsKmh: number[];
 };
 
+/** Plafond réaliste FR (hors erreur GPS). */
+export const MAX_PLAUSIBLE_SPEED_KMH = 130;
+
 /**
  * Vitesses segment par segment (device `speed` ou haversine/dt).
- * Ignore arrêt / outliers.
+ * Ignore arrêt / outliers / sauts GPS.
  */
 export function computeRouteSpeedStats(
   points: Array<PointLike & { speed?: number }>
@@ -120,9 +137,11 @@ export function computeRouteSpeedStats(
       const dt = b.timestamp - a.timestamp;
       if (!Number.isFinite(dt) || dt <= 0 || dt > 180_000) continue;
       const dKm = haversineKm(a.latitude, a.longitude, b.latitude, b.longitude);
+      // Saut GPS : > 400 m en < 3 s → ignorer
+      if (dKm > 0.4 && dt < 3000) continue;
       kmh = dKm / (dt / 3_600_000);
     }
-    if (kmh < 3 || kmh > 200) continue;
+    if (kmh < 3 || kmh > MAX_PLAUSIBLE_SPEED_KMH) continue;
     pointSpeedsKmh[i] = Math.round(kmh * 10) / 10;
     samples.push(kmh);
   }
