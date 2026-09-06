@@ -63,7 +63,7 @@ export default function StationTripScreen() {
   const [isFull, setIsFull] = useState(true);
   const [liters, setLiters] = useState('');
   const [price, setPrice] = useState(
-    params.price || activeVehicle?.defaultFuelPrice.toString() || '1.75'
+    params.price || activeVehicle?.defaultFuelPrice.toString() || '1.70'
   );
   /** Km réels GPS (ou saisie de secours si GPS = 0). */
   const [distanceKm, setDistanceKm] = useState('');

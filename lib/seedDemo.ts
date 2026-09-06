@@ -34,7 +34,7 @@ export async function seedDemoData(): Promise<{ vehicleId: number; trips: number
     fuelType: 'diesel',
     consumptionPer100: 7.8,
     tankCapacity: 80,
-    defaultFuelPrice: 1.72,
+    defaultFuelPrice: 1.7,
     currentOdometer: 248500,
     hasOdometer: false,
     trackedKm: 0,
@@ -43,7 +43,7 @@ export async function seedDemoData(): Promise<{ vehicleId: number; trips: number
     isActive: true,
   });
 
-  const price = 1.72;
+  const price = 1.7;
   const conso = 7.8;
 
   const tripDefs = [

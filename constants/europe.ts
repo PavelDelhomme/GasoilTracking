@@ -36,8 +36,8 @@ export type EuropeCountry = {
 
 /** Liste pays Europe (sens large / continental + UK / Islande) */
 export const EUROPE_COUNTRIES: EuropeCountry[] = [
-  { code: 'FR', name: 'France', nameNative: 'France', currency: 'EUR', locale: 'fr-FR', defaultFuelPrice: 1.75, symbol: '€' },
-  { code: 'BE', name: 'Belgium', nameNative: 'Belgique', currency: 'EUR', locale: 'fr-BE', defaultFuelPrice: 1.72, symbol: '€' },
+  { code: 'FR', name: 'France', nameNative: 'France', currency: 'EUR', locale: 'fr-FR', defaultFuelPrice: 1.7, symbol: '€' },
+  { code: 'BE', name: 'Belgium', nameNative: 'Belgique', currency: 'EUR', locale: 'fr-BE', defaultFuelPrice: 1.7, symbol: '€' },
   { code: 'LU', name: 'Luxembourg', nameNative: 'Luxembourg', currency: 'EUR', locale: 'fr-LU', defaultFuelPrice: 1.45, symbol: '€' },
   { code: 'DE', name: 'Germany', nameNative: 'Deutschland', currency: 'EUR', locale: 'de-DE', defaultFuelPrice: 1.68, symbol: '€' },
   { code: 'NL', name: 'Netherlands', nameNative: 'Nederland', currency: 'EUR', locale: 'nl-NL', defaultFuelPrice: 1.85, symbol: '€' },

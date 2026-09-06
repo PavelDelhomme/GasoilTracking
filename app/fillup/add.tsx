@@ -46,7 +46,7 @@ export default function AddFillUpScreen() {
   const [liters, setLiters] = useState('');
   const [totalPaid, setTotalPaid] = useState('');
   const [pricePerLiter, setPricePerLiter] = useState(
-    activeVehicle?.defaultFuelPrice.toString() ?? '1.75'
+    activeVehicle?.defaultFuelPrice.toString() ?? '1.70'
   );
   /** Qui a été modifié en dernier pour recalculer le 3e champ */
   const [lastEdited, setLastEdited] = useState<'liters' | 'total' | 'ppl'>('liters');

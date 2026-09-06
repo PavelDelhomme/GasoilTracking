@@ -179,6 +179,13 @@ function snapshotWeight(snap: {
 export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'> {
   const token = await getToken();
   if (!token) return 'skipped';
+  // Corrige prix/litres/budgets locaux avant tout push (évite d’écraser le cloud corrigé).
+  try {
+    const { repairFillUpVehiclesAndBudgets } = await import('@/lib/repairFillUpVehicles');
+    await repairFillUpVehiclesAndBudgets();
+  } catch {
+    /* ignore */
+  }
   const remote = await fetchSync();
   const remoteSnap = normalizeSnapshot(remote?.data);
   const local = await collectSnapshot();
@@ -189,7 +196,13 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
 
   if (remoteSnap && (remoteAt > localAt + 2000 || remoteW > localW + 5)) {
     await applySnapshot(remoteSnap, 'replace');
-    await saveLocalBackup(remoteSnap);
+    try {
+      const { repairFillUpVehiclesAndBudgets } = await import('@/lib/repairFillUpVehicles');
+      await repairFillUpVehiclesAndBudgets();
+    } catch {
+      /* ignore */
+    }
+    await saveLocalBackup(await collectSnapshot());
     return 'pulled';
   }
   await pushSync(local);
