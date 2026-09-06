@@ -64,6 +64,7 @@ import {
 } from '@/lib/gpsCarSimulator';
 import { applyTripFuelBurn, blendConsumptionLearnFactor } from '@/lib/fuelLevel';
 import { askFuelGaugeApprox } from '@/lib/fuelGaugePrompt';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   estimateTripFuelLiters,
   fetchElevationAscentM,
@@ -103,6 +104,16 @@ type TripTab = 'live' | 'history';
 /** free = suivi GPS sans destination ; nav = avec destination */
 type StartMode = 'free' | 'nav';
 
+const START_MODE_KEY = 'gasoil_trip_start_mode';
+const SMART_DISMISS_KEY = 'gasoil_smart_dismiss_window';
+
+function smartWindowKey(): string {
+  const d = new Date();
+  const h = d.getHours();
+  const slot = h < 12 ? 'am' : h < 17 ? 'mid' : 'pm';
+  return `${d.toISOString().slice(0, 10)}-${slot}`;
+}
+
 type GeoCoords = { latitude: number; longitude: number };
 
 /** Waypoints pour biaiser Google Maps vers l’itinéraire choisi. */
@@ -126,7 +137,7 @@ export default function TripScreen() {
   const mapRef = useRef<TripMapRef>(null);
   const autoStartDone = useRef(false);
   const [tab, setTab] = useState<TripTab>('live');
-  const [startMode, setStartMode] = useState<StartMode>('free');
+  const [startMode, setStartMode] = useState<StartMode>('nav');
   const [destination, setDestination] = useState('');
   const [destCoords, setDestCoords] = useState<GeoCoords | null>(null);
   const [places, setPlaces] = useState<Place[]>([]);
@@ -230,6 +241,29 @@ export default function TripScreen() {
       setRecentDests(fromHist);
     })();
   }, [activeVehicle, colors.accent]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const mode = await AsyncStorage.getItem(START_MODE_KEY);
+        if (mode === 'free' || mode === 'nav') setStartMode(mode);
+        const dismissed = await AsyncStorage.getItem(SMART_DISMISS_KEY);
+        setSmartDismissed(dismissed === smartWindowKey());
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, []);
+
+  const persistStartMode = useCallback((mode: StartMode) => {
+    setStartMode(mode);
+    void AsyncStorage.setItem(START_MODE_KEY, mode);
+  }, []);
+
+  const dismissSmartSuggestions = useCallback(() => {
+    setSmartDismissed(true);
+    void AsyncStorage.setItem(SMART_DISMISS_KEY, smartWindowKey());
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -467,15 +501,27 @@ export default function TripScreen() {
     [applyRouteSelection]
   );
 
-  const handleStartTrip = async () => {
+  const handleStartTrip = async (override?: {
+    destinationLabel?: string;
+    dest?: GeoCoords | null;
+    mode?: StartMode;
+  }) => {
     if (!activeVehicle) {
       notify('Erreur', 'Sélectionnez un véhicule avant de démarrer un trajet.');
       return;
     }
-    if (startMode === 'nav' && !destination.trim()) {
+    const mode = override?.mode ?? startMode;
+    const destLabel =
+      override?.destinationLabel?.trim() || destination.trim();
+    const coordsOverride =
+      override && 'dest' in override ? override.dest : destCoords;
+
+    if (mode === 'nav' && !destLabel) {
       notify('Destination', 'Indiquez une destination, ou choisissez « Suivi libre ».');
       return;
     }
+
+    if (mode === 'nav') persistStartMode('nav');
 
     setIsStarting(true);
     // Capturer l’itinéraire choisi avant les await (évite state stale)
@@ -486,7 +532,8 @@ export default function TripScreen() {
       const gauge = await askFuelGaugeApprox(
         activeVehicle,
         'Niveau d’essence au départ',
-        'Indiquez approximativement la jauge pour affiner la conso (passable).'
+        'Indiquez approximativement la jauge pour affiner la conso (passable).',
+        { softSkip: true }
       );
       const startFuel = gauge.skipped
         ? activeVehicle.estimatedFuelLiters
@@ -513,14 +560,16 @@ export default function TripScreen() {
         });
       }
 
-      let resolvedDest = destCoords;
-      if (startMode === 'nav' && !resolvedDest && destination.trim()) {
-        const geo = await forwardGeocode(destination.trim()).catch(() => null);
+      let resolvedDest = coordsOverride ?? null;
+      if (mode === 'nav' && !resolvedDest && destLabel) {
+        const geo = await forwardGeocode(destLabel).catch(() => null);
         if (geo) {
           resolvedDest = { latitude: geo.latitude, longitude: geo.longitude };
           setDestCoords(resolvedDest);
         }
       }
+      if (destLabel) setDestination(destLabel);
+      if (resolvedDest) setDestCoords(resolvedDest);
 
       if (loc && resolvedDest) {
         try {
@@ -560,8 +609,7 @@ export default function TripScreen() {
           'Position de départ'
         : undefined;
 
-      const destName =
-        startMode === 'nav' ? destination.trim() : undefined;
+      const destName = mode === 'nav' ? destLabel : undefined;
 
       const tripId = await createTrip({
         vehicleId: activeVehicle.id,
@@ -578,7 +626,7 @@ export default function TripScreen() {
         status: 'confirmed',
         source: 'gps',
         fillUpId: null,
-        note: startMode === 'free'
+        note: mode === 'free'
           ? isWeb
             ? 'Suivi GPS web (onglet ouvert)'
             : 'Suivi GPS libre (arrière-plan)'
@@ -607,7 +655,7 @@ export default function TripScreen() {
       await loadLists();
 
       // Navigation Maps APRÈS démarrage suivi — avec l’itinéraire réellement choisi
-      if (startMode === 'nav' && destName && resolvedDest) {
+      if (mode === 'nav' && destName && resolvedDest) {
         void pushRecentDestination({
           label: destName,
           latitude: resolvedDest.latitude,
@@ -698,7 +746,7 @@ export default function TripScreen() {
   };
 
   const finishTripCore = useCallback(
-    async (opts?: { openRecap?: boolean }) => {
+    async (opts?: { openRecap?: boolean; skipGauge?: boolean }) => {
       if (!activeTrip) return;
       await stopBackgroundTracking();
       await stopActiveTrips();
@@ -756,26 +804,33 @@ export default function TripScreen() {
 
       let endFuel: number | null = null;
       if (vehicle) {
-        const gauge = await askFuelGaugeApprox(
-          vehicle,
-          'Niveau d’essence à l’arrivée',
-          'Comparez avec la jauge pour corriger les prochaines estimations.'
-        );
-        if (!gauge.skipped) {
-          endFuel = gauge.liters;
-          const startFuel =
-            tripStartFuelLiters ??
-            (vehicle.estimatedFuelLiters != null
-              ? vehicle.estimatedFuelLiters + fuelUsed
-              : null);
-          if (startFuel != null && endFuel != null && startFuel > endFuel) {
-            const drop = startFuel - endFuel;
-            const sample = learnedFactorFromGauge(fuelUsed, drop);
-            await blendConsumptionLearnFactor(vehicle, sample);
+        if (opts?.skipGauge) {
+          if (activeTrip.distanceKm > 0) {
+            await applyTripFuelBurn(vehicle, activeTrip.distanceKm, ascentM);
           }
-          await updateVehicle(vehicle.id, { estimatedFuelLiters: endFuel });
-        } else if (activeTrip.distanceKm > 0) {
-          await applyTripFuelBurn(vehicle, activeTrip.distanceKm, ascentM);
+        } else {
+          const gauge = await askFuelGaugeApprox(
+            vehicle,
+            'Niveau d’essence à l’arrivée',
+            'Comparez avec la jauge pour corriger les prochaines estimations.',
+            { softSkip: true }
+          );
+          if (!gauge.skipped) {
+            endFuel = gauge.liters;
+            const startFuel =
+              tripStartFuelLiters ??
+              (vehicle.estimatedFuelLiters != null
+                ? vehicle.estimatedFuelLiters + fuelUsed
+                : null);
+            if (startFuel != null && endFuel != null && startFuel > endFuel) {
+              const drop = startFuel - endFuel;
+              const sample = learnedFactorFromGauge(fuelUsed, drop);
+              await blendConsumptionLearnFactor(vehicle, sample);
+            }
+            await updateVehicle(vehicle.id, { estimatedFuelLiters: endFuel });
+          } else if (activeTrip.distanceKm > 0) {
+            await applyTripFuelBurn(vehicle, activeTrip.distanceKm, ascentM);
+          }
         }
       }
 
@@ -842,14 +897,22 @@ export default function TripScreen() {
     if (isStopping) return;
 
     setIsStopping(true);
-    const title = opts?.fromArrival ? 'Arrivée détectée' : 'Terminer le trajet';
-    const msg = opts?.fromArrival
-      ? 'Vous semblez arrivé (retour depuis Maps). Terminer le suivi et voir le récap ?'
-      : 'Arrêter le suivi GPS et afficher le récap du trajet ?';
+
+    // Arrivée : 1 geste → récap (sans double confirm / jauge)
+    if (opts?.fromArrival) {
+      try {
+        await finishTripCore({ openRecap: true, skipGauge: true });
+      } catch (e) {
+        notify('Erreur', e instanceof Error ? e.message : 'Impossible de terminer le trajet.');
+      } finally {
+        setIsStopping(false);
+      }
+      return;
+    }
 
     confirm(
-      title,
-      msg,
+      'Terminer le trajet',
+      'Arrêter le suivi GPS et afficher le récap du trajet ?',
       () => {
         void (async () => {
           try {
@@ -900,33 +963,19 @@ export default function TripScreen() {
     if (near && activeTrip.distanceKm >= 0.8 && !arrivalPromptedRef.current) {
       arrivalPromptedRef.current = true;
       setIsStopping(true);
-      confirm(
-        'Arrivée détectée',
-        'Vous semblez de retour près de la destination (Maps fermé ?). Terminer et voir le récap ?',
-        () => {
-          void (async () => {
-            try {
-              await finishTripCore({ openRecap: true });
-            } catch (e) {
-              notify(
-                'Erreur',
-                e instanceof Error ? e.message : 'Impossible de terminer le trajet.'
-              );
-              arrivalPromptedRef.current = false;
-            } finally {
-              setIsStopping(false);
-            }
-          })();
-        },
-        'Terminer',
-        () => {
+      void (async () => {
+        try {
+          await finishTripCore({ openRecap: true, skipGauge: true });
+        } catch (e) {
+          notify(
+            'Erreur',
+            e instanceof Error ? e.message : 'Impossible de terminer le trajet.'
+          );
+          arrivalPromptedRef.current = false;
+        } finally {
           setIsStopping(false);
-          // Reproposer dans 2 min si toujours sur place
-          setTimeout(() => {
-            arrivalPromptedRef.current = false;
-          }, 120_000);
         }
-      );
+      })();
     }
   }, [
     activeTrip,
@@ -1214,7 +1263,7 @@ export default function TripScreen() {
 
   const applyDestination = useCallback(
     (label: string, lat?: number | null, lon?: number | null) => {
-      setStartMode('nav');
+      persistStartMode('nav');
       setDestination(label);
       if (lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon)) {
         const coords = { latitude: lat, longitude: lon };
@@ -1236,7 +1285,7 @@ export default function TripScreen() {
         });
       }
     },
-    [userLocation, loadRouteAlternatives]
+    [userLocation, loadRouteAlternatives, persistStartMode]
   );
 
   const destinationHabit = useMemo((): SimilarTripStats | null => {
@@ -1463,9 +1512,9 @@ export default function TripScreen() {
               >
                 <Ionicons name="flag" size={20} color={colors.success} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: colors.text, fontWeight: '800' }}>Arrivée proche</Text>
+                  <Text style={{ color: colors.text, fontWeight: '800' }}>Arrivé ?</Text>
                   <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                    Terminer le suivi et voir le récap du trajet
+                    Terminer maintenant et voir le récap
                   </Text>
                 </View>
                 <Text style={{ color: colors.success, fontWeight: '800' }}>OK</Text>
@@ -1583,7 +1632,7 @@ export default function TripScreen() {
                       <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>
                         {smartHint || 'Suggestion du moment'}
                       </Text>
-                      <Pressable onPress={() => setSmartDismissed(true)} hitSlop={10}>
+                      <Pressable onPress={dismissSmartSuggestions} hitSlop={10}>
                         <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Plus tard</Text>
                       </Pressable>
                     </View>
@@ -1595,15 +1644,11 @@ export default function TripScreen() {
                         lineHeight: 17,
                       }}
                     >
-                      Proposition selon l’heure et vos trajets réguliers — optionnel.
+                      Selon l’heure et vos trajets réguliers — un tap pour démarrer + Maps.
                     </Text>
                     {smartSuggestions.map((s) => (
-                      <Pressable
+                      <View
                         key={s.id}
-                        onPress={() => {
-                          setSmartDismissed(true);
-                          applyDestination(s.label, s.latitude, s.longitude);
-                        }}
                         style={[
                           styles.smartRow,
                           {
@@ -1635,10 +1680,38 @@ export default function TripScreen() {
                             {s.habitCount > 0 ? ` · ${s.habitCount} trajets` : ''}
                           </Text>
                         </View>
-                        <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 12 }}>
-                          Préparer
-                        </Text>
-                      </Pressable>
+                        <Pressable
+                          onPress={() => {
+                            dismissSmartSuggestions();
+                            applyDestination(s.label, s.latitude, s.longitude);
+                          }}
+                          style={{ paddingHorizontal: 6, paddingVertical: 4 }}
+                        >
+                          <Text style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 11 }}>
+                            Voir
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => {
+                            dismissSmartSuggestions();
+                            void handleStartTrip({
+                              mode: 'nav',
+                              destinationLabel: s.label,
+                              dest: { latitude: s.latitude, longitude: s.longitude },
+                            });
+                          }}
+                          style={{
+                            backgroundColor: colors.accent,
+                            paddingHorizontal: 10,
+                            paddingVertical: 8,
+                            borderRadius: 10,
+                          }}
+                        >
+                          <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>
+                            Go
+                          </Text>
+                        </Pressable>
+                      </View>
                     ))}
                   </Card>
                 )}
@@ -1652,7 +1725,7 @@ export default function TripScreen() {
                   </Text>
 
                   <Pressable
-                    onPress={() => setStartMode('free')}
+                    onPress={() => persistStartMode('free')}
                     style={[
                       styles.modeCard,
                       {
@@ -1662,7 +1735,7 @@ export default function TripScreen() {
                     ]}
                   >
                     <Text style={{ color: colors.text, fontWeight: '800' }}>
-                      Suivi libre (recommandé)
+                      Suivi libre
                     </Text>
                     <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 4 }}>
                       Pas de destination obligatoire — trace km, vitesse moyenne et conso estimée
@@ -1671,7 +1744,7 @@ export default function TripScreen() {
                   </Pressable>
 
                   <Pressable
-                    onPress={() => setStartMode('nav')}
+                    onPress={() => persistStartMode('nav')}
                     style={[
                       styles.modeCard,
                       {

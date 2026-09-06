@@ -353,6 +353,38 @@ export default function TripDetailScreen() {
             </Card>
           )}
 
+          <Button
+            title="Relancer ce trajet"
+            onPress={() => {
+              const dest =
+                trip.destinationName?.trim() ||
+                destLabel ||
+                '';
+              const end = rawPts.length > 1 ? rawPts[rawPts.length - 1] : displayPoints[displayPoints.length - 1];
+              router.push({
+                pathname: '/(tabs)/trip' as never,
+                params: {
+                  mode: 'nav',
+                  dest,
+                  destLat: end ? String(end.latitude) : undefined,
+                  destLon: end ? String(end.longitude) : undefined,
+                  autoStart: '1',
+                },
+              });
+            }}
+            style={{ marginBottom: 10 }}
+          />
+          <Button
+            title="Enregistrer un plein"
+            variant="secondary"
+            onPress={() =>
+              router.push({
+                pathname: '/fillup/add' as never,
+                params: { fromTrip: String(trip.id) },
+              })
+            }
+            style={{ marginBottom: 10 }}
+          />
           <Button title="Supprimer ce trajet" variant="danger" onPress={onDelete} />
         </ScrollView>
       </View>

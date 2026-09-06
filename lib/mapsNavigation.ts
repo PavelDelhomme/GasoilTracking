@@ -1,7 +1,7 @@
 /**
  * Lance Google Maps en navigation guidée.
- * Sur Android (Blackview etc.) : éviter intent:// et dir_action fragile →
- * privilégier google.navigation: qui démarre vraiment la nav.
+ * Android : si waypoints (via Châteaugiron) → classique saddr/daddr d’abord,
+ * sinon google.navigation: (fiable Blackview).
  */
 import { Linking, Platform } from 'react-native';
 
@@ -11,7 +11,7 @@ function fmt(p: MapsLatLng): string {
   return `${Number(p.latitude).toFixed(6)},${Number(p.longitude).toFixed(6)}`;
 }
 
-/** Waypoints « via » pour biaiser l’itinéraire (quand le schéma le permet). */
+/** Waypoints « via » pour biaiser l’itinéraire. */
 export function buildViaWaypoints(
   routeCoords: MapsLatLng[] | undefined,
   explicitVia?: MapsLatLng[]
@@ -22,14 +22,13 @@ export function buildViaWaypoints(
   return [routeCoords[Math.floor(n * 0.4)]].filter(Boolean);
 }
 
-/** URL HTTPS directions (web / iOS / fallback). Sans dir_action (souvent « lien incompatible »). */
+/** URL HTTPS directions (web / iOS / fallback). */
 export function buildGoogleMapsDirUrl(opts: {
   destination: MapsLatLng;
   origin?: MapsLatLng | null;
   waypoints?: MapsLatLng[];
   navigate?: boolean;
 }): string {
-  // Format chemin : plus toléré par Maps Android que api=1 + via:
   if (opts.origin || (opts.waypoints && opts.waypoints.length)) {
     const segs: string[] = [];
     if (opts.origin) segs.push(fmt(opts.origin));
@@ -43,7 +42,6 @@ export function buildGoogleMapsDirUrl(opts: {
     `destination=${fmt(opts.destination)}`,
     'travelmode=driving',
   ];
-  // dir_action=navigate cassé sur certains Maps Android (« lien incompatible »)
   if (opts.navigate && Platform.OS !== 'android') {
     parts.push('dir_action=navigate');
   }
@@ -61,7 +59,6 @@ async function tryOpen(url: string): Promise<boolean> {
 
 /**
  * Ouvre Google Maps et démarre la navigation si possible.
- * Android : google.navigation en premier (fiable Blackview / Samsung).
  */
 export async function launchGoogleMapsNavigation(opts: {
   destination: MapsLatLng;
@@ -71,39 +68,49 @@ export async function launchGoogleMapsNavigation(opts: {
 }): Promise<boolean> {
   const dest = fmt(opts.destination);
   const wps = opts.waypoints || [];
+  const hasVia = wps.length > 0;
 
   if (Platform.OS === 'android') {
-    // 1) Navigation turn-by-turn native — le plus fiable
+    // Avec via (éco / Châteaugiron) : ouvrir l’itinéraire guidé avec passages
+    // avant le schéma navigation simple (qui ignore les waypoints).
+    if (hasVia) {
+      const origin = opts.origin ? fmt(opts.origin) : 'Current+Location';
+      const via = wps.map((p) => fmt(p)).join('+to:');
+      const classic =
+        `https://maps.google.com/maps?saddr=${origin}` +
+        `&daddr=${via}+to:${dest}&dirflg=d`;
+      if (await tryOpen(classic)) return true;
+
+      const pathUrl = buildGoogleMapsDirUrl({
+        destination: opts.destination,
+        origin: opts.origin,
+        waypoints: wps,
+        navigate: false,
+      });
+      if (await tryOpen(pathUrl)) return true;
+    }
+
+    // Sans via (ou fallback) : navigation turn-by-turn native
     if (await tryOpen(`google.navigation:q=${dest}&mode=d`)) {
       return true;
     }
 
-    // 2) Ancien format saddr/daddr (+ via éventuel)
-    if (wps.length && opts.origin) {
-      const via = wps.map((p) => fmt(p)).join('+to:');
-      const classic =
-        `https://maps.google.com/maps?saddr=${fmt(opts.origin)}` +
-        `&daddr=${via}+to:${dest}&dirflg=d`;
-      if (await tryOpen(classic)) return true;
-    } else {
-      const classic = `https://maps.google.com/maps?daddr=${dest}&dirflg=d`;
-      if (await tryOpen(classic)) return true;
-    }
+    const classic = `https://maps.google.com/maps?daddr=${dest}&dirflg=d`;
+    if (await tryOpen(classic)) return true;
 
-    // 3) Chemin /dir/A/B/C
-    const pathUrl = buildGoogleMapsDirUrl({
-      destination: opts.destination,
-      origin: opts.origin,
-      waypoints: wps,
-      navigate: false,
-    });
-    if (await tryOpen(pathUrl)) return true;
-
-    // 4) geo:
     return tryOpen(`geo:0,0?q=${dest}`);
   }
 
   if (Platform.OS === 'ios') {
+    if (hasVia && opts.origin) {
+      const pathUrl = buildGoogleMapsDirUrl({
+        destination: opts.destination,
+        origin: opts.origin,
+        waypoints: wps,
+        navigate: true,
+      });
+      if (await tryOpen(pathUrl)) return true;
+    }
     const gmaps = `comgooglemaps://?daddr=${dest}&directionsmode=driving`;
     if (await tryOpen(gmaps)) return true;
   }

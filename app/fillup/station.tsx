@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Linking,
   Switch,
   AppState,
   type AppStateStatus,
@@ -25,10 +24,10 @@ import {
 import { notify } from '@/lib/notify';
 import {
   getCurrentLocation,
-  openGoogleMapsNavigation,
   startBackgroundTracking,
   stopBackgroundTracking,
 } from '@/lib/locationService';
+import { launchGoogleMapsNavigation } from '@/lib/mapsNavigation';
 import { fuelLabel, isSaneFuelPricePerLiter } from '@/lib/fuelPrices';
 import { applyFillUpToFuelEstimate } from '@/lib/fuelLevel';
 import {
@@ -165,8 +164,13 @@ export default function StationTripScreen() {
       setDistanceKm('0');
 
       const trackingPromise = startBackgroundTracking();
-      const url = openGoogleMapsNavigation(lat, lon, stationName);
-      await Linking.openURL(url);
+      await launchGoogleMapsNavigation({
+        destination: { latitude: lat, longitude: lon },
+        origin: loc
+          ? { latitude: loc.coords.latitude, longitude: loc.coords.longitude }
+          : null,
+        label: stationName,
+      });
 
       const trackingStarted = await trackingPromise;
       if (loc) {

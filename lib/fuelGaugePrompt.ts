@@ -1,5 +1,6 @@
 /** Demande un niveau de carburant approximatif (début / fin de trajet). */
 import { Alert, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Vehicle } from '@/types';
 import { setFuelFraction } from '@/lib/fuelLevel';
 import { updateVehicle } from '@/lib/database';
@@ -9,16 +10,54 @@ export type FuelGaugeResult = {
   skipped: boolean;
 };
 
+const GAUGE_ASKED_KEY = (vehicleId: number) => `gasoil_gauge_asked_${vehicleId}`;
+
+/** Skip intelligent : jauge connue récemment → ne pas redemander. */
+export async function shouldSkipFuelGauge(
+  vehicle: Vehicle,
+  opts?: { maxAgeHours?: number }
+): Promise<boolean> {
+  if (vehicle.estimatedFuelLiters == null) return false;
+  const maxAge = (opts?.maxAgeHours ?? 18) * 3600_000;
+  try {
+    const raw = await AsyncStorage.getItem(GAUGE_ASKED_KEY(vehicle.id));
+    if (!raw) return true; // niveau connu, jamais forcé récemment → skip départ
+    const ts = Number(raw);
+    if (!Number.isFinite(ts)) return true;
+    return Date.now() - ts < maxAge;
+  } catch {
+    return true;
+  }
+}
+
+async function markGaugeAsked(vehicleId: number) {
+  try {
+    await AsyncStorage.setItem(GAUGE_ASKED_KEY(vehicleId), String(Date.now()));
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Demande le niveau essence (fractions ou saisie litres).
- * Android : Alert limité à ~3 boutons → menus en cascade.
- * `skipped: true` si l’utilisateur passe.
+ * `force: false` + jauge récente → skip auto.
  */
-export function askFuelGaugeApprox(
+export async function askFuelGaugeApprox(
   vehicle: Vehicle,
   title: string,
-  message: string
+  message: string,
+  opts?: { force?: boolean; softSkip?: boolean }
 ): Promise<FuelGaugeResult> {
+  if (!opts?.force) {
+    const skipOk = await shouldSkipFuelGauge(vehicle);
+    if (skipOk && opts?.softSkip !== false) {
+      return {
+        liters: vehicle.estimatedFuelLiters ?? 0,
+        skipped: true,
+      };
+    }
+  }
+
   return new Promise((resolve) => {
     const skip = () =>
       resolve({ liters: vehicle.estimatedFuelLiters ?? 0, skipped: true });
@@ -26,11 +65,13 @@ export function askFuelGaugeApprox(
     const setLiters = async (liters: number) => {
       const v = Math.min(vehicle.tankCapacity, Math.max(0, Math.round(liters * 10) / 10));
       await updateVehicle(vehicle.id, { estimatedFuelLiters: v });
+      await markGaugeAsked(vehicle.id);
       resolve({ liters: v, skipped: false });
     };
 
     const pickFraction = async (f: number) => {
       const liters = await setFuelFraction(vehicle, f);
+      await markGaugeAsked(vehicle.id);
       resolve({ liters, skipped: false });
     };
 
@@ -50,7 +91,6 @@ export function askFuelGaugeApprox(
         );
         return;
       }
-      // Android : 4 niveaux rapides (pas de prompt natif)
       Alert.alert('Niveau approximatif', `Réservoir ${vehicle.tankCapacity} L`, [
         { text: 'Plein', onPress: () => void pickFraction(1) },
         { text: '1/2', onPress: () => void pickFraction(0.5) },
