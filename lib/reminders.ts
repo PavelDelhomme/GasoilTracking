@@ -136,7 +136,7 @@ export async function refreshVehicleReminders(): Promise<{ scheduled: number }> 
       const threshold =
         v.lowFuelThresholdLiters != null && v.lowFuelThresholdLiters > 0
           ? v.lowFuelThresholdLiters
-          : Math.max(5, Math.round(v.tankCapacity * 0.2));
+          : Math.max(5, Math.round(v.tankCapacity / 3));
       if (v.estimatedFuelLiters != null && v.estimatedFuelLiters <= threshold) {
         try {
           const id = await Notifications.scheduleNotificationAsync({
@@ -167,7 +167,7 @@ export function defaultLowFuelThreshold(vehicle: Vehicle): number {
   if (vehicle.lowFuelThresholdLiters != null && vehicle.lowFuelThresholdLiters > 0) {
     return vehicle.lowFuelThresholdLiters;
   }
-  return Math.max(5, Math.round(vehicle.tankCapacity * 0.2));
+  return Math.max(5, Math.round(vehicle.tankCapacity / 3));
 }
 
 export type { VehicleMaintenance };

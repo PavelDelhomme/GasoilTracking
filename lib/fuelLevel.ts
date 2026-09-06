@@ -144,6 +144,10 @@ export function fuelLevelPercent(vehicle: Vehicle): number {
 
 export type FuelTone = 'ok' | 'warn' | 'critical' | 'unknown';
 
+/** Autonomie basse ≈ ⅓ réservoir ; critique ≈ ¼. */
+export const FUEL_WARN_FRACTION = 1 / 3;
+export const FUEL_CRITICAL_FRACTION = 1 / 4;
+
 export function fuelRemainingTone(opts: {
   litersRemaining: number | null | undefined;
   tankCapacity: number;
@@ -155,15 +159,28 @@ export function fuelRemainingTone(opts: {
     return 'unknown';
   }
   const pct = (litersRemaining / tankCapacity) * 100;
-  const lowAbs =
+  const warnLiters =
     lowLitersThreshold != null && lowLitersThreshold > 0
       ? lowLitersThreshold
-      : Math.max(8, tankCapacity * 0.12);
+      : tankCapacity * FUEL_WARN_FRACTION;
+  const criticalLiters = Math.min(warnLiters * 0.75, tankCapacity * FUEL_CRITICAL_FRACTION);
 
-  if (litersRemaining <= lowAbs * 0.55 || pct < 12 || (rangeKm != null && rangeKm > 0 && rangeKm < 60)) {
+  // Seuils km (approx) : critique ~¼ plein, warn ~⅓ — basés sur conso typique ~8 L/100
+  const criticalKm = tankCapacity * FUEL_CRITICAL_FRACTION * (100 / 8);
+  const warnKm = tankCapacity * FUEL_WARN_FRACTION * (100 / 8);
+
+  if (
+    litersRemaining <= criticalLiters ||
+    pct <= FUEL_CRITICAL_FRACTION * 100 ||
+    (rangeKm != null && rangeKm > 0 && rangeKm < criticalKm)
+  ) {
     return 'critical';
   }
-  if (litersRemaining <= lowAbs || pct < 28 || (rangeKm != null && rangeKm > 0 && rangeKm < 140)) {
+  if (
+    litersRemaining <= warnLiters ||
+    pct <= FUEL_WARN_FRACTION * 100 ||
+    (rangeKm != null && rangeKm > 0 && rangeKm < warnKm)
+  ) {
     return 'warn';
   }
   return 'ok';

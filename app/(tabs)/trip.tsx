@@ -2132,9 +2132,9 @@ export default function TripScreen() {
                     const tank = activeVehicle?.tankCapacity || 50;
                     const rem = sinceFill.fuelRemainingEst;
                     const tone =
-                      rem <= tank * 0.12
+                      rem <= tank * 0.25
                         ? 'critical'
-                        : rem <= tank * 0.28
+                        : rem <= tank * (1 / 3)
                           ? 'warn'
                           : 'ok';
                     const toneColor =
