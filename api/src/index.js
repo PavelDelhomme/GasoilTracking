@@ -11,6 +11,7 @@ import path from 'path';
 import nodemailer from 'nodemailer';
 import Database from 'better-sqlite3';
 import multer from 'multer';
+import QRCode from 'qrcode';
 
 const PORT = Number(process.env.PORT || 4000);
 const DATA_DIR = process.env.DATA_DIR || './data';
@@ -116,6 +117,19 @@ db.exec(`
     created_at TEXT NOT NULL,
     used_at TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS qr_login_challenges (
+    id TEXT PRIMARY KEY,
+    challenge_hash TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'pending',
+    user_id TEXT,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    approved_at TEXT,
+    consumed_at TEXT,
+    ip TEXT,
+    user_agent TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
   );
 `);
 
@@ -914,6 +928,110 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
     return res.status(403).json({ error: 'Email non vérifié. Consultez votre boîte mail.' });
   }
   res.json(createSession(user, sessionMeta(req)));
+});
+
+const QR_LOGIN_TTL_MS = 2 * 60 * 1000;
+
+/** Web : démarre un challenge QR (connexion site via app mobile). */
+app.post('/api/auth/qr/start', authLimiter, async (req, res) => {
+  try {
+    const id = uuid();
+    const raw = crypto.randomBytes(32).toString('base64url');
+    const now = new Date();
+    const expires = new Date(now.getTime() + QR_LOGIN_TTL_MS);
+    const meta = sessionMeta(req);
+    db.prepare(
+      `INSERT INTO qr_login_challenges
+       (id, challenge_hash, status, expires_at, created_at, ip, user_agent)
+       VALUES (?, ?, 'pending', ?, ?, ?, ?)`
+    ).run(id, hashToken(raw), expires.toISOString(), now.toISOString(), meta.ip, meta.userAgent);
+
+    const payload = `${PUBLIC_URL}/qr-login?c=${encodeURIComponent(raw)}`;
+    const qrDataUrl = await QRCode.toDataURL(payload, {
+      width: 280,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#1a1a2e', light: '#ffffff' },
+    });
+
+    res.json({
+      challengeId: id,
+      expiresAt: expires.toISOString(),
+      ttlSeconds: Math.round(QR_LOGIN_TTL_MS / 1000),
+      qrPayload: payload,
+      qrDataUrl,
+      deepLink: `${APP_SCHEME}://qr-login?c=${encodeURIComponent(raw)}`,
+    });
+  } catch (e) {
+    console.error('qr-start', e);
+    res.status(500).json({ error: 'Impossible de créer le QR' });
+  }
+});
+
+/** Mobile connecté : valide le challenge scanné. */
+app.post('/api/auth/qr/approve', auth, authLimiter, (req, res) => {
+  const raw = String(req.body?.challenge || req.body?.c || '').trim();
+  if (!raw || raw.length < 16) {
+    return res.status(400).json({ error: 'Challenge QR invalide' });
+  }
+  const row = db
+    .prepare('SELECT * FROM qr_login_challenges WHERE challenge_hash = ?')
+    .get(hashToken(raw));
+  if (!row) {
+    return res.status(404).json({ error: 'QR inconnu ou déjà utilisé' });
+  }
+  if (row.status !== 'pending') {
+    return res.status(409).json({ error: 'Ce QR a déjà été utilisé' });
+  }
+  if (new Date(row.expires_at).getTime() < Date.now()) {
+    db.prepare(`UPDATE qr_login_challenges SET status = 'expired' WHERE id = ?`).run(row.id);
+    return res.status(410).json({ error: 'QR expiré — régénérez-le sur le site' });
+  }
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.sub);
+  if (!user || user.email_verified === 0) {
+    return res.status(403).json({ error: 'Compte non autorisé' });
+  }
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE qr_login_challenges SET status = 'approved', user_id = ?, approved_at = ? WHERE id = ? AND status = 'pending'`
+  ).run(user.id, now, row.id);
+  res.json({ ok: true, message: 'Connexion web autorisée' });
+});
+
+/** Web : poll jusqu’à obtenir la session. */
+app.get('/api/auth/qr/poll', authLimiter, (req, res) => {
+  const challengeId = String(req.query?.challengeId || '').trim();
+  if (!challengeId) {
+    return res.status(400).json({ error: 'challengeId requis' });
+  }
+  const row = db.prepare('SELECT * FROM qr_login_challenges WHERE id = ?').get(challengeId);
+  if (!row) {
+    return res.status(404).json({ error: 'Challenge introuvable' });
+  }
+  if (row.status === 'consumed') {
+    return res.status(410).json({ status: 'consumed', error: 'Session déjà récupérée' });
+  }
+  if (row.status === 'expired' || new Date(row.expires_at).getTime() < Date.now()) {
+    if (row.status === 'pending') {
+      db.prepare(`UPDATE qr_login_challenges SET status = 'expired' WHERE id = ?`).run(row.id);
+    }
+    return res.json({ status: 'expired' });
+  }
+  if (row.status === 'pending') {
+    return res.json({ status: 'pending', expiresAt: row.expires_at });
+  }
+  if (row.status !== 'approved' || !row.user_id) {
+    return res.json({ status: row.status });
+  }
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
+  if (!user) {
+    return res.status(404).json({ error: 'Utilisateur introuvable' });
+  }
+  const session = createSession(user, sessionMeta(req));
+  db.prepare(
+    `UPDATE qr_login_challenges SET status = 'consumed', consumed_at = ? WHERE id = ? AND status = 'approved'`
+  ).run(new Date().toISOString(), row.id);
+  res.json({ status: 'approved', ...session });
 });
 
 /** Rotation du refresh token → nouvel access + nouveau refresh */

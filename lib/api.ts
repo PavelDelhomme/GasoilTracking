@@ -178,6 +178,83 @@ export async function login(email: string, password: string) {
   return data;
 }
 
+export type QrLoginStart = {
+  challengeId: string;
+  expiresAt: string;
+  ttlSeconds: number;
+  qrPayload: string;
+  qrDataUrl: string;
+  deepLink: string;
+};
+
+export async function startQrLogin(): Promise<QrLoginStart> {
+  const res = await fetch(`${API_URL}/api/auth/qr/start`, { method: 'POST' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Impossible de créer le QR');
+  return data as QrLoginStart;
+}
+
+export async function pollQrLogin(challengeId: string): Promise<{
+  status: string;
+  token?: string;
+  refreshToken?: string;
+  user?: AuthUser;
+  expiresAt?: string;
+  error?: string;
+}> {
+  const res = await fetch(
+    `${API_URL}/api/auth/qr/poll?challengeId=${encodeURIComponent(challengeId)}`
+  );
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 404) return { status: 'missing', error: data.error };
+  if (!res.ok && res.status !== 410) {
+    throw new Error(data.error || 'Erreur QR');
+  }
+  return data;
+}
+
+export async function approveQrLogin(challenge: string) {
+  return request('/api/auth/qr/approve', {
+    method: 'POST',
+    body: JSON.stringify({ challenge }),
+  }) as Promise<{ ok: boolean; message: string }>;
+}
+
+/** Extrait le challenge opaque depuis un QR / deep link. */
+export function parseQrLoginChallenge(raw: string): string | null {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  try {
+    if (s.startsWith('{')) {
+      const j = JSON.parse(s) as { c?: string; challenge?: string };
+      const c = j.c || j.challenge;
+      if (c && String(c).length >= 16) return String(c);
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (/^https?:\/\//i.test(s) || s.includes('://')) {
+      const u = new URL(s);
+      const c = u.searchParams.get('c') || u.searchParams.get('challenge');
+      if (c && c.length >= 16) return c;
+    }
+  } catch {
+    /* ignore */
+  }
+  const m = s.match(/[?&]c=([^&]+)/i);
+  if (m?.[1]) {
+    try {
+      const c = decodeURIComponent(m[1]);
+      if (c.length >= 16) return c;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (/^[A-Za-z0-9_-]{20,}$/.test(s)) return s;
+  return null;
+}
+
 export async function logoutRemote() {
   const token = await getToken();
   const refreshToken = await getRefreshToken();

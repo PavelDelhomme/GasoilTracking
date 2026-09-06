@@ -64,6 +64,18 @@ export default function AccountScreen() {
       </Card>
 
       <Card style={{ marginBottom: 12 }}>
+        <Text style={[styles.section, { color: colors.text }]}>Connexion web (QR)</Text>
+        <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 10 }}>
+          Sur le site, ouvrez Connexion : un QR s’affiche. Scannez-le ici pour connecter le
+          navigateur sans retaper le mot de passe.
+        </Text>
+        <Button
+          title="Scanner le QR du site"
+          onPress={() => router.push('/qr-login?scan=1' as never)}
+        />
+      </Card>
+
+      <Card style={{ marginBottom: 12 }}>
         <Text style={[styles.section, { color: colors.text }]}>Session</Text>
         <Button
           title="Déconnexion"

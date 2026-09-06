@@ -2,7 +2,7 @@
   "expo": {
     "name": "Gasoil Tracking",
     "slug": "gasoil-tracking",
-    "version": "1.4.44",
+    "version": "1.4.45",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "gasoiltracking",
@@ -44,14 +44,15 @@
         "POST_NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",
-        "READ_CONTACTS"
+        "READ_CONTACTS",
+        "CAMERA"
       ],
       "config": {
         "googleMaps": {
           "apiKey": "VOTRE_CLE_GOOGLE_MAPS_ANDROID"
         }
       },
-      "versionCode": 70
+      "versionCode": 71
     },
     "web": {
       "bundler": "metro",
@@ -80,6 +81,13 @@
         "expo-contacts",
         {
           "contactsPermission": "Gasoil Tracking propose les adresses de vos contacts comme destinations."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Gasoil Tracking utilise la caméra pour scanner le QR de connexion du site web.",
+          "barcodeScannerEnabled": true
         }
       ],
       "expo-asset",

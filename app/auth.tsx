@@ -14,6 +14,7 @@ import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
+import { QrWebLoginPanel } from '@/components/QrWebLoginPanel';
 import { API_URL, forgotPassword } from '@/lib/api';
 
 export default function AuthScreen() {
@@ -87,6 +88,19 @@ export default function AuthScreen() {
             ? `Connexion cloud (sync). Serveur : ${API_URL}`
             : 'Compte utilisateur standard (pas admin). Code d’invitation requis. Un email de validation sera envoyé ; un gestionnaire peut aussi valider depuis Administration.'}
         </Text>
+        {mode === 'login' && (
+          <QrWebLoginPanel
+            onLoggedIn={async () => {
+              await refresh();
+              router.replace('/' as never);
+            }}
+          />
+        )}
+        {mode === 'login' && (
+          <Text style={{ color: colors.textSecondary, fontWeight: '700', marginBottom: 10 }}>
+            Ou avec email / mot de passe
+          </Text>
+        )}
         {mode === 'register' && (
           <>
             <Input label="Nom" value={name} onChangeText={setName} placeholder="Vous" />

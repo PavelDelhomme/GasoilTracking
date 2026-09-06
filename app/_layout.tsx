@@ -56,6 +56,13 @@ function RootNavigation() {
           options={{ title: 'Nouveau budget', presentation: 'modal' }}
         />
         <Stack.Screen name="auth" options={{ title: 'Compte', presentation: 'modal' }} />
+        <Stack.Screen
+          name="qr-login"
+          options={{
+            title: 'Scanner QR site',
+            headerLeft: () => <HeaderBackButton fallbackHref="/account" />,
+          }}
+        />
         <Stack.Screen name="verify" options={{ title: 'Vérification email', headerShown: true }} />
         <Stack.Screen
           name="admin"
