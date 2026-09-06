@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, Pressable } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
@@ -85,6 +85,18 @@ export default function HomeScreen() {
       setSinceFill(null);
     }
   }, [activeVehicle?.id]);
+
+  // Toujours rafraîchir « depuis le dernier plein » pour le véhicule sélectionné
+  useFocusEffect(
+    useCallback(() => {
+      if (!activeVehicle) {
+        setSinceFill(null);
+        setStats(null);
+        return;
+      }
+      void reloadStats(activeVehicle.id);
+    }, [activeVehicle?.id])
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -333,7 +345,7 @@ export default function HomeScreen() {
                 }}
               >
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  Depuis le dernier plein
+                  Depuis le dernier plein · {activeVehicle.name}
                 </Text>
                 <Text
                   style={{

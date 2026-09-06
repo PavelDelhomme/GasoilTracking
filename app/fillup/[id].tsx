@@ -32,6 +32,7 @@ import {
   getVehicleById,
   updateFillUp,
 } from '@/lib/database';
+import { reapplyFillUpFuelEstimate } from '@/lib/fuelLevel';
 import {
   fetchCheapestStations,
   isFrenchFuelOpenDataAvailable,
@@ -139,6 +140,13 @@ export default function FillUpDetailScreen() {
         pricePerLiter: Math.round(P * 1000) / 1000,
         totalCost: Math.round(T * 100) / 100,
       });
+      if (vehicle) {
+        await reapplyFillUpFuelEstimate(
+          vehicle,
+          { liters: fill.liters, isFull: fill.isFull },
+          { liters: Math.round(L * 100) / 100, isFull: isFullDraft }
+        );
+      }
       notify('Plein', 'Modifications enregistrées.');
       setEditing(false);
       await load();
@@ -367,9 +375,14 @@ export default function FillUpDetailScreen() {
                 placeholder="Ex. Total Energies Thorigné"
               />
               <View style={styles.switchRow}>
-                <Text style={{ color: colors.text, flex: 1, fontWeight: '600' }}>
-                  Plein complet
-                </Text>
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <Text style={{ color: colors.text, fontWeight: '600' }}>
+                    Plein jusqu’au bouchon
+                  </Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                    Oui = capacité du réservoir. Non = ajoute les litres au reste.
+                  </Text>
+                </View>
                 <Switch
                   value={isFullDraft}
                   onValueChange={setIsFullDraft}

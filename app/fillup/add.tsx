@@ -18,7 +18,7 @@ import { Card } from '@/components/Card';
 import { DatePickerField } from '@/components/DatePickerField';
 import { createFillUp, getFillUps, updateVehicle, updateTrip } from '@/lib/database';
 import { adaptVehicleConsumption, formatEuro, refreshBudgets } from '@/lib/calculations';
-import { applyFillUpToFuelEstimate } from '@/lib/fuelLevel';
+import { applyFillUpToFuelEstimate, fuelLevelLabel, previewFillUpFuel } from '@/lib/fuelLevel';
 import {
   fetchCheapestStations,
   fuelLabel,
@@ -443,13 +443,37 @@ export default function AddFillUpScreen() {
       )}
 
       <View style={styles.switchRow}>
-        <Text style={[styles.switchLabel, { color: colors.text }]}>Plein complet</Text>
+        <View style={{ flex: 1, paddingRight: 12 }}>
+          <Text style={[styles.switchLabel, { color: colors.text }]}>Plein jusqu’au bouchon</Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2, lineHeight: 16 }}>
+            Oui = réservoir rempli (niveau = capacité). Non = on ajoute les litres au reste estimé.
+          </Text>
+        </View>
         <Switch
           value={isFull}
           onValueChange={setIsFull}
           trackColor={{ false: colors.border, true: colors.accent }}
         />
       </View>
+
+      {derived.liters > 0 && (
+        <Card style={{ marginBottom: 14 }}>
+          <Text style={{ color: colors.text, fontWeight: '700', marginBottom: 4 }}>
+            Réservoir estimé ({activeVehicle.name})
+          </Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
+            Actuel : {fuelLevelLabel(activeVehicle)}
+          </Text>
+          <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 14, lineHeight: 20 }}>
+            {
+              previewFillUpFuel(activeVehicle, {
+                liters: Math.round(derived.liters * 100) / 100,
+                isFull,
+              }).summary
+            }
+          </Text>
+        </Card>
+      )}
 
       <Input
         label="Note / station"

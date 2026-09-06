@@ -414,7 +414,12 @@ export default function StationTripScreen() {
                 keyboardType="numeric"
               />
               <View style={styles.switchRow}>
-                <Text style={{ color: colors.text, fontWeight: '600', flex: 1 }}>Plein complet</Text>
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <Text style={{ color: colors.text, fontWeight: '600' }}>Plein jusqu’au bouchon</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                    Oui = capacité. Non = reste + litres ajoutés.
+                  </Text>
+                </View>
                 <Switch
                   value={isFull}
                   onValueChange={setIsFull}

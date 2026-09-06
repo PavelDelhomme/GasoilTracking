@@ -1497,7 +1497,7 @@ export default function TripScreen() {
                   }}
                 >
                   <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 4 }]}>
-                    Depuis le dernier plein
+                    Depuis le dernier plein · {activeVehicle.name}
                   </Text>
                   <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
                     {formatDateSlash(sinceFill.lastFill.date)} ·{' '}

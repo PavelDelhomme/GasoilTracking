@@ -4,22 +4,81 @@ import type { FillUp, Vehicle } from '@/types';
 import { updateVehicle } from '@/lib/database';
 import { estimateTripFuelLiters } from '@/lib/consumptionModel';
 
+export type FillFuelPreview = {
+  beforeLiters: number | null;
+  afterLiters: number;
+  mode: 'full' | 'add' | 'replace_unknown';
+  summary: string;
+};
+
+/**
+ * Aperçu avant enregistrement :
+ * - plein complet → réservoir = capacité (le reste précédent est « complété »)
+ * - partiel + niveau connu → reste + litres ajoutés (plafonné capacité)
+ * - partiel + niveau inconnu → seulement les litres saisis
+ */
+export function previewFillUpFuel(
+  vehicle: Vehicle,
+  fill: Pick<FillUp, 'liters' | 'isFull'>
+): FillFuelPreview {
+  const before = vehicle.estimatedFuelLiters;
+  if (fill.isFull) {
+    return {
+      beforeLiters: before,
+      afterLiters: vehicle.tankCapacity,
+      mode: 'full',
+      summary:
+        before != null
+          ? `Avant ~${before.toFixed(1)} L → plein = ${vehicle.tankCapacity} L (capacité)`
+          : `Plein complet → ${vehicle.tankCapacity} L (capacité du réservoir)`,
+    };
+  }
+  if (before != null) {
+    const after = Math.min(vehicle.tankCapacity, before + fill.liters);
+    return {
+      beforeLiters: before,
+      afterLiters: Math.round(after * 10) / 10,
+      mode: 'add',
+      summary: `Avant ~${before.toFixed(1)} L + ${fill.liters.toFixed(1)} L → ~${after.toFixed(1)} L`,
+    };
+  }
+  const after = Math.min(vehicle.tankCapacity, fill.liters);
+  return {
+    beforeLiters: null,
+    afterLiters: Math.round(after * 10) / 10,
+    mode: 'replace_unknown',
+    summary: `Niveau inconnu → estime ~${after.toFixed(1)} L (litres de ce plein seulement)`,
+  };
+}
+
 /** Applique un plein au niveau estimé du véhicule. */
 export async function applyFillUpToFuelEstimate(
   vehicle: Vehicle,
   fill: Pick<FillUp, 'liters' | 'isFull'>
 ): Promise<number> {
-  let next: number;
-  if (fill.isFull) {
-    next = vehicle.tankCapacity;
-  } else if (vehicle.estimatedFuelLiters != null) {
-    next = Math.min(vehicle.tankCapacity, vehicle.estimatedFuelLiters + fill.liters);
-  } else {
-    next = Math.min(vehicle.tankCapacity, fill.liters);
-  }
-  next = Math.round(next * 10) / 10;
+  const preview = previewFillUpFuel(vehicle, fill);
+  const next = preview.afterLiters;
   await updateVehicle(vehicle.id, { estimatedFuelLiters: next });
   return next;
+}
+
+/**
+ * Après modification d’un plein déjà enregistré : retire l’ancien apport litres, puis réapplique.
+ */
+export async function reapplyFillUpFuelEstimate(
+  vehicle: Vehicle,
+  previous: Pick<FillUp, 'liters' | 'isFull'>,
+  nextFill: Pick<FillUp, 'liters' | 'isFull'>
+): Promise<number | null> {
+  if (vehicle.estimatedFuelLiters == null) {
+    return applyFillUpToFuelEstimate(vehicle, nextFill);
+  }
+  const undone = Math.max(
+    0,
+    Math.round((vehicle.estimatedFuelLiters - previous.liters) * 10) / 10
+  );
+  const virtual: Vehicle = { ...vehicle, estimatedFuelLiters: undone };
+  return applyFillUpToFuelEstimate(virtual, nextFill);
 }
 
 /** Décrémente le niveau après un trajet (modèle conso réaliste). */
