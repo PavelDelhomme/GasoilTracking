@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, Pressable } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, Pressable, ActivityIndicator } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '@/context/AppContext';
@@ -32,7 +32,7 @@ import { MAINTENANCE_KIND_LABELS, maintenanceIsUrgent } from '@/lib/vehicleMaint
 import { formatDateSlash, toLocalYmd } from '@/lib/dates';
 
 export default function HomeScreen() {
-  const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles, selectVehicle } = useApp();
+  const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles, selectVehicle, isLoading } = useApp();
   const { syncNow } = useAuth();
   const { colors } = useTheme();
   const { locale } = useLocale();
@@ -220,7 +220,14 @@ export default function HomeScreen() {
       >
         <PendingAccountsBanner />
         <InstallAppHint />
-        {!activeVehicle ? (
+        {isLoading && !activeVehicle && vehicles.length === 0 ? (
+          <Card style={styles.emptyCard}>
+            <ActivityIndicator size="large" color={colors.accent} />
+            <Text style={[styles.emptyText, { color: colors.textSecondary, marginTop: 16 }]}>
+              Chargement…
+            </Text>
+          </Card>
+        ) : !activeVehicle ? (
           <Card style={styles.emptyCard}>
             <Ionicons name="car-outline" size={48} color={colors.textSecondary} />
             <Text style={[styles.emptyTitle, { color: colors.text }]}>Aucun véhicule actif</Text>
@@ -295,6 +302,9 @@ export default function HomeScreen() {
                       <Pressable
                         key={v.id}
                         onPress={() => void selectVehicle(v.id)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        accessibilityLabel={`Véhicule ${v.name}`}
                         style={[
                           styles.vehChip,
                           {
@@ -435,12 +445,24 @@ export default function HomeScreen() {
                 {fuelTone !== 'unknown' && (
                   <Text style={{ color: fuelColor, fontWeight: '700', fontSize: 13, marginTop: 8 }}>
                     {fuelTone === 'ok'
-                      ? `Autonomie OK · ~${formatDistance(sinceFill.rangeKm)}`
+                      ? `Autonomie correcte · ~${formatDistance(sinceFill.rangeKm)}`
                       : fuelTone === 'warn'
                         ? `Autonomie basse · ~${formatDistance(sinceFill.rangeKm)} restants`
                         : `Réservoir critique · ~${formatDistance(sinceFill.rangeKm)} restants`}
                   </Text>
                 )}
+              </Card>
+            )}
+
+            {!sinceFill?.lastFill && (
+              <Card style={{ marginBottom: 16 }}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  Depuis le dernier plein
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 12 }}>
+                  Enregistrez un plein pour suivre km, litres et autonomie.
+                </Text>
+                <Button title="Nouveau plein" onPress={() => router.push('/fillup/add')} />
               </Card>
             )}
 
@@ -620,19 +642,30 @@ export default function HomeScreen() {
 
       <SpeedDialFab
         dual
-        disabled={!activeVehicle}
         actions={[
           {
             key: 'fillup',
             label: 'Nouveau plein',
             icon: 'gas-pump',
-            onPress: () => router.push('/fillup/add'),
+            onPress: () => {
+              if (!activeVehicle) {
+                notify('Véhicule', 'Sélectionnez un véhicule d’abord.');
+                return;
+              }
+              router.push('/fillup/add');
+            },
           },
           {
             key: 'trip',
             label: 'Démarrer trajet',
             icon: 'navigate',
-            onPress: () => router.push('/(tabs)/trip'),
+            onPress: () => {
+              if (!activeVehicle) {
+                notify('Véhicule', 'Sélectionnez un véhicule d’abord.');
+                return;
+              }
+              router.push('/(tabs)/trip');
+            },
           },
         ]}
       />
@@ -675,13 +708,6 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: 'row', gap: 12, marginBottom: 12 },
   budgetCard: { marginBottom: 16 },
   sectionTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
-  budgetRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  budgetAmount: { fontSize: 15, fontWeight: '600' },
-  budgetRemaining: { fontSize: 13, marginTop: 8 },
   quickChip: {
     borderWidth: 1,
     borderRadius: 16,

@@ -50,6 +50,9 @@ export function Button({
       onPress={onPress}
       disabled={disabled || loading}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityState={{ busy: !!loading, disabled: !!(disabled || loading) }}
+      accessibilityLabel={title}
     >
       {loading ? (
         <ActivityIndicator color={textColor} />

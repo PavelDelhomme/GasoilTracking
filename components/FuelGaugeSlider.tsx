@@ -101,7 +101,18 @@ export function FuelGaugeSlider({
   const thumbLeft = Math.max(0, Math.min(trackW - thumb, fraction * trackW - thumb / 2));
 
   return (
-    <View style={styles.wrap} pointerEvents={disabled ? 'none' : 'auto'}>
+    <View
+      style={styles.wrap}
+      pointerEvents={disabled ? 'none' : 'auto'}
+      accessibilityRole="adjustable"
+      accessibilityLabel="Niveau de carburant"
+      accessibilityValue={{
+        min: 0,
+        max: Math.round(capacity),
+        now: Math.round(valueL),
+        text: known ? `${valueL.toFixed(1)} litres sur ${capacity.toFixed(0)}` : 'Niveau inconnu',
+      }}
+    >
       <View style={[styles.valueRow, compact && { marginBottom: 4 }]}>
         <Text
           style={[

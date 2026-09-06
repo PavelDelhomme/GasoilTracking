@@ -161,6 +161,7 @@ export default function TripScreen() {
     (Constants.easConfig as { enableGpsSimulator?: boolean } | undefined)?.enableGpsSimulator ===
       true;
   const [history, setHistory] = useState<Trip[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [pending, setPending] = useState<Trip[]>([]);
   const [sinceFill, setSinceFill] = useState<SinceLastFillStats | null>(null);
   const [historyFilter, setHistoryFilter] = useState<'all' | 'sinceFill'>('all');
@@ -205,8 +206,11 @@ export default function TripScreen() {
       setHistory([]);
       setPending([]);
       setSinceFill(null);
+      setHistoryLoading(false);
       return;
     }
+    setHistoryLoading(true);
+    try {
     const [trips, pend, since, pl] = await Promise.all([
       getTrips(activeVehicle.id),
       getPendingTrips(activeVehicle.id),
@@ -240,6 +244,9 @@ export default function TripScreen() {
       }
       setRecentDests(fromHist);
     })();
+    } finally {
+      setHistoryLoading(false);
+    }
   }, [activeVehicle, colors.accent]);
 
   useEffect(() => {
@@ -1323,17 +1330,23 @@ export default function TripScreen() {
       <View style={[styles.segments, { borderBottomColor: colors.border }]}>
         <TouchableOpacity
           onPress={() => setTab('live')}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: tab === 'live' }}
+          accessibilityLabel="Trajet en cours"
           style={[
             styles.segment,
             tab === 'live' && { borderBottomColor: colors.accent, borderBottomWidth: 3 },
           ]}
         >
           <Text style={{ color: tab === 'live' ? colors.accent : colors.textSecondary, fontWeight: '700' }}>
-            Trajet
+            En cours
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => setTab('history')}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: tab === 'history' }}
+          accessibilityLabel="Historique des trajets"
           style={[
             styles.segment,
             tab === 'history' && { borderBottomColor: colors.accent, borderBottomWidth: 3 },
@@ -1488,13 +1501,13 @@ export default function TripScreen() {
             ) : (
               <View style={styles.toolbar}>
                 <Button
-                  title="Manuel"
+                  title="Saisie manuelle"
                   variant="outline"
                   onPress={() => router.push('/trip/add' as never)}
                   style={{ flex: 1 }}
                 />
                 <Button
-                  title="Import"
+                  title="Importer"
                   variant="secondary"
                   onPress={() => router.push('/trip/import' as never)}
                   style={{ flex: 1 }}
@@ -1517,7 +1530,7 @@ export default function TripScreen() {
                     Terminer maintenant et voir le récap
                   </Text>
                 </View>
-                <Text style={{ color: colors.success, fontWeight: '800' }}>OK</Text>
+                <Text style={{ color: colors.success, fontWeight: '800' }}>Terminer</Text>
               </Pressable>
             )}
 
@@ -1526,6 +1539,11 @@ export default function TripScreen() {
                 <Text style={[styles.warning, { color: colors.warning }]}>
                   Sélectionnez un véhicule pour démarrer un trajet.
                 </Text>
+                <Button
+                  title="Aller aux véhicules"
+                  onPress={() => router.push('/(tabs)/vehicles' as never)}
+                  style={{ marginTop: 12 }}
+                />
               </Card>
             ) : activeTrip ? (
               <>
@@ -1708,7 +1726,7 @@ export default function TripScreen() {
                           }}
                         >
                           <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>
-                            Go
+                            Démarrer
                           </Text>
                         </Pressable>
                       </View>
@@ -2187,7 +2205,14 @@ export default function TripScreen() {
               <Text style={[styles.hint, { color: colors.textSecondary }]}>
                 Adresses · durée · touchez pour le détail (carte + vitesses).
               </Text>
-              {filteredHistory.length === 0 && (
+              {historyLoading && filteredHistory.length === 0 && (
+                <Card style={{ marginTop: 12 }}>
+                  <Text style={{ color: colors.textSecondary, textAlign: 'center' }}>
+                    Chargement de l’historique…
+                  </Text>
+                </Card>
+              )}
+              {!historyLoading && filteredHistory.length === 0 && (
                 <Card style={{ marginTop: 12 }}>
                   <Text style={{ color: colors.textSecondary, textAlign: 'center' }}>
                     {historyFilter === 'sinceFill'

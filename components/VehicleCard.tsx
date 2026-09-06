@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
+import { useLocale } from '@/context/LocaleContext';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
 import type { Vehicle } from '@/types';
 import { displayOdometerKm, formatConsumption } from '@/lib/calculations';
@@ -34,6 +35,7 @@ export function VehicleCard({
   onFuelUpdated,
 }: VehicleCardProps) {
   const { colors } = useTheme();
+  const { locale } = useLocale();
   const odo = displayOdometerKm(vehicle);
   const fuelTone = fuelRemainingTone({
     litersRemaining: vehicle.estimatedFuelLiters,
@@ -68,6 +70,8 @@ export function VehicleCard({
       onPress={onPress}
       onLongPress={onLongPress}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={`${vehicle.name}${isActive ? ', véhicule actif' : ''}`}
     >
       <View style={styles.header}>
         <View style={styles.info}>
@@ -91,7 +95,9 @@ export function VehicleCard({
           <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Conso.</Text>
         </View>
         <View style={styles.stat}>
-          <Text style={[styles.statValue, { color: colors.text }]}>{odo.toLocaleString('fr-FR')}</Text>
+          <Text style={[styles.statValue, { color: colors.text }]}>
+            {odo.toLocaleString(locale)}
+          </Text>
           <Text style={[styles.statLabel, { color: colors.textSecondary }]}>km</Text>
         </View>
         <View style={styles.stat}>
@@ -174,7 +180,7 @@ function ActionBtn({
   onPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} style={[styles.actionBtn, { borderColor }]}>
+    <Pressable onPress={onPress} style={[styles.actionBtn, { borderColor }]} accessibilityRole="button" accessibilityLabel={label}>
       <Ionicons name={icon} size={16} color={color} />
       <Text style={[styles.actionLabel, { color }]} numberOfLines={1}>
         {label}

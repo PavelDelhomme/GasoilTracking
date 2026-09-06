@@ -11,7 +11,7 @@ import { tripPlaceLabel, tripSourceLabel } from '@/lib/geocode';
 import { getPlaces } from '@/lib/database';
 import { getCachedTripRoute, resolveTripRouteCached } from '@/lib/tripMapCache';
 import { computeSimilarTripStats } from '@/lib/similarTrips';
-import type { Trip } from '@/types';
+import type { Place, Trip } from '@/types';
 import type { RouteCoord } from '@/components/TripMap.types';
 
 type Props = {
@@ -24,6 +24,14 @@ type Props = {
   allTrips?: Trip[];
 };
 
+let placesCache: { at: number; places: Place[] } | null = null;
+async function getPlacesCached(): Promise<Place[]> {
+  if (placesCache && Date.now() - placesCache.at < 60_000) return placesCache.places;
+  const places = await getPlaces();
+  placesCache = { at: Date.now(), places };
+  return places;
+}
+
 function tripDurationMinutes(trip: Trip): number {
   if (!trip.endTime) return 0;
   const ms = new Date(trip.endTime).getTime() - new Date(trip.startTime).getTime();
@@ -32,7 +40,7 @@ function tripDurationMinutes(trip: Trip): number {
 }
 
 /** Carte historique : mini-carte du trajet réalisé + adresses. */
-export function TripHistoryCard({
+function TripHistoryCardInner({
   trip,
   onPress,
   onDelete,
@@ -73,7 +81,7 @@ export function TripHistoryCard({
     let cancelled = false;
     (async () => {
       try {
-        const places = await getPlaces();
+        const places = await getPlacesCached();
         const pts = await resolveTripRouteCached(trip, places);
         if (cancelled || !pts.length) return;
         setDisplayPts(pts);
@@ -226,6 +234,8 @@ export function TripHistoryCard({
     </Pressable>
   );
 }
+
+export const TripHistoryCard = React.memo(TripHistoryCardInner);
 
 const styles = StyleSheet.create({
   card: { marginTop: 12, overflow: 'hidden' },

@@ -183,7 +183,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!live) {
       const interval = setInterval(() => {
         void refresh();
-      }, 30000);
+      }, 90000);
       return () => clearInterval(interval);
     }
 

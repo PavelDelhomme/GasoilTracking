@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, FlatList } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, RefreshControl } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '@/context/AppContext';
@@ -12,15 +12,29 @@ import { confirm, notify } from '@/lib/notify';
 export default function VehiclesScreen() {
   const { vehicles, activeVehicle, selectVehicle, refresh } = useApp();
   const { colors } = useTheme();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refresh]);
 
   const handleDelete = (id: number, name: string) => {
     confirm(
       'Supprimer',
-      `Supprimer "${name}" ?`,
+      `Supprimer « ${name} » ?`,
       async () => {
-        await deleteVehicle(id);
-        await refresh();
-        notify('Supprimé', name);
+        try {
+          await deleteVehicle(id);
+          await refresh();
+          notify('Supprimé', name);
+        } catch (e) {
+          notify('Erreur', e instanceof Error ? e.message : 'Impossible de supprimer.');
+        }
       },
       'Supprimer'
     );
@@ -32,6 +46,7 @@ export default function VehiclesScreen() {
         data={vehicles}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={styles.list}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="car-outline" size={64} color={colors.textSecondary} />
@@ -59,10 +74,8 @@ export default function VehiclesScreen() {
           <VehicleCard
             vehicle={item}
             isActive={activeVehicle?.id === item.id}
-            onSelect={() => selectVehicle(item.id)}
-            onPress={() =>
-              router.push({ pathname: '/vehicle/edit' as never, params: { id: String(item.id) } })
-            }
+            onSelect={() => void selectVehicle(item.id)}
+            onPress={() => void selectVehicle(item.id)}
             onEdit={() =>
               router.push({ pathname: '/vehicle/edit' as never, params: { id: String(item.id) } })
             }

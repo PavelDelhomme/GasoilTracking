@@ -6,7 +6,6 @@ import {
   Switch,
   Text,
   Pressable,
-  ActivityIndicator,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp } from '@/context/AppContext';
@@ -336,10 +335,15 @@ export default function AddFillUpScreen() {
 
   if (!activeVehicle) {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.container, { backgroundColor: colors.background, padding: 16 }]}>
         <Text style={[styles.error, { color: colors.danger }]}>
           Sélectionnez un véhicule actif avant d&apos;ajouter un plein.
         </Text>
+        <Button
+          title="Aller aux véhicules"
+          onPress={() => router.push('/(tabs)/vehicles' as never)}
+          style={{ marginTop: 16 }}
+        />
       </View>
     );
   }
@@ -585,7 +589,6 @@ export default function AddFillUpScreen() {
       )}
 
       <Button title="Enregistrer le plein" onPress={handleSave} loading={loading} />
-      {locating && <ActivityIndicator style={{ marginTop: 12 }} color={colors.accent} />}
     </ScrollView>
   );
 }

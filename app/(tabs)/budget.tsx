@@ -6,6 +6,7 @@ import {
   ScrollView,
   RefreshControl,
   Pressable,
+  ActivityIndicator,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
@@ -86,6 +87,8 @@ export default function BudgetScreen() {
   const [zoneQuery, setZoneQuery] = useState('');
   const [showZonePicker, setShowZonePicker] = useState(false);
   const [zoneHint, setZoneHint] = useState('Autour de votre position GPS');
+  const [fuelOpen, setFuelOpen] = useState(true);
+  const [budgetsOpen, setBudgetsOpen] = useState(true);
 
   const persistFuelZone = async (z: FuelZone) => {
     setFuelZone(z);
@@ -793,18 +796,27 @@ export default function BudgetScreen() {
         </Card>
 
         {/* Prix carburant — GPS réel ou zone choisie (pas les trajets) */}
-        <View style={styles.sectionRow}>
+        <Pressable
+          onPress={() => setFuelOpen((v) => !v)}
+          style={styles.sectionRow}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: fuelOpen }}
+        >
           <Text style={[styles.section, { color: colors.text, marginBottom: 0 }]}>
-            Prix carburant (zone)
+            Prix carburant (zone) {fuelOpen ? '▾' : '▸'}
           </Text>
           <Button
             title="Actualiser"
             variant="secondary"
             loading={fuelLoading}
-            onPress={() => loadFuelPrices()}
+            onPress={() => {
+              setFuelOpen(true);
+              void loadFuelPrices();
+            }}
             style={{ paddingVertical: 8, paddingHorizontal: 12 }}
           />
-        </View>
+        </Pressable>
+        {fuelOpen && (
         <Card>
           <Text style={{ color: colors.text, fontWeight: '600', marginBottom: 4 }}>
             {zoneHint}
@@ -932,9 +944,17 @@ export default function BudgetScreen() {
           )}
 
           {!!fuelError && <Text style={{ color: colors.danger, marginBottom: 8 }}>{fuelError}</Text>}
-          {!stations.length && !fuelError && (
+          {fuelLoading && !stations.length && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <ActivityIndicator color={colors.accent} />
+              <Text style={{ color: colors.textSecondary, flex: 1 }}>
+                Recherche des stations les moins chères…
+              </Text>
+            </View>
+          )}
+          {!fuelLoading && !stations.length && !fuelError && (
             <Text style={{ color: colors.textSecondary, marginBottom: 8 }}>
-              Chargement des stations les moins chères autour de la zone…
+              Aucune station trouvée dans cette zone. Essayez une autre ville ou « Ma position ».
             </Text>
           )}
           {stations.map((s, idx) => {
@@ -1012,10 +1032,19 @@ export default function BudgetScreen() {
             </Text>
           )}
         </Card>
+        )}
 
         {/* Budgets */}
-        <Text style={[styles.section, { color: colors.text }]}>Budgets</Text>
-        {budgetStatuses.length === 0 ? (
+        <Pressable
+          onPress={() => setBudgetsOpen((v) => !v)}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: budgetsOpen }}
+        >
+          <Text style={[styles.section, { color: colors.text }]}>
+            Budgets {budgetsOpen ? '▾' : '▸'}
+          </Text>
+        </Pressable>
+        {budgetsOpen && (budgetStatuses.length === 0 ? (
           <Card>
             <Text style={{ color: colors.textSecondary, textAlign: 'center' }}>
               Aucun budget. Créez-en un pour suivre vos dépenses.
@@ -1093,7 +1122,7 @@ export default function BudgetScreen() {
               </Card>
             );
           })
-        )}
+        ))}
 
         <View style={{ height: 100 }} />
       </ScrollView>

@@ -7,8 +7,9 @@ import {
   RefreshControl,
   Pressable,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '@/context/AppContext';
 import { useLocale } from '@/context/LocaleContext';
@@ -21,51 +22,12 @@ import {
   formatEuro,
   getMonthFillStats,
 } from '@/lib/calculations';
-import { formatDateSlash, monthKeyFromDate, currentMonthKey } from '@/lib/dates';
+import { formatDateSlash, monthKeyFromDate, currentMonthKey, formatMonthChip, formatMonthLabel } from '@/lib/dates';
 import { ProgressBar } from '@/components/Card';
+import { notify } from '@/lib/notify';
 import type { FillUp, MonthFillStats } from '@/types';
 
 const PAGE = 25;
-
-const MONTH_SHORT_FR = [
-  'Janv.',
-  'Févr.',
-  'Mars',
-  'Avr.',
-  'Mai',
-  'Juin',
-  'Juil.',
-  'Août',
-  'Sept.',
-  'Oct.',
-  'Nov.',
-  'Déc.',
-];
-
-function monthChipLabel(ym: string): string {
-  const [y, m] = ym.split('-').map(Number);
-  const label = MONTH_SHORT_FR[(m || 1) - 1] || ym;
-  return `${label} ${String(y).slice(2)}`;
-}
-
-function monthTitleFr(ym: string): string {
-  const [y, m] = ym.split('-').map(Number);
-  const names = [
-    'Janvier',
-    'Février',
-    'Mars',
-    'Avril',
-    'Mai',
-    'Juin',
-    'Juillet',
-    'Août',
-    'Septembre',
-    'Octobre',
-    'Novembre',
-    'Décembre',
-  ];
-  return `${names[(m || 1) - 1] || ym} ${y}`;
-}
 
 export default function FillUpsScreen() {
   const { activeVehicle, budgetStatuses, refresh } = useApp();
@@ -76,6 +38,7 @@ export default function FillUpsScreen() {
   const [selectedMonth, setSelectedMonth] = useState<string | 'all'>('all');
   const [visibleCount, setVisibleCount] = useState(PAGE);
   const [initialized, setInitialized] = useState(false);
+  const [loadingList, setLoadingList] = useState(true);
 
   const loadFillUps = useCallback(async () => {
     const data = await getFillUps(activeVehicle?.id);
@@ -85,17 +48,28 @@ export default function FillUpsScreen() {
 
   useEffect(() => {
     void (async () => {
-      const data = await loadFillUps();
-      setVisibleCount(PAGE);
-      if (!initialized && data.length > 0) {
-        setSelectedMonth(monthKeyFromDate(data[0].date));
-        setInitialized(true);
-      } else if (!initialized) {
-        setSelectedMonth('all');
-        setInitialized(true);
+      setLoadingList(true);
+      try {
+        const data = await loadFillUps();
+        setVisibleCount(PAGE);
+        if (!initialized && data.length > 0) {
+          setSelectedMonth(monthKeyFromDate(data[0].date));
+          setInitialized(true);
+        } else if (!initialized) {
+          setSelectedMonth('all');
+          setInitialized(true);
+        }
+      } finally {
+        setLoadingList(false);
       }
     })();
   }, [loadFillUps]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadFillUps();
+    }, [loadFillUps])
+  );
 
   const monthKeys = useMemo(() => {
     const keys = new Set<string>();
@@ -182,6 +156,8 @@ export default function FillUpsScreen() {
         >
           <Pressable
             onPress={() => pickMonth('all')}
+            accessibilityRole="button"
+            accessibilityState={{ selected: selectedMonth === 'all' }}
             style={[
               styles.chip,
               {
@@ -206,6 +182,8 @@ export default function FillUpsScreen() {
               <Pressable
                 key={key}
                 onPress={() => pickMonth(key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
                 style={[
                   styles.chip,
                   {
@@ -220,7 +198,7 @@ export default function FillUpsScreen() {
                   adjustsFontSizeToFit
                   minimumFontScale={0.85}
                 >
-                  {monthChipLabel(key)}
+                  {formatMonthChip(key)}
                 </Text>
               </Pressable>
             );
@@ -231,7 +209,7 @@ export default function FillUpsScreen() {
       {periodStats.count > 0 && (
         <View style={[styles.summary, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.summaryTitle, { color: colors.text }]}>
-            {selectedMonth !== 'all' ? monthTitleFr(selectedMonth) : 'Tous les pleins'}
+            {selectedMonth !== 'all' ? formatMonthLabel(selectedMonth) : 'Tous les pleins'}
           </Text>
           <Text
             style={[
@@ -302,6 +280,13 @@ export default function FillUpsScreen() {
           )}
         </View>
       )}
+
+      {loadingList && allFillUps.length === 0 ? (
+        <View style={{ paddingTop: 48, alignItems: 'center' }}>
+          <ActivityIndicator color={colors.accent} />
+          <Text style={{ color: colors.textSecondary, marginTop: 12 }}>Chargement des pleins…</Text>
+        </View>
+      ) : null}
 
       <FlatList
         style={styles.listFlex}
@@ -412,8 +397,13 @@ export default function FillUpsScreen() {
       <SimpleFab
         label="Nouveau plein"
         icon="gas-pump"
-        disabled={!activeVehicle}
-        onPress={() => router.push('/fillup/add')}
+        onPress={() => {
+          if (!activeVehicle) {
+            notify('Véhicule', 'Sélectionnez un véhicule d’abord.');
+            return;
+          }
+          router.push('/fillup/add');
+        }}
       />
     </View>
   );
