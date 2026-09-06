@@ -7,6 +7,7 @@ import {
   normalizeSnapshot,
   type AppDataSnapshot,
 } from '@/lib/dataSnapshot';
+import { repairFillUpVehiclesAndBudgets } from '@/lib/repairFillUpVehicles';
 
 const BACKUP_KEY = 'gasoil_local_backup_v1';
 const PENDING_UPDATE_KEY = 'gasoil_pending_update_v1';
@@ -181,7 +182,6 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
   if (!token) return 'skipped';
   // Corrige prix/litres/budgets locaux avant tout push (évite d’écraser le cloud corrigé).
   try {
-    const { repairFillUpVehiclesAndBudgets } = await import('@/lib/repairFillUpVehicles');
     await repairFillUpVehiclesAndBudgets();
   } catch {
     /* ignore */
@@ -197,7 +197,6 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
   if (remoteSnap && (remoteAt > localAt + 2000 || remoteW > localW + 5)) {
     await applySnapshot(remoteSnap, 'replace');
     try {
-      const { repairFillUpVehiclesAndBudgets } = await import('@/lib/repairFillUpVehicles');
       await repairFillUpVehiclesAndBudgets();
     } catch {
       /* ignore */

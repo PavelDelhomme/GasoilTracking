@@ -45,9 +45,10 @@ export function HeaderActions() {
       const result = await syncNow();
       await refresh();
       setOffline(false);
-      if (result === 'pulled') showToast('Cloud téléchargé');
-      else if (result === 'pushed') showToast('Sauvegarde envoyée au cloud');
-      else showToast('Synchronisation à jour');
+      const hhmm = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      if (result === 'pulled') showToast(`Cloud téléchargé · ${hhmm}`);
+      else if (result === 'pushed') showToast(`Sauvegarde envoyée · ${hhmm}`);
+      else showToast(`Synchronisation à jour · ${hhmm}`);
     } catch (e) {
       setOffline(true);
       showToast(e instanceof Error ? e.message : 'Hors ligne — sync impossible');
@@ -69,7 +70,8 @@ export function HeaderActions() {
           onPress={onSync}
           disabled={busy}
           accessibilityRole="button"
-          accessibilityLabel="Synchroniser manuellement"
+          accessibilityState={{ busy }}
+          accessibilityLabel={busy ? 'Synchronisation en cours…' : 'Synchroniser manuellement'}
           accessibilityHint={
             offline ? 'Hors ligne — dernière synchronisation échouée' : 'Synchroniser avec le cloud'
           }

@@ -121,6 +121,19 @@ export function VehicleCard({
           onChange={setDraftLiters}
           onChangeEnd={(L) => void commitFuel(L)}
         />
+        {draftLiters != null && vehicle.consumptionPer100 > 0 && (
+          <Text
+            style={{
+              marginTop: 6,
+              fontSize: 12,
+              fontWeight: '600',
+              color: colors.textSecondary,
+            }}
+            accessibilityLiveRegion="polite"
+          >
+            Autonomie est. ~{Math.round((draftLiters / vehicle.consumptionPer100) * 100)} km
+          </Text>
+        )}
       </View>
 
       <View style={styles.actions}>

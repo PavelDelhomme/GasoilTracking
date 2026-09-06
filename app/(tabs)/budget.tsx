@@ -18,7 +18,7 @@ import { Card, ProgressBar } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { formatEuro, getActiveMonthlyAllocation } from '@/lib/calculations';
-import { currentMonthKey, formatMonthChip, formatMonthLabel, monthKeyFromDate, formatDateSlash } from '@/lib/dates';
+import { currentMonthKey, formatMonthChip, formatMonthLabel, monthKeyFromDate, formatDateSlash, formatRelativeDay } from '@/lib/dates';
 import {
   deleteBudget,
   deleteFillUp,
@@ -37,6 +37,7 @@ import {
 import { forwardGeocode, reverseGeocode } from '@/lib/geocode';
 import { getCurrentLocation } from '@/lib/locationService';
 import { confirm } from '@/lib/notify';
+import { useToast } from '@/context/ToastContext';
 import type { BudgetStatus, FillUp, Place, RecurringRoute } from '@/types';
 
 const FUEL_ZONE_KEY = 'gasoil_fuel_zone';
@@ -70,6 +71,7 @@ const KIND_LABEL: Record<string, string> = {
 export default function BudgetScreen() {
   const { budgetStatuses, activeVehicle, vehicles, refresh } = useApp();
   const { colors } = useTheme();
+  const { showToast } = useToast();
   const { countryCode, formatPerLiter, locale } = useLocale();
   const [refreshing, setRefreshing] = useState(false);
   const [places, setPlaces] = useState<Place[]>([]);
@@ -550,7 +552,7 @@ export default function BudgetScreen() {
                       style={{ flex: 1 }}
                     >
                       <Text style={{ color: colors.text, fontWeight: '600' }}>
-                        {formatDateSlash(f.date)} · {f.liters.toFixed(1)} L ·{' '}
+                        {formatRelativeDay(f.date)} · {f.liters.toFixed(1)} L ·{' '}
                         {formatEuro(f.totalCost)}
                       </Text>
                       <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
@@ -568,6 +570,7 @@ export default function BudgetScreen() {
                             await deleteFillUp(f.id);
                             await loadExtra();
                             await refresh();
+                            showToast('Plein retiré');
                           },
                           'Supprimer'
                         )
@@ -1107,6 +1110,7 @@ export default function BudgetScreen() {
                         async () => {
                           await deleteBudget(item.budget.id);
                           await refresh();
+                          showToast('Budget supprimé');
                         },
                         'Supprimer'
                       )

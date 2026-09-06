@@ -130,9 +130,10 @@
       <a class="btn secondary" id="openWeb" href="/">Ouvrir la version web</a>
     </div>
 
-    <div class="code-box" id="codeBox">
+      <div class="code-box" id="codeBox">
       <strong>Code d’invitation</strong>
       <div class="code" id="inviteCode"></div>
+      <button type="button" class="btn secondary" id="copyInvite" style="margin-top:10px;display:none">Copier le code</button>
       <p class="hint">À saisir lors de la création du compte (Inscription).</p>
     </div>
 
@@ -145,6 +146,16 @@
       if (code) {
         document.getElementById('codeBox').style.display = 'block';
         document.getElementById('inviteCode').textContent = code;
+        var copyBtn = document.getElementById('copyInvite');
+        copyBtn.style.display = 'inline-block';
+        copyBtn.onclick = function () {
+          navigator.clipboard.writeText(code).then(function () {
+            copyBtn.textContent = 'Copié !';
+            setTimeout(function () { copyBtn.textContent = 'Copier le code'; }, 1600);
+          }).catch(function () {
+            copyBtn.textContent = 'Sélectionnez le code ci-dessus';
+          });
+        };
       }
       var ua = navigator.userAgent || '';
       var isIos = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -152,38 +163,41 @@
       if (isIos) document.getElementById('ios').style.outline = '1px solid #3b82f6';
       if (isAndroid) document.getElementById('android').style.outline = '1px solid #22c55e';
 
-      fetch('/api/version')
-        .then(function (r) { return r.json(); })
-        .then(function (v) {
-          document.getElementById('ver').textContent =
-            'Version app ' + (v.version || '—') +
-            (v.webUrl ? ' · web live' : '') +
-            (v.buildingVersion ? ' · build ' + v.buildingVersion + ' en cours…' : '');
-          var dl = document.getElementById('dl');
-          if (v.apkUrl && v.apkAvailable !== false) {
-            dl.href = v.apkUrl;
-            dl.removeAttribute('aria-disabled');
-            dl.textContent = 'Télécharger APK ' + (v.version || '');
-            dl.setAttribute('download', 'gasoil-tracking-' + (v.version || 'latest') + '.apk');
-          } else {
-            dl.textContent = 'APK pas encore publiée';
-          }
-          var web = v.webUrl || '/';
-          document.getElementById('openWeb').href = web;
-          document.getElementById('openWebIos').href = web;
-          if (!code && v.inviteCodePublic) {
-            /* jamais exposer le code publicement via API — ignore */
-          }
-          document.getElementById('info').textContent = v.releaseNotes || '';
-          if (v.buildingVersion) {
-            document.getElementById('info').textContent =
-              (v.releaseNotes ? v.releaseNotes + ' · ' : '') +
-              'Build v' + v.buildingVersion + ' en cours…';
-          }
-        })
-        .catch(function () {
-          document.getElementById('ver').textContent = 'API indisponible';
-        });
+      function loadVersion() {
+        fetch('/api/version')
+          .then(function (r) { return r.json(); })
+          .then(function (v) {
+            document.getElementById('ver').textContent =
+              'Version app ' + (v.version || '—') +
+              (v.webUrl ? ' · web live' : '') +
+              (v.buildingVersion ? ' · build ' + v.buildingVersion + ' en cours…' : '');
+            var dl = document.getElementById('dl');
+            if (v.apkUrl && v.apkAvailable !== false) {
+              dl.href = v.apkUrl;
+              dl.removeAttribute('aria-disabled');
+              dl.textContent = 'Télécharger APK ' + (v.version || '');
+              dl.setAttribute('download', 'gasoil-tracking-' + (v.version || 'latest') + '.apk');
+            } else {
+              dl.textContent = 'APK pas encore publiée';
+            }
+            var web = v.webUrl || '/';
+            document.getElementById('openWeb').href = web;
+            document.getElementById('openWebIos').href = web;
+            document.getElementById('info').textContent = v.releaseNotes || '';
+            if (v.buildingVersion) {
+              document.getElementById('info').textContent =
+                (v.releaseNotes ? v.releaseNotes + ' · ' : '') +
+                'Build v' + v.buildingVersion + ' en cours…';
+            }
+          })
+          .catch(function () {
+            document.getElementById('ver').innerHTML =
+              'API indisponible — <a href="#" id="retryVer" style="color:#e94560">Réessayer</a>';
+            var retry = document.getElementById('retryVer');
+            if (retry) retry.onclick = function (e) { e.preventDefault(); loadVersion(); };
+          });
+      }
+      loadVersion();
     })();
   </script>
 </body>

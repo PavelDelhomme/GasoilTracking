@@ -197,7 +197,22 @@ export async function getSinceLastFillStats(vehicleId: number): Promise<SinceLas
     fuelRemainingEst: 0,
     rangeKm: 0,
   };
-  if (!vehicle || !fillUps.length) return empty;
+  if (!vehicle) return empty;
+
+  const rangeFromLiters = (liters: number, lPer100: number) =>
+    lPer100 > 0 ? Math.round((Math.max(0, liters) / lPer100) * 1000) / 10 : 0;
+
+  // Pas encore de plein : autonomie basée uniquement sur le niveau jauge + conso véhicule
+  if (!fillUps.length) {
+    if (vehicle.estimatedFuelLiters == null) return empty;
+    const fuelRemainingEst = Math.max(0, Math.round(vehicle.estimatedFuelLiters * 100) / 100);
+    const l100 = estimateTripFuelLiters(vehicle, 100);
+    return {
+      ...empty,
+      fuelRemainingEst,
+      rangeKm: rangeFromLiters(fuelRemainingEst, l100),
+    };
+  }
 
   const lastFill = [...fillUps].sort((a, b) => b.date.localeCompare(a.date))[0];
   const since = trips.filter(
@@ -229,8 +244,7 @@ export async function getSinceLastFillStats(vehicleId: number): Promise<SinceLas
       : Math.max(0, Math.round((startFuel - fuelUsedEst) * 100) / 100);
   const effectiveL100 =
     tripKm > 0 ? (fuelUsedEst / tripKm) * 100 : estimateTripFuelLiters(vehicle, 100);
-  const rangeKm =
-    effectiveL100 > 0 ? Math.round((fuelRemainingEst / effectiveL100) * 1000) / 10 : 0;
+  const rangeKm = rangeFromLiters(fuelRemainingEst, effectiveL100);
 
   return {
     lastFill,

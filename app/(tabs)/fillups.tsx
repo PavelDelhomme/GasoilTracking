@@ -349,9 +349,23 @@ export default function FillUpsScreen() {
               </Pressable>
             )}
             {activeVehicle && allFillUps.length > 0 && selectedMonth !== 'all' && (
-              <Pressable onPress={() => pickMonth('all')} style={{ marginTop: 8 }}>
-                <Text style={{ color: colors.accent, fontWeight: '700' }}>Voir tous les pleins</Text>
-              </Pressable>
+              <View style={{ marginTop: 8, alignItems: 'center', gap: 10 }}>
+                <Pressable onPress={() => pickMonth('all')}>
+                  <Text style={{ color: colors.accent, fontWeight: '700' }}>Voir tous les pleins</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => router.push('/fillup/add' as never)}
+                  style={{
+                    paddingHorizontal: 16,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: colors.accent,
+                  }}
+                >
+                  <Text style={{ color: colors.accent, fontWeight: '700' }}>Ou enregistrer un plein</Text>
+                </Pressable>
+              </View>
             )}
           </View>
         }

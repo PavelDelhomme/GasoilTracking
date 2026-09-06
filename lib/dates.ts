@@ -88,7 +88,7 @@ export function formatMonthChip(ym: string): string {
   return `${MONTH_SHORT_FR[(m || 1) - 1] || ym} ${String(y).slice(2)}`;
 }
 
-/** « Aujourd’hui », « Hier », sinon JJ/MM/AAAA */
+/** « Aujourd’hui », « Hier », « Il y a N jours » (2–6), sinon JJ/MM/AAAA */
 export function formatRelativeDay(input: string | Date): string {
   const d =
     typeof input === 'string'
@@ -104,6 +104,8 @@ export function formatRelativeDay(input: string | Date): string {
   if (diffDays === 0) return 'Aujourd’hui';
   if (diffDays === 1) return 'Hier';
   if (diffDays === -1) return 'Demain';
+  if (diffDays >= 2 && diffDays <= 6) return `Il y a ${diffDays} jours`;
+  if (diffDays <= -2 && diffDays >= -6) return `Dans ${Math.abs(diffDays)} jours`;
   return formatDateSlash(d);
 }
 

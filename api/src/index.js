@@ -596,11 +596,17 @@ function finalizeEmailVerification(req, res, raw, platform) {
 
 app.get('/health', (req, res) => {
   const accept = String(req.headers.accept || '');
+  const uptimeSec = Math.floor(process.uptime());
   res.setHeader('X-App-Version', APP_VERSION);
   if (accept.includes('application/json')) {
-    return res.json({ status: 'ok', version: APP_VERSION });
+    return res.json({
+      status: 'ok',
+      version: APP_VERSION,
+      uptimeSec,
+      time: new Date().toISOString(),
+    });
   }
-  res.type('text').send('ok');
+  res.type('text').send(`ok · v${APP_VERSION} · ${uptimeSec}s`);
 });
 
 /** Taux FX via proxy (évite CORS web : frankfurter.app → 301 sans ACAO). */

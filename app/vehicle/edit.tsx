@@ -374,13 +374,15 @@ export default function EditVehicleScreen() {
             onChangeEnd={async (L) => {
               const next = await setFuelLiters(vehicle, L);
               setVehicle({ ...vehicle, estimatedFuelLiters: next });
-              notify('Niveau', `${next.toFixed(1)} L`);
+              await refresh();
+              notify('Niveau', `${next.toFixed(1)} L · autonomie mise à jour`);
             }}
           />
           <Pressable
             onPress={async () => {
               await updateVehicle(vehicle.id, { estimatedFuelLiters: null });
               setVehicle({ ...vehicle, estimatedFuelLiters: null });
+              await refresh();
               notify('Niveau', 'Marqué inconnu');
             }}
             style={{ marginTop: 10 }}

@@ -19,6 +19,7 @@ import * as Location from 'expo-location';
 import Constants from 'expo-constants';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
+import { useToast } from '@/context/ToastContext';
 import { Card, StatCard } from '@/components/Card';
 import { Button } from '@/components/Button';
 import TripMap from '@/components/TripMap';
@@ -135,6 +136,7 @@ export default function TripScreen() {
   }>();
   const { activeVehicle, activeTrip, refresh } = useApp();
   const { colors } = useTheme();
+  const { showToast } = useToast();
   const mapRef = useRef<TripMapRef>(null);
   const autoStartDone = useRef(false);
   const [tab, setTab] = useState<TripTab>('live');
@@ -891,9 +893,8 @@ export default function TripScreen() {
         router.push(`/trip/${finishedId}` as never);
       } else {
         setTab('history');
-        notify(
-          'Trajet terminé',
-          `${originName || 'Départ'} → ${destName} · ${formatDistance(activeTrip.distanceKm)} · ~${fuelUsed.toFixed(1)} L`
+        showToast(
+          `Trajet terminé · ${formatDistance(activeTrip.distanceKm)} · ~${fuelUsed.toFixed(1)} L`
         );
       }
     },
@@ -904,6 +905,7 @@ export default function TripScreen() {
       tripStartFuelLiters,
       refresh,
       loadLists,
+      showToast,
     ]
   );
 

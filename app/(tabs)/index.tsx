@@ -121,8 +121,11 @@ export default function HomeScreen() {
     setRefreshing(true);
     await refresh();
     try {
-      await syncNow();
-      showToast('Synchronisation manuelle réussie');
+      const result = await syncNow();
+      await refresh();
+      if (result === 'pulled') showToast('Cloud téléchargé');
+      else if (result === 'pushed') showToast('Sauvegarde envoyée au cloud');
+      else showToast('Synchronisation à jour');
     } catch {
       showToast('Hors ligne — données locales affichées');
     }
@@ -285,12 +288,36 @@ export default function HomeScreen() {
                   tankCapacity={activeVehicle.tankCapacity}
                   liters={homeFuelDraft}
                   accentColor={fuelColor}
-                  onChange={setHomeFuelDraft}
+                  onChange={(L) => {
+                    setHomeFuelDraft(L);
+                    // Aperçu immédiat autonomie / L restants pendant le drag
+                    setSinceFill((prev) => {
+                      const l100 =
+                        prev?.tripKm && prev.tripKm > 0 && prev.fuelUsedEst > 0
+                          ? (prev.fuelUsedEst / prev.tripKm) * 100
+                          : activeVehicle.consumptionPer100 || 8;
+                      const rangeKm =
+                        l100 > 0 ? Math.round((Math.max(0, L) / l100) * 1000) / 10 : 0;
+                      if (prev) {
+                        return { ...prev, fuelRemainingEst: L, rangeKm };
+                      }
+                      return {
+                        lastFill: null,
+                        tripKm: 0,
+                        tripCount: 0,
+                        fuelUsedEst: 0,
+                        costEst: 0,
+                        fuelRemainingEst: L,
+                        rangeKm,
+                      };
+                    });
+                  }}
                   onChangeEnd={async (L) => {
                     setHomeFuelDraft(L);
                     await setFuelLiters(activeVehicle, L);
                     await refresh();
-                    notify('Réservoir', `${L.toFixed(1)} L`);
+                    await reloadStats(activeVehicle.id);
+                    notify('Réservoir', `${L.toFixed(1)} L · autonomie mise à jour`);
                   }}
                 />
               </View>
