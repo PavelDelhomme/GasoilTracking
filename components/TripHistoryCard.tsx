@@ -10,6 +10,7 @@ import { formatDateSlash } from '@/lib/dates';
 import { tripPlaceLabel, tripSourceLabel } from '@/lib/geocode';
 import { getPlaces } from '@/lib/database';
 import { getCachedTripRoute, resolveTripRouteCached } from '@/lib/tripMapCache';
+import { computeSimilarTripStats } from '@/lib/similarTrips';
 import type { Trip } from '@/types';
 import type { RouteCoord } from '@/components/TripMap.types';
 
@@ -19,6 +20,8 @@ type Props = {
   onDelete: (trip: Trip) => void;
   /** Afficher la mini-carte (désactiver hors viewport pour fluidité) */
   showMap?: boolean;
+  /** Tous les trajets pour moyennes / comparaison */
+  allTrips?: Trip[];
 };
 
 function tripDurationMinutes(trip: Trip): number {
@@ -29,13 +32,29 @@ function tripDurationMinutes(trip: Trip): number {
 }
 
 /** Carte historique : mini-carte du trajet réalisé + adresses. */
-export function TripHistoryCard({ trip, onPress, onDelete, showMap = true }: Props) {
+export function TripHistoryCard({
+  trip,
+  onPress,
+  onDelete,
+  showMap = true,
+  allTrips = [],
+}: Props) {
   const { colors } = useTheme();
   const stored = useMemo(() => parseRoutePoints(trip.routePoints), [trip.routePoints]);
   const cached = getCachedTripRoute(trip.id);
   const [displayPts, setDisplayPts] = useState<RouteCoord[]>(
     cached && cached.length ? cached : stored
   );
+
+  const similar = useMemo(
+    () => (allTrips.length ? computeSimilarTripStats(allTrips, trip, { excludeId: trip.id }) : null),
+    [allTrips, trip]
+  );
+
+  const tripL100 =
+    trip.distanceKm >= 0.5 && trip.estimatedFuelUsed > 0
+      ? (trip.estimatedFuelUsed / trip.distanceKm) * 100
+      : 0;
 
   const start = displayPts[0] || stored[0] || null;
   const end =
@@ -162,7 +181,47 @@ export function TripHistoryCard({ trip, onPress, onDelete, showMap = true }: Pro
               </Text>
             </View>
           )}
+          {tripL100 > 0 && (
+            <View style={[styles.chip, { backgroundColor: colors.background, borderColor: colors.border }]}>
+              <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 11 }}>
+                {tripL100.toFixed(1)} L/100
+              </Text>
+            </View>
+          )}
         </View>
+
+        {similar && similar.count >= 1 && (
+          <View
+            style={[
+              styles.compareBox,
+              { borderColor: colors.border, backgroundColor: colors.background },
+            ]}
+          >
+            <Text style={{ color: colors.textSecondary, fontSize: 11, lineHeight: 16 }}>
+              Moy. similaires ({similar.count}) : {similar.avgDistanceKm.toFixed(1)} km ·{' '}
+              {similar.avgFuelL.toFixed(1)} L · {formatEuro(similar.avgCost)}
+              {similar.avgDurationMin > 0 ? ` · ${similar.avgDurationMin} min` : ''}
+              {similar.avgL100 > 0 ? ` · ${similar.avgL100.toFixed(1)} L/100` : ''}
+            </Text>
+            {similar.vsHabitLabel ? (
+              <Text
+                style={{
+                  color:
+                    similar.deltaL100 != null && similar.deltaL100 > 0.3
+                      ? colors.warning
+                      : similar.deltaL100 != null && similar.deltaL100 < -0.3
+                        ? colors.success
+                        : colors.text,
+                  fontSize: 12,
+                  fontWeight: '700',
+                  marginTop: 4,
+                }}
+              >
+                {similar.vsHabitLabel}
+              </Text>
+            ) : null}
+          </View>
+        )}
       </Card>
     </Pressable>
   );
@@ -208,5 +267,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 10,
     padding: 8,
+  },
+  compareBox: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
 });

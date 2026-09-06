@@ -15,6 +15,7 @@ import {
   parseRoutePoints,
 } from '@/lib/calculations';
 import { estimateTripFuelLiters } from '@/lib/consumptionModel';
+import { buildGoogleMapsDirUrl } from '@/lib/mapsNavigation';
 
 interface LocationTaskData {
   locations: Location.LocationObject[];
@@ -201,24 +202,18 @@ export async function getCurrentLocation(opts?: {
 export function openGoogleMapsNavigation(
   destinationLat: number,
   destinationLng: number,
-  destinationName?: string,
+  _destinationName?: string,
   opts?: {
     origin?: { latitude: number; longitude: number };
     waypoints?: { latitude: number; longitude: number }[];
   }
 ): string {
-  const dest = `${destinationLat},${destinationLng}`;
-  const origin = opts?.origin
-    ? `${opts.origin.latitude},${opts.origin.longitude}`
-    : '';
-  const wps = (opts?.waypoints || [])
-    .slice(0, 8)
-    .map((p) => `${p.latitude},${p.longitude}`)
-    .join('|');
-  let url = `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=driving`;
-  if (origin) url += `&origin=${origin}`;
-  if (wps) url += `&waypoints=${encodeURIComponent(wps)}`;
-  return url;
+  return buildGoogleMapsDirUrl({
+    destination: { latitude: destinationLat, longitude: destinationLng },
+    origin: opts?.origin,
+    waypoints: opts?.waypoints,
+    navigate: true,
+  });
 }
 
 /** Ouvre Google Maps avec une recherche */

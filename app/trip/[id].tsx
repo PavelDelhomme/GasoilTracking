@@ -6,7 +6,7 @@ import { Card, StatCard } from '@/components/Card';
 import { Button } from '@/components/Button';
 import TripMap from '@/components/TripMap';
 import type { TripMapRef } from '@/components/TripMap.types';
-import { deleteTrip, getTripById } from '@/lib/database';
+import { deleteTrip, getTripById, getTrips } from '@/lib/database';
 import {
   calculateTripStats,
   formatDistance,
@@ -23,6 +23,7 @@ import { notify, confirm } from '@/lib/notify';
 import { useApp } from '@/context/AppContext';
 import { getPlaces } from '@/lib/database';
 import { getTripDisplayRoute } from '@/lib/routeGeometry';
+import { computeSimilarTripStats } from '@/lib/similarTrips';
 import type { Trip } from '@/types';
 
 /** Détail d’un trajet passé : carte plein écran du tracé + stats. */
@@ -34,6 +35,7 @@ export default function TripDetailScreen() {
   const mapRef = useRef<TripMapRef>(null);
   const fittedRef = useRef(false);
   const [trip, setTrip] = useState<Trip | null>(null);
+  const [peerTrips, setPeerTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [originLabel, setOriginLabel] = useState('');
   const [destLabel, setDestLabel] = useState('');
@@ -53,6 +55,8 @@ export default function TripDetailScreen() {
     if (!t) return;
 
     const places = await getPlaces();
+    const peers = await getTrips(t.vehicleId);
+    setPeerTrips(peers);
     const display = await getTripDisplayRoute(t, places);
     setDisplayPoints(display);
 
@@ -90,6 +94,16 @@ export default function TripDetailScreen() {
   }, [displayPoints, rawPts]);
 
   const speedStats = useMemo(() => computeRouteSpeedStats(rawPts), [rawPts]);
+
+  const similar = useMemo(
+    () => (trip && peerTrips.length ? computeSimilarTripStats(peerTrips, trip, { excludeId: trip.id }) : null),
+    [trip, peerTrips]
+  );
+
+  const tripL100 =
+    trip && trip.distanceKm >= 0.5 && trip.estimatedFuelUsed > 0
+      ? (trip.estimatedFuelUsed / trip.distanceKm) * 100
+      : 0;
 
   const mapPoints = useMemo(() => {
     // Préférer le GPS stocké (timestamps/vitesses) pour coloration
@@ -257,6 +271,58 @@ export default function TripDetailScreen() {
               value={formatDurationMinutes(stats?.durationMinutes ?? 0)}
             />
           </View>
+          {tripL100 > 0 && (
+            <View style={styles.statsRow}>
+              <StatCard label="Conso" value={`${tripL100.toFixed(1)} L/100`} />
+              <StatCard
+                label="vs habitude"
+                value={
+                  similar?.deltaL100 != null
+                    ? `${similar.deltaL100 > 0 ? '+' : ''}${similar.deltaL100.toFixed(1)}`
+                    : similar?.avgL100
+                      ? `moy. ${similar.avgL100.toFixed(1)}`
+                      : '—'
+                }
+              />
+            </View>
+          )}
+
+          {similar && similar.count >= 1 && (
+            <Card style={{ marginBottom: 12 }}>
+              <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '800' }}>
+                TRAJETS SIMILAIRES ({similar.count})
+              </Text>
+              <Text
+                style={{
+                  color: colors.textSecondary,
+                  fontSize: 13,
+                  marginTop: 6,
+                  lineHeight: 19,
+                }}
+              >
+                Moyenne : {similar.avgDistanceKm.toFixed(1)} km · {similar.avgFuelL.toFixed(1)} L ·{' '}
+                {formatEuro(similar.avgCost)}
+                {similar.avgDurationMin > 0 ? ` · ${similar.avgDurationMin} min` : ''}
+                {similar.avgL100 > 0 ? ` · ${similar.avgL100.toFixed(1)} L/100` : ''}
+              </Text>
+              {similar.vsHabitLabel ? (
+                <Text
+                  style={{
+                    color:
+                      similar.deltaL100 != null && similar.deltaL100 > 0.3
+                        ? colors.warning
+                        : similar.deltaL100 != null && similar.deltaL100 < -0.3
+                          ? colors.success
+                          : colors.text,
+                    fontWeight: '700',
+                    marginTop: 8,
+                  }}
+                >
+                  {similar.vsHabitLabel}
+                </Text>
+              ) : null}
+            </Card>
+          )}
 
           {(avgShown > 0 || speedStats.maxKmh > 0) && (
             <>
