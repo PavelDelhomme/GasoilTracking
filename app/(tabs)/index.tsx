@@ -24,11 +24,11 @@ import {
 import { seedDemoData } from '@/lib/seedDemo';
 import { seedTodayCommuteAndFillUp } from '@/lib/seedToday';
 import { notify } from '@/lib/notify';
-import { getPlaces, getMaintenances, reconcileTrackedKmFromTrips } from '@/lib/database';
+import { getPlaces, getMaintenances, getTrips, reconcileTrackedKmFromTrips } from '@/lib/database';
 import { fuelRemainingTone, fuelToneColor } from '@/lib/fuelLevel';
-import type { ConsumptionStats, Place, SinceLastFillStats, VehicleMaintenance } from '@/types';
+import type { ConsumptionStats, Place, SinceLastFillStats, Trip, VehicleMaintenance } from '@/types';
 import { MAINTENANCE_KIND_LABELS, maintenanceIsUrgent } from '@/lib/vehicleMaintenance';
-import { formatDateSlash } from '@/lib/dates';
+import { formatDateSlash, toLocalYmd } from '@/lib/dates';
 
 export default function HomeScreen() {
   const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles, selectVehicle } = useApp();
@@ -44,14 +44,27 @@ export default function HomeScreen() {
   const [seedingToday, setSeedingToday] = useState(false);
   const [places, setPlaces] = useState<Place[]>([]);
   const [dueMaintenances, setDueMaintenances] = useState<VehicleMaintenance[]>([]);
+  const [todayTrips, setTodayTrips] = useState<Trip[]>([]);
 
   const reloadStats = async (vehicleId: number) => {
-    const [s, since] = await Promise.all([
+    const [s, since, trips] = await Promise.all([
       getConsumptionStats(vehicleId),
       getSinceLastFillStats(vehicleId),
+      getTrips(vehicleId),
     ]);
     setStats(s);
     setSinceFill(since);
+    const ymd = toLocalYmd(new Date());
+    setTodayTrips(
+      trips.filter((t) => {
+        if (t.isActive || t.distanceKm < 0.05) return false;
+        try {
+          return toLocalYmd(new Date(t.startTime)) === ymd;
+        } catch {
+          return t.startTime.slice(0, 10) === ymd;
+        }
+      })
+    );
   };
 
   const reloadDueMaintenances = async () => {
@@ -177,6 +190,10 @@ export default function HomeScreen() {
   const workPlace = places.find((p) => p.kind === 'work');
   const favoritePlaces = places.filter((p) => p.kind === 'other' || p.kind === 'station');
 
+  const todayKm = todayTrips.reduce((s, t) => s + t.distanceKm, 0);
+  const todayFuel = todayTrips.reduce((s, t) => s + t.estimatedFuelUsed, 0);
+  const todayCost = todayTrips.reduce((s, t) => s + t.estimatedCost, 0);
+
   const fuelTone = activeVehicle
     ? fuelRemainingTone({
         litersRemaining:
@@ -281,6 +298,36 @@ export default function HomeScreen() {
                 </View>
               )}
             </Card>
+
+            {(todayTrips.length > 0 || todayKm > 0) && (
+              <Card style={{ marginTop: 12 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '800' }}>
+                  AUJOURD’HUI
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 12, marginTop: 10 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.text, fontWeight: '800', fontSize: 18 }}>
+                      {formatDistance(todayKm)}
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
+                      {todayTrips.length} trajet{todayTrips.length > 1 ? 's' : ''}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.text, fontWeight: '800', fontSize: 18 }}>
+                      {todayFuel.toFixed(1)} L
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11 }}>estimé</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 18 }}>
+                      {formatEuro(todayCost)}
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11 }}>coût</Text>
+                  </View>
+                </View>
+              </Card>
+            )}
 
             {activeTrip && (
               <Card style={{ ...styles.tripBanner, borderColor: colors.accent }}>

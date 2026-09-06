@@ -375,6 +375,28 @@ export default function TripDetailScreen() {
             style={{ marginBottom: 10 }}
           />
           <Button
+            title="Retour (sens inverse)"
+            variant="outline"
+            onPress={() => {
+              const dest =
+                trip.originName?.trim() ||
+                originLabel ||
+                '';
+              const start = rawPts[0] || displayPoints[0];
+              router.push({
+                pathname: '/(tabs)/trip' as never,
+                params: {
+                  mode: 'nav',
+                  dest,
+                  destLat: start ? String(start.latitude) : undefined,
+                  destLon: start ? String(start.longitude) : undefined,
+                  autoStart: '1',
+                },
+              });
+            }}
+            style={{ marginBottom: 10 }}
+          />
+          <Button
             title="Enregistrer un plein"
             variant="secondary"
             onPress={() =>

@@ -1072,6 +1072,24 @@ export default function BudgetScreen() {
                   {formatEuro(item.spent)} dépensés sur {formatEuro(item.budget.amount)} (
                   {item.percentUsed.toFixed(0)} %)
                 </Text>
+                {item.projectedEndOfPeriod > 0 && (
+                  <Text
+                    style={{
+                      color:
+                        item.projectedEndOfPeriod > item.budget.amount
+                          ? colors.warning
+                          : colors.textSecondary,
+                      marginTop: 6,
+                      fontSize: 12,
+                      fontWeight: '600',
+                    }}
+                  >
+                    Au rythme actuel → ~{formatEuro(item.projectedEndOfPeriod)} fin de période
+                    {item.projectedEndOfPeriod > item.budget.amount
+                      ? ` (+${formatEuro(item.projectedEndOfPeriod - item.budget.amount)})`
+                      : ''}
+                  </Text>
+                )}
               </Card>
             );
           })

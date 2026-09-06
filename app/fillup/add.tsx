@@ -29,6 +29,7 @@ import {
 import { getCurrentLocation } from '@/lib/locationService';
 import { notify } from '@/lib/notify';
 import { toLocalYmd } from '@/lib/dates';
+import type { FillUp } from '@/types';
 
 function parseNum(v: string): number {
   const n = parseFloat(String(v).replace(',', '.'));
@@ -60,6 +61,7 @@ export default function AddFillUpScreen() {
   const [locating, setLocating] = useState(false);
   const [loading, setLoading] = useState(false);
   const [kmHint, setKmHint] = useState('');
+  const [lastFill, setLastFill] = useState<FillUp | null>(null);
 
   const hasOdo = activeVehicle?.hasOdometer !== false;
 
@@ -67,7 +69,8 @@ export default function AddFillUpScreen() {
     if (!activeVehicle) return;
     void (async () => {
       const fills = await getFillUps(activeVehicle.id);
-      const last = fills[0];
+      const last = fills[0] || null;
+      setLastFill(last);
       const currentOdo = activeVehicle.currentOdometer || 0;
 
       if (hasOdo) {
@@ -96,6 +99,49 @@ export default function AddFillUpScreen() {
       : activeVehicle?.fuelType === 'gpl'
         ? 'gplc'
         : 'e10';
+
+  const fillToFullLiters = useMemo(() => {
+    if (!activeVehicle) return 0;
+    const rem = activeVehicle.estimatedFuelLiters;
+    if (rem == null || rem < 0) return 0;
+    const need = activeVehicle.tankCapacity - rem;
+    return need > 0.5 ? Math.round(need * 10) / 10 : 0;
+  }, [activeVehicle]);
+
+  const priceDelta = useMemo(() => {
+    if (!lastFill?.pricePerLiter || lastFill.pricePerLiter <= 0) return null;
+    const p = parseNum(pricePerLiter);
+    if (p <= 0) return null;
+    return Math.round((p - lastFill.pricePerLiter) * 1000) / 1000;
+  }, [pricePerLiter, lastFill]);
+
+  const lastStationLabel = useMemo(() => {
+    const n = (lastFill?.note || '').trim();
+    if (!n) return null;
+    // note souvent "Station …" ou nom libre
+    return n.length > 2 ? n : null;
+  }, [lastFill]);
+
+  const applyFillToFull = () => {
+    if (fillToFullLiters <= 0) return;
+    const L = fillToFullLiters;
+    setLiters(String(L));
+    setIsFull(true);
+    setLastEdited('liters');
+    const P = parseNum(pricePerLiter);
+    if (P > 0) setTotalPaid((L * P).toFixed(2));
+  };
+
+  const applyLastStation = () => {
+    if (!lastStationLabel) return;
+    setNote(lastStationLabel);
+    if (lastFill?.pricePerLiter && lastFill.pricePerLiter > 0) {
+      setPricePerLiter(String(lastFill.pricePerLiter));
+      setLastEdited('ppl');
+      const L = parseNum(liters);
+      if (L > 0) setTotalPaid((L * lastFill.pricePerLiter).toFixed(2));
+    }
+  };
 
   const derived = useMemo(() => {
     const L = parseNum(liters);
@@ -318,6 +364,19 @@ export default function AddFillUpScreen() {
       />
 
       <Text style={[styles.section, { color: colors.text }]}>Station</Text>
+      {lastStationLabel && !station && (
+        <Pressable
+          onPress={applyLastStation}
+          style={[
+            styles.quickChip,
+            { borderColor: colors.accent, backgroundColor: colors.accent + '18', marginBottom: 10 },
+          ]}
+        >
+          <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }} numberOfLines={1}>
+            Dernière station : {lastStationLabel}
+          </Text>
+        </Pressable>
+      )}
       <Button
         title={
           locating
@@ -382,6 +441,19 @@ export default function AddFillUpScreen() {
       <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
         Entrez litres + montant payé → le prix/L se calcule tout seul (ou l’inverse).
       </Text>
+      {fillToFullLiters > 0 && (
+        <Pressable
+          onPress={applyFillToFull}
+          style={[
+            styles.quickChip,
+            { borderColor: colors.border, backgroundColor: colors.card, marginBottom: 10 },
+          ]}
+        >
+          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>
+            Compléter le réservoir (~{fillToFullLiters.toFixed(1)} L)
+          </Text>
+        </Pressable>
+      )}
       <Input
         label="Litres"
         placeholder="45.00"
@@ -402,6 +474,21 @@ export default function AddFillUpScreen() {
         onChangeText={onPpl}
         keyboardType="decimal-pad"
       />
+      {priceDelta != null && Math.abs(priceDelta) >= 0.001 && (
+        <Text
+          style={{
+            color: priceDelta > 0 ? colors.warning : colors.success,
+            fontSize: 12,
+            fontWeight: '700',
+            marginTop: -6,
+            marginBottom: 10,
+          }}
+        >
+          {priceDelta > 0 ? '+' : ''}
+          {(priceDelta * 100).toFixed(1)} ct/L vs dernier plein (
+          {formatPerLiter(lastFill!.pricePerLiter)})
+        </Text>
+      )}
 
       {derived.total > 0 && derived.liters > 0 && (
         <Text style={[styles.total, { color: colors.accent }]}>
@@ -516,6 +603,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginTop: 8,
     gap: 8,
+  },
+  quickChip: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   switchRow: {
     flexDirection: 'row',
