@@ -105,6 +105,16 @@ export async function setFuelFraction(vehicle: Vehicle, fraction: number): Promi
   return next;
 }
 
+/** Fixe un niveau en litres. */
+export async function setFuelLiters(vehicle: Vehicle, liters: number): Promise<number> {
+  const next = Math.min(
+    vehicle.tankCapacity,
+    Math.max(0, Math.round(liters * 10) / 10)
+  );
+  await updateVehicle(vehicle.id, { estimatedFuelLiters: next });
+  return next;
+}
+
 /**
  * Met à jour le facteur d’apprentissage (EMA) après saisie jauge début/fin.
  */

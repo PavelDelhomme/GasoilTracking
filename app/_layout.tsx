@@ -15,6 +15,7 @@ import { HeaderBackButton } from '@/components/HeaderBackButton';
 import { AccountDrawer } from '@/components/AccountDrawer';
 import { ClientOnly } from '@/components/ClientOnly';
 import { AppUpdateModal } from '@/components/AppUpdateModal';
+import { FuelGaugeModalHost } from '@/components/FuelGaugeModalHost';
 import { RegisterServiceWorker } from '@/components/RegisterServiceWorker';
 
 function RootNavigation() {
@@ -86,6 +87,7 @@ function RootNavigation() {
         <Stack.Screen name="place/route" options={{ title: 'Trajet régulier', presentation: 'modal' }} />
       </Stack>
       <AccountDrawer />
+      <FuelGaugeModalHost />
       <AppUpdateModal
         visible={update.visible}
         info={update.info}

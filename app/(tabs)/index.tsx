@@ -25,7 +25,8 @@ import { seedDemoData } from '@/lib/seedDemo';
 import { seedTodayCommuteAndFillUp } from '@/lib/seedToday';
 import { notify } from '@/lib/notify';
 import { getPlaces, getMaintenances, getTrips, reconcileTrackedKmFromTrips } from '@/lib/database';
-import { fuelRemainingTone, fuelToneColor } from '@/lib/fuelLevel';
+import { fuelRemainingTone, fuelToneColor, setFuelLiters } from '@/lib/fuelLevel';
+import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
 import type { ConsumptionStats, Place, SinceLastFillStats, Trip, VehicleMaintenance } from '@/types';
 import { MAINTENANCE_KIND_LABELS, maintenanceIsUrgent } from '@/lib/vehicleMaintenance';
 import { formatDateSlash, toLocalYmd } from '@/lib/dates';
@@ -45,6 +46,11 @@ export default function HomeScreen() {
   const [places, setPlaces] = useState<Place[]>([]);
   const [dueMaintenances, setDueMaintenances] = useState<VehicleMaintenance[]>([]);
   const [todayTrips, setTodayTrips] = useState<Trip[]>([]);
+  const [homeFuelDraft, setHomeFuelDraft] = useState<number | null>(null);
+
+  useEffect(() => {
+    setHomeFuelDraft(activeVehicle?.estimatedFuelLiters ?? null);
+  }, [activeVehicle?.id, activeVehicle?.estimatedFuelLiters]);
 
   const reloadStats = async (vehicleId: number) => {
     const [s, since, trips] = await Promise.all([
@@ -551,39 +557,25 @@ export default function HomeScreen() {
             {activeVehicle && (
               <Card style={{ marginBottom: 16 }}>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Carburant réservoir</Text>
-                {activeVehicle.estimatedFuelLiters == null ? (
-                  <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
-                    Niveau inconnu — saisissez un plein pour initialiser la jauge.
-                  </Text>
-                ) : (
-                  <>
-                    <Text
-                      style={{
-                        color: fuelColor,
-                        fontWeight: '800',
-                        fontSize: 22,
-                        marginBottom: 6,
-                      }}
-                    >
-                      {activeVehicle.estimatedFuelLiters.toFixed(1)} L restants
-                    </Text>
-                    <ProgressBar
-                      percent={
-                        activeVehicle.tankCapacity > 0
-                          ? (activeVehicle.estimatedFuelLiters / activeVehicle.tankCapacity) * 100
-                          : 0
-                      }
-                      color={fuelColor}
-                      height={12}
-                    />
-                    <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 8 }}>
-                      Sur {activeVehicle.tankCapacity} L
-                      {sinceFill && sinceFill.rangeKm > 0
-                        ? ` · ~${formatDistance(sinceFill.rangeKm)} d’autonomie`
-                        : ''}
-                    </Text>
-                  </>
-                )}
+                <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 10 }}>
+                  Glissez pour indiquer ce que vous voyez sur la jauge
+                  {sinceFill && sinceFill.rangeKm > 0
+                    ? ` · ~${formatDistance(sinceFill.rangeKm)} d’autonomie`
+                    : ''}
+                  .
+                </Text>
+                <FuelGaugeSlider
+                  tankCapacity={activeVehicle.tankCapacity}
+                  liters={homeFuelDraft}
+                  accentColor={fuelColor}
+                  onChange={setHomeFuelDraft}
+                  onChangeEnd={async (L) => {
+                    setHomeFuelDraft(L);
+                    await setFuelLiters(activeVehicle, L);
+                    await refresh();
+                    notify('Réservoir', `${L.toFixed(1)} L`);
+                  }}
+                />
               </Card>
             )}
 

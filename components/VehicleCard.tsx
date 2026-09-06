@@ -1,12 +1,17 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
 import type { Vehicle } from '@/types';
 import { displayOdometerKm, formatConsumption } from '@/lib/calculations';
-import { fuelLevelLabel, fuelLevelPercent, fuelRemainingTone, fuelToneColor, setFuelFraction } from '@/lib/fuelLevel';
-import { ProgressBar } from '@/components/Card';
+import {
+  fuelLevelLabel,
+  fuelRemainingTone,
+  fuelToneColor,
+  setFuelLiters,
+} from '@/lib/fuelLevel';
+import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
 import { notify } from '@/lib/notify';
 
 interface VehicleCardProps {
@@ -22,14 +27,6 @@ interface VehicleCardProps {
   onFuelUpdated?: () => void;
 }
 
-const FUEL_PRESETS = [
-  { f: 0.125, label: '~1/8' },
-  { f: 0.25, label: '1/4' },
-  { f: 0.5, label: '1/2' },
-  { f: 0.75, label: '3/4' },
-  { f: 1, label: 'Plein' },
-] as const;
-
 export function VehicleCard({
   vehicle,
   isActive,
@@ -43,17 +40,23 @@ export function VehicleCard({
 }: VehicleCardProps) {
   const { colors } = useTheme();
   const odo = displayOdometerKm(vehicle);
-  const fuelPct = fuelLevelPercent(vehicle);
   const fuelTone = fuelRemainingTone({
     litersRemaining: vehicle.estimatedFuelLiters,
     tankCapacity: vehicle.tankCapacity,
     lowLitersThreshold: vehicle.lowFuelThresholdLiters,
   });
   const fuelColor = fuelToneColor(fuelTone, colors);
+  const [draftLiters, setDraftLiters] = useState<number | null>(vehicle.estimatedFuelLiters);
 
-  const setFuel = async (fraction: number, label: string) => {
-    const next = await setFuelFraction(vehicle, fraction);
-    notify('Réservoir', `${vehicle.name} · ${label} (~${next.toFixed(0)} L)`);
+  // Sync si le véhicule change ailleurs
+  React.useEffect(() => {
+    setDraftLiters(vehicle.estimatedFuelLiters);
+  }, [vehicle.id, vehicle.estimatedFuelLiters]);
+
+  const commitFuel = async (liters: number) => {
+    const next = await setFuelLiters(vehicle, liters);
+    setDraftLiters(next);
+    notify('Réservoir', `${vehicle.name} · ${next.toFixed(1)} L`);
     onFuelUpdated?.();
   };
 
@@ -104,47 +107,22 @@ export function VehicleCard({
         </View>
       </View>
 
-      <View style={styles.fuelBlock}>
-        <View style={styles.fuelHeader}>
-          <Text style={{ color: fuelColor, fontWeight: '700', fontSize: 13 }}>
-            Réservoir · {fuelLevelLabel(vehicle)}
-          </Text>
-          <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
-            {vehicle.tankCapacity} L
-          </Text>
-        </View>
-        <ProgressBar
-          percent={fuelPct}
-          color={fuelColor}
-          height={10}
-        />
-        <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 6 }}>
-          Jauge approx. (ce que vous voyez sur le tableau de bord)
+      <View
+        style={styles.fuelBlock}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+      >
+        <Text style={{ color: fuelColor, fontWeight: '700', fontSize: 13, marginBottom: 6 }}>
+          Réservoir · {fuelLevelLabel({ ...vehicle, estimatedFuelLiters: draftLiters })}
         </Text>
-        <View style={styles.fuelChips}>
-          {FUEL_PRESETS.map((opt) => (
-            <Pressable
-              key={opt.label}
-              onPress={(e) => {
-                e.stopPropagation?.();
-                void setFuel(opt.f, opt.label);
-              }}
-              style={[
-                styles.fuelChip,
-                {
-                  borderColor: colors.border,
-                  backgroundColor:
-                    vehicle.estimatedFuelLiters != null &&
-                    Math.abs(fuelPct / 100 - opt.f) < 0.08
-                      ? colors.accent + '22'
-                      : colors.background,
-                },
-              ]}
-            >
-              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 12 }}>{opt.label}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <FuelGaugeSlider
+          compact
+          tankCapacity={vehicle.tankCapacity}
+          liters={draftLiters}
+          accentColor={fuelColor}
+          onChange={setDraftLiters}
+          onChangeEnd={(L) => void commitFuel(L)}
+        />
         {(vehicle.currentOdometer > 0 || (vehicle.trackedKm ?? 0) > 0) && (
           <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
             Compteur {odo.toLocaleString('fr-FR')} km · base{' '}
@@ -249,24 +227,6 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 14, fontWeight: '600' },
   statLabel: { fontSize: 11, marginTop: 2 },
   fuelBlock: { marginTop: 14 },
-  fuelHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  fuelChips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 8,
-  },
-  fuelChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
   actions: {
     flexDirection: 'row',
     flexWrap: 'wrap',

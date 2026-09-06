@@ -19,7 +19,8 @@ import { getConsumptionStats } from '@/lib/calculations';
 import { confirm, notify } from '@/lib/notify';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
 import { searchVehicles, type VehiclePreset } from '@/constants/vehicles';
-import { fuelLevelLabel, setFuelFraction } from '@/lib/fuelLevel';
+import { setFuelLiters } from '@/lib/fuelLevel';
+import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
 import { refreshVehicleReminders } from '@/lib/reminders';
 import type { FuelType, Vehicle } from '@/types';
 
@@ -361,47 +362,35 @@ export default function EditVehicleScreen() {
 
       <Text style={[styles.sectionTitle, { color: colors.text }]}>Niveau carburant estimé</Text>
       <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 8, lineHeight: 18 }}>
-        Utile si vous roulez avec plusieurs voitures sans connaître le niveau exact. Après un plein
-        sur une voiture, basculez sur l’autre et indiquez un niveau approximatif.
+        Réglez la jauge comme sur le tableau de bord (glisser la barre). Utile avec plusieurs
+        voitures.
       </Text>
-      <Text style={{ color: colors.text, fontWeight: '600', marginBottom: 8 }}>
-        {vehicle ? fuelLevelLabel(vehicle) : '—'}
-      </Text>
-      <View style={styles.fuelTypes}>
-        {[
-          { f: 0, label: 'Vide' },
-          { f: 0.25, label: '1/4' },
-          { f: 0.5, label: '1/2' },
-          { f: 0.75, label: '3/4' },
-          { f: 1, label: 'Plein' },
-        ].map((opt) => (
-          <Pressable
-            key={opt.label}
-            onPress={async () => {
-              if (!vehicle) return;
-              const next = await setFuelFraction(vehicle, opt.f);
+      {vehicle && (
+        <View style={{ marginBottom: 12 }}>
+          <FuelGaugeSlider
+            tankCapacity={vehicle.tankCapacity}
+            liters={vehicle.estimatedFuelLiters}
+            onChange={(L) => setVehicle({ ...vehicle, estimatedFuelLiters: L })}
+            onChangeEnd={async (L) => {
+              const next = await setFuelLiters(vehicle, L);
               setVehicle({ ...vehicle, estimatedFuelLiters: next });
-              notify('Niveau', `${opt.label} (~${next} L)`);
+              notify('Niveau', `${next.toFixed(1)} L`);
             }}
-            style={[styles.fuelChip, { backgroundColor: colors.card, borderColor: colors.border }]}
+          />
+          <Pressable
+            onPress={async () => {
+              await updateVehicle(vehicle.id, { estimatedFuelLiters: null });
+              setVehicle({ ...vehicle, estimatedFuelLiters: null });
+              notify('Niveau', 'Marqué inconnu');
+            }}
+            style={{ marginTop: 10 }}
           >
-            <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{opt.label}</Text>
+            <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 13 }}>
+              Marquer comme inconnu
+            </Text>
           </Pressable>
-        ))}
-        <Pressable
-          onPress={async () => {
-            if (!vehicle) return;
-            await updateVehicle(vehicle.id, { estimatedFuelLiters: null });
-            setVehicle({ ...vehicle, estimatedFuelLiters: null });
-            notify('Niveau', 'Marqué inconnu');
-          }}
-          style={[styles.fuelChip, { backgroundColor: colors.card, borderColor: colors.border }]}
-        >
-          <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 13 }}>
-            Inconnu
-          </Text>
-        </Pressable>
-      </View>
+        </View>
+      )}
 
       <Button title="Enregistrer les modifications" onPress={handleSave} loading={loading} />
       <Button
