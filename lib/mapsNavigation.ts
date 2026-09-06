@@ -1,6 +1,6 @@
 /**
  * Lance Google Maps en navigation guidée.
- * Android : si waypoints (via Châteaugiron) → classique saddr/daddr d’abord,
+ * Android : si waypoints (itinéraire alternatif / éco) → classique saddr/daddr d’abord,
  * sinon google.navigation: (fiable Blackview).
  */
 import { Linking, Platform } from 'react-native';
@@ -71,7 +71,7 @@ export async function launchGoogleMapsNavigation(opts: {
   const hasVia = wps.length > 0;
 
   if (Platform.OS === 'android') {
-    // Avec via (éco / Châteaugiron) : ouvrir l’itinéraire guidé avec passages
+    // Avec via (éco / alternatif) : ouvrir l’itinéraire guidé avec passages
     // avant le schéma navigation simple (qui ignore les waypoints).
     if (hasVia) {
       const origin = opts.origin ? fmt(opts.origin) : 'Current+Location';

@@ -1,5 +1,6 @@
 /**
- * Itinéraires routiers OSRM + alternatives (rapide / éco / via).
+ * Itinéraires routiers OSRM + alternatives génériques (rapide / éco / autres).
+ * Style Google Maps : 1 à N propositions selon ce que le réseau offre — jamais de via local hardcodé.
  */
 import { haversineDistance } from '@/lib/calculations';
 import { forwardGeocode } from '@/lib/geocode';
@@ -25,6 +26,13 @@ export type RoadDistanceResult = {
   source: 'osrm' | 'estimate';
 };
 
+type RawRoute = {
+  distanceKm: number;
+  durationMinutes: number | null;
+  coordinates: Geo[];
+  via?: Geo[];
+};
+
 function toCoords(geometry?: { coordinates?: [number, number][] }): Geo[] {
   return (geometry?.coordinates || []).map(([lon, lat]) => ({
     latitude: lat,
@@ -32,21 +40,14 @@ function toCoords(geometry?: { coordinates?: [number, number][] }): Geo[] {
   }));
 }
 
-async function osrmRoute(
-  points: Geo[],
-  alternatives: boolean
-): Promise<
-  Array<{
-    distanceKm: number;
-    durationMinutes: number | null;
-    coordinates: Geo[];
-  }>
-> {
+async function osrmRoute(points: Geo[], maxAlternatives: number): Promise<RawRoute[]> {
   if (points.length < 2) return [];
   const path = points.map((p) => `${p.longitude},${p.latitude}`).join(';');
+  const alt =
+    maxAlternatives <= 0 ? 'false' : String(Math.max(1, Math.min(3, maxAlternatives)));
   const url =
     `https://router.project-osrm.org/route/v1/driving/${path}` +
-    `?overview=full&geometries=geojson&alternatives=${alternatives ? 'true' : 'false'}`;
+    `?overview=full&geometries=geojson&alternatives=${alt}&steps=false`;
   const res = await fetch(url, {
     headers: { Accept: 'application/json', 'User-Agent': 'GasoilTracking/1.4' },
   });
@@ -69,16 +70,66 @@ async function osrmRoute(
     }));
 }
 
-/** Via typiques Ille-et-Vilaine (domicile Rennes Est ↔ Guerche). */
+/**
+ * Via historique perso (réparation trajets domicile↔travail) — PAS utilisé pour le picker public.
+ */
 export const VIA_CHATEAUGIRON: Geo = { latitude: 48.04867, longitude: -1.50282 };
-export const VIA_VITRE_SUD: Geo = { latitude: 48.05, longitude: -1.25 };
 
 function routeFingerprint(r: { distanceKm: number; durationMinutes: number | null }): string {
   return `${r.distanceKm.toFixed(1)}:${r.durationMinutes ?? 0}`;
 }
 
+function isSameish(a: RawRoute, b: RawRoute): boolean {
+  if (routeFingerprint(a) === routeFingerprint(b)) return true;
+  return (
+    Math.abs(a.distanceKm - b.distanceKm) < 1.2 &&
+    Math.abs((a.durationMinutes ?? 0) - (b.durationMinutes ?? 0)) < 3
+  );
+}
+
+/** Points de passage génériques : décalage perpendiculaire au corridor A→B. */
+function corridorOffsetVias(from: Geo, to: Geo): Geo[] {
+  const bird = haversineDistance(from.latitude, from.longitude, to.latitude, to.longitude);
+  if (bird < 10) return [];
+  const dLat = to.latitude - from.latitude;
+  const dLon = to.longitude - from.longitude;
+  const len = Math.sqrt(dLat * dLat + dLon * dLon) || 1;
+  const pLat = -dLon / len;
+  const pLon = dLat / len;
+  // ~3–12 km de décalage selon la longueur du trajet
+  const offsetDeg = Math.min(0.11, Math.max(0.028, bird * 0.0018));
+  const out: Geo[] = [];
+  for (const t of [0.4, 0.55]) {
+    for (const sign of [-1, 1] as const) {
+      out.push({
+        latitude: from.latitude + t * dLat + sign * pLat * offsetDeg,
+        longitude: from.longitude + t * dLon + sign * pLon * offsetDeg,
+      });
+    }
+  }
+  return out;
+}
+
+function midViaFromGeometry(coords: Geo[]): Geo | null {
+  if (coords.length < 8) return null;
+  return coords[Math.floor(coords.length * 0.45)] || null;
+}
+
+function dedupeRoutes(collected: RawRoute[], max = 6): RawRoute[] {
+  const unique: RawRoute[] = [];
+  for (const r of [...collected].sort(
+    (a, b) => (a.durationMinutes ?? 999) - (b.durationMinutes ?? 999)
+  )) {
+    if (unique.some((u) => isSameish(u, r))) continue;
+    unique.push(r);
+    if (unique.length >= max) break;
+  }
+  return unique;
+}
+
 /**
- * Jusqu’à 3 propositions : plus rapide, économique (plus court), alternatif (via / plus long).
+ * Propositions d’itinéraires (1 à 4) : plus rapide, économique, puis alternatives distinctes.
+ * Aucun via géographique hardcodé — uniquement OSRM + corridors génériques si besoin.
  */
 export async function fetchDrivingRouteAlternatives(
   from: Geo,
@@ -86,51 +137,33 @@ export async function fetchDrivingRouteAlternatives(
   opts?: { vias?: Geo[] }
 ): Promise<DrivingRoute[]> {
   const bird = haversineDistance(from.latitude, from.longitude, to.latitude, to.longitude);
-  const collected: Array<{
-    distanceKm: number;
-    durationMinutes: number | null;
-    coordinates: Geo[];
-    via?: Geo[];
-  }> = [];
+  let collected: RawRoute[] = [];
 
   try {
-    const direct = await osrmRoute([from, to], true);
-    for (const r of direct) collected.push(r);
+    const direct = await osrmRoute([from, to], 3);
+    collected.push(...direct);
 
-    const vias = opts?.vias?.length
-      ? opts.vias
-      : bird > 15
-        ? [VIA_CHATEAUGIRON, VIA_VITRE_SUD]
-        : [];
-    for (const via of vias) {
-      const viaRoutes = await osrmRoute([from, via, to], false);
-      for (const r of viaRoutes) {
-        collected.push({ ...r, via: [via] });
+    // Via explicites (caller) uniquement — jamais de villes en dur
+    for (const via of opts?.vias || []) {
+      const viaRoutes = await osrmRoute([from, via, to], 0);
+      for (const r of viaRoutes) collected.push({ ...r, via: [via] });
+    }
+
+    // Si OSRM ne donne qu’1–2 routes, explorer des corridors décalés (générique)
+    if (dedupeRoutes(collected).length < 3 && bird >= 10) {
+      for (const via of corridorOffsetVias(from, to)) {
+        const viaRoutes = await osrmRoute([from, via, to], 0);
+        for (const r of viaRoutes) {
+          collected.push({ ...r, via: [via] });
+        }
+        if (dedupeRoutes(collected).length >= 4) break;
       }
     }
   } catch {
     /* fallback below */
   }
 
-  // Dédupliquer (distance/durée proches)
-  const unique: typeof collected = [];
-  for (const r of collected.sort(
-    (a, b) => (a.durationMinutes ?? 999) - (b.durationMinutes ?? 999)
-  )) {
-    const fp = routeFingerprint(r);
-    if (unique.some((u) => routeFingerprint(u) === fp)) continue;
-    if (
-      unique.some(
-        (u) =>
-          Math.abs(u.distanceKm - r.distanceKm) < 1.2 &&
-          Math.abs((u.durationMinutes ?? 0) - (r.durationMinutes ?? 0)) < 3
-      )
-    ) {
-      continue;
-    }
-    unique.push(r);
-    if (unique.length >= 5) break;
-  }
+  const unique = dedupeRoutes(collected, 6);
 
   if (!unique.length) {
     return [
@@ -150,21 +183,16 @@ export async function fetchDrivingRouteAlternatives(
     (a, b) => (a.durationMinutes ?? 999) - (b.durationMinutes ?? 999)
   );
   const byDist = [...unique].sort((a, b) => a.distanceKm - b.distanceKm);
-  const byLong = [...unique].sort(
-    (a, b) => (b.durationMinutes ?? 0) - (a.durationMinutes ?? 0)
-  );
 
   const pick: DrivingRoute[] = [];
   const used = new Set<string>();
 
-  const add = (
-    r: (typeof unique)[0],
-    kind: DrivingRoute['kind'],
-    label: string
-  ) => {
+  const add = (r: RawRoute, kind: DrivingRoute['kind'], label: string) => {
     const fp = routeFingerprint(r);
-    if (used.has(fp)) return;
+    if (used.has(fp)) return false;
     used.add(fp);
+    const via =
+      r.via?.length ? r.via : midViaFromGeometry(r.coordinates) ? [midViaFromGeometry(r.coordinates)!] : undefined;
     pick.push({
       id: `${kind}-${fp}`,
       label,
@@ -172,43 +200,52 @@ export async function fetchDrivingRouteAlternatives(
       distanceKm: r.distanceKm,
       durationMinutes: r.durationMinutes,
       coordinates: r.coordinates,
-      via: r.via,
+      via: kind === 'fastest' && !r.via?.length ? undefined : via,
       source: 'osrm',
     });
+    return true;
   };
 
-  add(byDist[0], 'eco', 'Économique');
-  add(byTime[0], 'fastest', 'Plus rapide');
-  // Alternatif : via Châteaugiron en priorité, sinon le plus long distinct
-  const viaCg = unique.find(
-    (u) =>
-      u.via?.some(
-        (v) =>
-          Math.abs(v.latitude - VIA_CHATEAUGIRON.latitude) < 0.02 &&
-          Math.abs(v.longitude - VIA_CHATEAUGIRON.longitude) < 0.02
-      )
-  );
-  const viaPref = viaCg || unique.find((u) => u.via?.length);
-  if (viaPref) {
-    add(
-      viaPref,
-      'alternate',
-      viaCg ? 'Via Châteaugiron' : 'Alternatif'
-    );
-  } else if (byLong[0]) add(byLong[0], 'alternate', 'Plus long');
+  const fastest = byTime[0];
+  const eco = byDist[0];
 
-  // Garantir 2–3 options si possible
-  for (const r of unique) {
-    if (pick.length >= 3) break;
-    add(r, 'alternate', 'Autre itinéraire');
+  if (fastest && eco && isSameish(fastest, eco)) {
+    add(fastest, 'fastest', 'Plus rapide');
+  } else {
+    if (eco) add(eco, 'eco', 'Économique');
+    if (fastest) add(fastest, 'fastest', 'Plus rapide');
   }
 
-  // Éco en premier (défaut UX / proche Google Maps)
+  // Alternatives restantes (souvent un 3e trajet plus long / différent)
+  const rest = unique
+    .filter((r) => !used.has(routeFingerprint(r)))
+    .sort((a, b) => {
+      // Préférer ceux bien distincts du plus rapide (écart durée puis distance)
+      const dtA = Math.abs((a.durationMinutes ?? 0) - (fastest?.durationMinutes ?? 0));
+      const dtB = Math.abs((b.durationMinutes ?? 0) - (fastest?.durationMinutes ?? 0));
+      if (dtB !== dtA) return dtB - dtA;
+      return Math.abs(b.distanceKm - (fastest?.distanceKm ?? 0)) - Math.abs(a.distanceKm - (fastest?.distanceKm ?? 0));
+    });
+
+  let altIdx = 0;
+  for (const r of rest) {
+    if (pick.length >= 4) break;
+    altIdx += 1;
+    const dMin = (r.durationMinutes ?? 0) - (fastest?.durationMinutes ?? 0);
+    const label =
+      altIdx === 1
+        ? dMin >= 4
+          ? 'Alternatif'
+          : 'Autre itinéraire'
+        : `Autre ${altIdx}`;
+    add(r, 'alternate', label);
+  }
+
+  // Ordre UX : éco → rapide → alternatives (comme souvent sur Maps)
   return [...pick].sort((a, b) => {
-    const rank = (k: DrivingRoute['kind']) =>
-      k === 'eco' ? 0 : k === 'fastest' ? 1 : 2;
+    const rank = (k: DrivingRoute['kind']) => (k === 'eco' ? 0 : k === 'fastest' ? 1 : 2);
     return rank(a.kind) - rank(b.kind);
-  }).slice(0, 3);
+  });
 }
 
 /**
@@ -226,7 +263,7 @@ export async function fetchDrivingDistanceKm(
   };
 }
 
-/** Itinéraire complet (géométrie) pour affichage carte — 1er = plus rapide. */
+/** Itinéraire complet (géométrie) pour affichage carte — priorise le plus rapide. */
 export async function fetchDrivingRoute(
   from: Geo,
   to: Geo,
@@ -240,7 +277,7 @@ export async function fetchDrivingRoute(
   const vias = opts?.via ? (Array.isArray(opts.via) ? opts.via : [opts.via]) : [];
   if (vias.length) {
     const alts = await fetchDrivingRouteAlternatives(from, to, { vias });
-    const hit = alts.find((a) => a.via?.length) || alts[0];
+    const hit = alts.find((a) => a.via?.length) || alts.find((a) => a.kind === 'fastest') || alts[0];
     if (hit) {
       return {
         distanceKm: hit.distanceKm,
@@ -251,7 +288,7 @@ export async function fetchDrivingRoute(
     }
   }
   const alts = await fetchDrivingRouteAlternatives(from, to);
-  const best = alts[0];
+  const best = alts.find((a) => a.kind === 'fastest') || alts[0];
   if (best) {
     return {
       distanceKm: best.distanceKm,

@@ -478,7 +478,7 @@ export default function TripScreen() {
         setRouteOptions(alts);
         const prefer =
           alts.find((a) => a.kind === 'eco') ||
-          alts.find((a) => a.kind === 'alternate' && /château|chateau/i.test(a.label)) ||
+          alts.find((a) => a.kind === 'fastest') ||
           alts[0];
         if (prefer) applyRouteSelection(prefer);
         else {
@@ -583,7 +583,7 @@ export default function TripScreen() {
             setRouteOptions(alts);
             routeForNav =
               alts.find((a) => a.kind === 'eco') ||
-              alts.find((a) => /château|chateau/i.test(a.label)) ||
+              alts.find((a) => a.kind === 'fastest') ||
               alts[0] ||
               null;
             if (routeForNav) {
