@@ -50,7 +50,7 @@ export default function FillUpDetailScreen() {
   const fillId = Number(id);
   const { colors } = useTheme();
   const { formatPerLiter, countryCode, moneySymbol } = useLocale();
-  const { refresh } = useApp();
+  const { refresh, vehicles } = useApp();
 
   const [fill, setFill] = useState<FillUp | null>(null);
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
@@ -63,6 +63,7 @@ export default function FillUpDetailScreen() {
   const [litersDraft, setLitersDraft] = useState('');
   const [pplDraft, setPplDraft] = useState('');
   const [totalDraft, setTotalDraft] = useState('');
+  const [vehicleIdDraft, setVehicleIdDraft] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [livePriceLoading, setLivePriceLoading] = useState(false);
 
@@ -82,6 +83,7 @@ export default function FillUpDetailScreen() {
     setLitersDraft(String(f.liters));
     setPplDraft(String(f.pricePerLiter));
     setTotalDraft(String(f.totalCost));
+    setVehicleIdDraft(f.vehicleId);
 
     const [v, all] = await Promise.all([getVehicleById(f.vehicleId), getFillUps(f.vehicleId)]);
     setVehicle(v);
@@ -139,6 +141,7 @@ export default function FillUpDetailScreen() {
         liters: Math.round(L * 100) / 100,
         pricePerLiter: Math.round(P * 1000) / 1000,
         totalCost: Math.round(T * 100) / 100,
+        ...(vehicleIdDraft != null ? { vehicleId: vehicleIdDraft } : {}),
       });
       if (vehicle) {
         await reapplyFillUpFuelEstimate(
@@ -328,6 +331,40 @@ export default function FillUpDetailScreen() {
           </View>
           {editing ? (
             <>
+              <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
+                Véhicule
+              </Text>
+              <View style={styles.vehicleRow}>
+                {vehicles.map((v) => {
+                  const active = vehicleIdDraft === v.id;
+                  return (
+                    <Pressable
+                      key={v.id}
+                      onPress={() => setVehicleIdDraft(v.id)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      style={[
+                        styles.vehicleChip,
+                        {
+                          backgroundColor: active ? colors.accent : colors.background,
+                          borderColor: active ? colors.accent : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          color: active ? '#fff' : colors.text,
+                          fontWeight: '700',
+                          fontSize: 12,
+                        }}
+                        numberOfLines={1}
+                      >
+                        {v.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
               <Input
                 label="Litres"
                 value={litersDraft}
@@ -497,6 +534,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
+  },
+  vehicleRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  vehicleChip: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    maxWidth: '100%',
   },
   prevRow: {
     flexDirection: 'row',

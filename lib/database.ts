@@ -617,6 +617,7 @@ export async function updateFillUp(
   patch: Partial<
     Pick<
       FillUp,
+      | 'vehicleId'
       | 'date'
       | 'liters'
       | 'pricePerLiter'
@@ -631,6 +632,10 @@ export async function updateFillUp(
   const database = await getDatabase();
   const fields: string[] = [];
   const values: (string | number | null)[] = [];
+  if (patch.vehicleId !== undefined) {
+    fields.push('vehicle_id = ?');
+    values.push(patch.vehicleId);
+  }
   if (patch.date !== undefined) {
     fields.push('date = ?');
     values.push(patch.date);
@@ -714,7 +719,7 @@ export async function updateBudgetSpent(id: number, spent: number): Promise<void
 
 export async function updateBudget(
   id: number,
-  patch: { amount?: number; name?: string; spent?: number }
+  patch: { amount?: number; name?: string; spent?: number; isActive?: boolean }
 ): Promise<void> {
   const database = await getDatabase();
   const fields: string[] = [];
@@ -731,9 +736,22 @@ export async function updateBudget(
     fields.push('spent = ?');
     values.push(patch.spent);
   }
+  if (patch.isActive !== undefined) {
+    fields.push('is_active = ?');
+    values.push(patch.isActive ? 1 : 0);
+  }
   if (!fields.length) return;
   values.push(id);
   await database.runAsync(`UPDATE budgets SET ${fields.join(', ')} WHERE id = ?`, values);
+}
+
+/** Désactive les budgets mensuels liés à un véhicule (garde l’enveloppe globale). */
+export async function deactivateVehicleScopedBudgets(): Promise<number> {
+  const database = await getDatabase();
+  const result = await database.runAsync(
+    'UPDATE budgets SET is_active = 0 WHERE vehicle_id IS NOT NULL AND is_active = 1'
+  );
+  return result.changes ?? 0;
 }
 
 export async function updateFillUpMoney(

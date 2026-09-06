@@ -240,6 +240,7 @@ export async function updateFillUp(
   patch: Partial<
     Pick<
       FillUp,
+      | 'vehicleId'
       | 'date'
       | 'liters'
       | 'pricePerLiter'
@@ -287,11 +288,26 @@ export async function updateBudgetSpent(id: number, spent: number): Promise<void
 
 export async function updateBudget(
   id: number,
-  patch: { amount?: number; name?: string; spent?: number }
+  patch: { amount?: number; name?: string; spent?: number; isActive?: boolean }
 ): Promise<void> {
   const s = await load();
   s.budgets = s.budgets.map((b) => (b.id === id ? { ...b, ...patch, id } : b));
   await save(s);
+}
+
+/** Désactive les budgets mensuels liés à un véhicule (garde l’enveloppe globale). */
+export async function deactivateVehicleScopedBudgets(): Promise<number> {
+  const s = await load();
+  let n = 0;
+  s.budgets = s.budgets.map((b) => {
+    if (b.vehicleId != null && b.isActive) {
+      n += 1;
+      return { ...b, isActive: false };
+    }
+    return b;
+  });
+  if (n) await save(s);
+  return n;
 }
 
 export async function updateFillUpMoney(

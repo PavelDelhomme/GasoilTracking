@@ -13,6 +13,7 @@ import {
   getBudgets,
   getMaintenances,
   createBudget,
+  updateBudget,
   updateBudgetSpent,
   updateVehicle,
   getVehicleById,
@@ -392,19 +393,19 @@ export async function refreshAllBudgets(): Promise<BudgetStatus[]> {
   return statuses;
 }
 
-const DEFAULT_GLOBAL_BUDGET = 250;
+/** Enveloppe mensuelle unique (tous véhicules cumulés). */
+export const DEFAULT_GLOBAL_BUDGET = 250;
 
 /**
- * Crée les enveloppes par défaut si absentes :
- * - une enveloppe globale mensuelle (250 € par défaut)
- * - une enveloppe par véhicule (nom dynamique)
+ * Crée l’enveloppe globale mensuelle si absente (250 € max, 806 + Touran + 206 cumulés).
+ * Ne crée plus de budgets par véhicule automatiquement (évite le double compteur).
  */
-export async function ensureDefaultBudgets(vehicles: Vehicle[]): Promise<void> {
+export async function ensureDefaultBudgets(_vehicles: Vehicle[]): Promise<void> {
   const all = await getBudgets();
   const { startDate, endDate } = getBudgetPeriodDates('monthly');
 
-  const hasGlobal = all.some((b) => b.vehicleId == null && b.period === 'monthly' && b.isActive);
-  if (!hasGlobal) {
+  const global = all.find((b) => b.vehicleId == null && b.period === 'monthly' && b.isActive);
+  if (!global) {
     await createBudget({
       vehicleId: null,
       name: 'Carburant total',
@@ -414,23 +415,13 @@ export async function ensureDefaultBudgets(vehicles: Vehicle[]): Promise<void> {
       endDate,
       isActive: true,
     });
+    return;
   }
-
-  for (const v of vehicles) {
-    const hasVehicleBudget = all.some(
-      (b) => b.vehicleId === v.id && b.period === 'monthly' && b.isActive
-    );
-    if (!hasVehicleBudget) {
-      await createBudget({
-        vehicleId: v.id,
-        name: `Carburant ${v.name}`,
-        amount: DEFAULT_GLOBAL_BUDGET,
-        period: 'monthly',
-        startDate,
-        endDate,
-        isActive: true,
-      });
-    }
+  if (global.amount !== DEFAULT_GLOBAL_BUDGET || global.name !== 'Carburant total') {
+    await updateBudget(global.id, {
+      amount: DEFAULT_GLOBAL_BUDGET,
+      name: 'Carburant total',
+    });
   }
 }
 

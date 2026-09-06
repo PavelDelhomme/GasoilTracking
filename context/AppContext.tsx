@@ -16,6 +16,7 @@ import { reverseGeocode } from '@/lib/geocode';
 import { applyTripFuelBurn } from '@/lib/fuelLevel';
 import { refreshVehicleReminders } from '@/lib/reminders';
 import { repairTripHistory } from '@/lib/repairTripHistory';
+import { repairFillUpVehiclesAndBudgets } from '@/lib/repairFillUpVehicles';
 
 interface AppContextType {
   activeVehicle: Vehicle | null;
@@ -37,6 +38,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   /** Évite repairTripHistory à chaque poll 90s — seulement au boot / changement véhicule. */
   const repairedForVehicle = useRef<number | 'none' | null>(null);
+  const fillBudgetRepaired = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -48,6 +50,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setVehicles(vehicleList);
       setActiveVehicleState(active);
       setActiveTrip(trip);
+
+      if (!fillBudgetRepaired.current) {
+        try {
+          await repairFillUpVehiclesAndBudgets();
+          fillBudgetRepaired.current = true;
+        } catch (e) {
+          console.warn('repairFillUpVehiclesAndBudgets', e);
+        }
+      }
 
       const repairKey = active?.id ?? 'none';
       if (repairedForVehicle.current !== repairKey) {
