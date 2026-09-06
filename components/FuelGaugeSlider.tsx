@@ -29,7 +29,7 @@ type Props = {
   onChangeEnd?: (liters: number) => void;
   accentColor?: string;
   disabled?: boolean;
-  /** Compact pour carte véhicule */
+  /** Compact / bas de carte véhicule / accueil */
   compact?: boolean;
 };
 
@@ -48,6 +48,10 @@ export function FuelGaugeSlider({
   const known = liters != null && Number.isFinite(liters);
   const valueL = known ? Math.max(0, Math.min(capacity, liters!)) : capacity * 0.5;
   const fraction = valueL / capacity;
+
+  const trackH = compact ? 18 : 36;
+  const thumb = compact ? 16 : 22;
+  const radius = compact ? 9 : 14;
 
   const [trackW, setTrackW] = useState(0);
   const trackWRef = useRef(0);
@@ -94,20 +98,20 @@ export function FuelGaugeSlider({
     setTrackW(w);
   };
 
-  const thumbLeft = Math.max(0, Math.min(trackW - 22, fraction * trackW - 11));
+  const thumbLeft = Math.max(0, Math.min(trackW - thumb, fraction * trackW - thumb / 2));
 
   return (
     <View style={styles.wrap} pointerEvents={disabled ? 'none' : 'auto'}>
-      <View style={styles.valueRow}>
+      <View style={[styles.valueRow, compact && { marginBottom: 4 }]}>
         <Text
           style={[
             styles.valueMain,
-            { color: colors.text, fontSize: compact ? 18 : 22 },
+            { color: colors.text, fontSize: compact ? 14 : 22 },
           ]}
         >
-          {known ? `${valueL.toFixed(1)} L` : 'Régler la jauge…'}
+          {known ? `${valueL.toFixed(1)} L` : 'Régler…'}
         </Text>
-        <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+        <Text style={{ color: colors.textSecondary, fontSize: compact ? 11 : 12 }}>
           / {capacity.toFixed(0)} L
         </Text>
       </View>
@@ -117,7 +121,8 @@ export function FuelGaugeSlider({
           styles.track,
           {
             backgroundColor: colors.border,
-            height: compact ? 28 : 36,
+            height: trackH,
+            borderRadius: radius,
             opacity: disabled ? 0.5 : 1,
           },
         ]}
@@ -130,10 +135,10 @@ export function FuelGaugeSlider({
             {
               width: `${Math.round(fraction * 1000) / 10}%`,
               backgroundColor: fillColor,
+              borderRadius: radius,
             },
           ]}
         />
-        {/* Graduations */}
         {MARKS.map((m) => (
           <View
             key={m.label}
@@ -142,6 +147,8 @@ export function FuelGaugeSlider({
               styles.tick,
               {
                 left: `${m.f * 100}%`,
+                top: compact ? 3 : 4,
+                bottom: compact ? 3 : 4,
                 backgroundColor: colors.background,
                 opacity: m.f === 0 || m.f === 1 ? 0 : 0.55,
               },
@@ -155,6 +162,10 @@ export function FuelGaugeSlider({
               styles.thumb,
               {
                 left: thumbLeft,
+                width: thumb,
+                height: thumb,
+                borderRadius: thumb / 2,
+                marginTop: -thumb / 2,
                 borderColor: '#fff',
                 backgroundColor: fillColor,
                 shadowColor: '#000',
@@ -164,7 +175,7 @@ export function FuelGaugeSlider({
         )}
       </View>
 
-      <View style={styles.marks}>
+      <View style={[styles.marks, compact && { marginTop: 4 }]}>
         {MARKS.map((m) => (
           <Pressable
             key={m.label}
@@ -174,7 +185,7 @@ export function FuelGaugeSlider({
               onChange(next);
               onChangeEnd?.(next);
             }}
-            hitSlop={6}
+            hitSlop={compact ? 4 : 6}
             style={styles.markBtn}
           >
             <Text
@@ -182,7 +193,7 @@ export function FuelGaugeSlider({
                 color:
                   Math.abs(fraction - m.f) < 0.06 ? fillColor : colors.textSecondary,
                 fontWeight: Math.abs(fraction - m.f) < 0.06 ? '800' : '600',
-                fontSize: compact ? 10 : 11,
+                fontSize: compact ? 9 : 11,
               }}
             >
               {m.label}
@@ -191,9 +202,11 @@ export function FuelGaugeSlider({
         ))}
       </View>
 
-      <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }}>
-        Glissez la barre ou touchez Vide → Plein
-      </Text>
+      {!compact && (
+        <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }}>
+          Glissez la barre ou touchez Vide → Plein
+        </Text>
+      )}
     </View>
   );
 }
@@ -209,7 +222,6 @@ const styles = StyleSheet.create({
   valueMain: { fontWeight: '800' },
   track: {
     width: '100%',
-    borderRadius: 14,
     overflow: 'hidden',
     position: 'relative',
     justifyContent: 'center',
@@ -219,24 +231,17 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
     bottom: 0,
-    borderRadius: 14,
   },
   tick: {
     position: 'absolute',
-    top: 4,
-    bottom: 4,
     width: 2,
     marginLeft: -1,
     borderRadius: 1,
   },
   thumb: {
     position: 'absolute',
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2.5,
+    borderWidth: 2,
     top: '50%',
-    marginTop: -11,
     elevation: 3,
     shadowOpacity: 0.25,
     shadowRadius: 3,
@@ -247,5 +252,5 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 8,
   },
-  markBtn: { paddingVertical: 2, paddingHorizontal: 2 },
+  markBtn: { paddingVertical: 1, paddingHorizontal: 1 },
 });

@@ -5,12 +5,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
 import type { Vehicle } from '@/types';
 import { displayOdometerKm, formatConsumption } from '@/lib/calculations';
-import {
-  fuelLevelLabel,
-  fuelRemainingTone,
-  fuelToneColor,
-  setFuelLiters,
-} from '@/lib/fuelLevel';
+import { fuelRemainingTone, fuelToneColor, setFuelLiters } from '@/lib/fuelLevel';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
 import { notify } from '@/lib/notify';
 
@@ -112,9 +107,6 @@ export function VehicleCard({
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => true}
       >
-        <Text style={{ color: fuelColor, fontWeight: '700', fontSize: 13, marginBottom: 6 }}>
-          Réservoir · {fuelLevelLabel({ ...vehicle, estimatedFuelLiters: draftLiters })}
-        </Text>
         <FuelGaugeSlider
           compact
           tankCapacity={vehicle.tankCapacity}
@@ -123,13 +115,6 @@ export function VehicleCard({
           onChange={setDraftLiters}
           onChangeEnd={(L) => void commitFuel(L)}
         />
-        {(vehicle.currentOdometer > 0 || (vehicle.trackedKm ?? 0) > 0) && (
-          <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
-            Compteur {odo.toLocaleString('fr-FR')} km · base{' '}
-            {(vehicle.currentOdometer || 0).toLocaleString('fr-FR')} +{' '}
-            {(vehicle.trackedKm || 0).toFixed(0)} km de trajets
-          </Text>
-        )}
       </View>
 
       <View style={styles.actions}>

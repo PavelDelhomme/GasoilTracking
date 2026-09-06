@@ -268,10 +268,25 @@ export default function HomeScreen() {
               <Text style={[styles.odometer, { color: colors.text }]}>
                 {displayOdometerKm(activeVehicle).toLocaleString(locale)} km
               </Text>
-              <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-                Base {(activeVehicle.currentOdometer || 0).toLocaleString(locale)} +{' '}
-                {Math.round(activeVehicle.trackedKm || 0).toLocaleString(locale)} km de trajets
-              </Text>
+              <View
+                style={{ marginTop: 10 }}
+                onStartShouldSetResponder={() => true}
+                onMoveShouldSetResponder={() => true}
+              >
+                <FuelGaugeSlider
+                  compact
+                  tankCapacity={activeVehicle.tankCapacity}
+                  liters={homeFuelDraft}
+                  accentColor={fuelColor}
+                  onChange={setHomeFuelDraft}
+                  onChangeEnd={async (L) => {
+                    setHomeFuelDraft(L);
+                    await setFuelLiters(activeVehicle, L);
+                    await refresh();
+                    notify('Réservoir', `${L.toFixed(1)} L`);
+                  }}
+                />
+              </View>
               {vehicles.length > 1 && (
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
                   {vehicles.map((v) => {
@@ -551,31 +566,6 @@ export default function HomeScreen() {
                     </Pressable>
                   );
                 })}
-              </Card>
-            )}
-
-            {activeVehicle && (
-              <Card style={{ marginBottom: 16 }}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Carburant réservoir</Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 10 }}>
-                  Glissez pour indiquer ce que vous voyez sur la jauge
-                  {sinceFill && sinceFill.rangeKm > 0
-                    ? ` · ~${formatDistance(sinceFill.rangeKm)} d’autonomie`
-                    : ''}
-                  .
-                </Text>
-                <FuelGaugeSlider
-                  tankCapacity={activeVehicle.tankCapacity}
-                  liters={homeFuelDraft}
-                  accentColor={fuelColor}
-                  onChange={setHomeFuelDraft}
-                  onChangeEnd={async (L) => {
-                    setHomeFuelDraft(L);
-                    await setFuelLiters(activeVehicle, L);
-                    await refresh();
-                    notify('Réservoir', `${L.toFixed(1)} L`);
-                  }}
-                />
               </Card>
             )}
 
