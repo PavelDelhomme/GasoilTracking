@@ -74,6 +74,9 @@ jobs:
       - name: Build Android APK (EAS local, sans quota cloud)
         env:
           EAS_BUILD_NO_EXPO_GO_WARNING: 'true'
+          # eas --local n’exporte pas toujours EAS_BUILD au prebuild/gradle
+          EAS_BUILD: 'true'
+          CI: 'true'
         run: |
           eas build --platform android --profile production \
             --non-interactive --local --output /tmp/gasoil.apk

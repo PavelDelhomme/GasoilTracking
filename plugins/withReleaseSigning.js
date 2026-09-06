@@ -1,23 +1,29 @@
 /**
- * Force le signing release via credentials/keystore.properties (keystore EAS).
- * Empêche de republier un APK signé debug (incompatible avec les installs EAS existantes).
+ * Signing release via credentials/keystore.properties (builds gradle locaux).
+ * Sur EAS (cloud ou --local / CI), EAS injecte le keystore : on n’y touche pas.
  */
 const { withAppBuildGradle } = require('@expo/config-plugins');
 
 const MARKER_START = '// gasoil-release-signing-start';
 const MARKER_END = '// gasoil-release-signing-end';
 
+function isEasOrCiBuild() {
+  return (
+    process.env.EAS_BUILD === 'true' ||
+    process.env.CI === 'true' ||
+    Boolean(process.env.EAS_BUILD_PROFILE) ||
+    Boolean(process.env.EAS_BUILD_RUNNER)
+  );
+}
+
 function withReleaseSigning(config) {
   return withAppBuildGradle(config, (cfg) => {
-    // EAS (cloud ou --local) injecte le keystore après prebuild.
-    // Ne pas exiger credentials/keystore.properties dans ce cas.
-    if (process.env.EAS_BUILD === 'true') {
+    if (isEasOrCiBuild()) {
       return cfg;
     }
 
     let contents = cfg.modResults.contents;
 
-    // Retirer un éventuel bloc déjà injecté
     contents = contents.replace(
       new RegExp(`${MARKER_START}[\\s\\S]*?${MARKER_END}\\n?`, 'g'),
       ''
@@ -25,17 +31,14 @@ function withReleaseSigning(config) {
 
     const propsBlock = `${MARKER_START}
     def gasoilKeystorePropsFile = rootProject.file("../credentials/keystore.properties")
-    if (!gasoilKeystorePropsFile.exists() && System.getenv("EAS_BUILD") != "true") {
-        throw new GradleException("credentials/keystore.properties manquant — refuse debug signing")
-    }
+    def gasoilHasLocalKeystore = gasoilKeystorePropsFile.exists()
     def gasoilKeystoreProps = new Properties()
-    if (gasoilKeystorePropsFile.exists()) {
+    if (gasoilHasLocalKeystore) {
         gasoilKeystoreProps.load(new FileInputStream(gasoilKeystorePropsFile))
     }
     ${MARKER_END}
 `;
 
-    // Injecter les props avant signingConfigs
     if (!contents.includes('gasoilKeystorePropsFile')) {
       contents = contents.replace(
         /(\n\s*)signingConfigs\s*\{/,
@@ -43,31 +46,31 @@ function withReleaseSigning(config) {
       );
     }
 
-    // Ajouter signingConfigs.release si absent
     if (!contents.includes("keyAlias gasoilKeystoreProps['keyAlias']")) {
       contents = contents.replace(
         /signingConfigs\s*\{\s*debug\s*\{[\s\S]*?\n\s*\}/,
         (match) =>
           `${match}
         release {
-            storeFile rootProject.file("../credentials/" + gasoilKeystoreProps['storeFile'])
-            storePassword gasoilKeystoreProps['storePassword']
-            keyAlias gasoilKeystoreProps['keyAlias']
-            keyPassword gasoilKeystoreProps['keyPassword']
+            if (gasoilHasLocalKeystore) {
+                storeFile rootProject.file("../credentials/" + gasoilKeystoreProps['storeFile'])
+                storePassword gasoilKeystoreProps['storePassword']
+                keyAlias gasoilKeystoreProps['keyAlias']
+                keyPassword gasoilKeystoreProps['keyPassword']
+            }
         }`
       );
     }
 
-    // release doit utiliser signingConfigs.release (jamais debug)
     contents = contents.replace(
       /release\s*\{[\s\S]*?signingConfig\s+signingConfigs\.debug/,
-      (match) => match.replace(
-        'signingConfig signingConfigs.debug',
-        'signingConfig signingConfigs.release'
-      )
+      (match) =>
+        match.replace(
+          'signingConfig signingConfigs.debug',
+          'signingConfig signingConfigs.release'
+        )
     );
 
-    // Si release n'a plus de signingConfig (commentaire), forcer release
     if (
       /release\s*\{/.test(contents) &&
       !/release\s*\{[\s\S]*?signingConfig\s+signingConfigs\.release/.test(contents)
