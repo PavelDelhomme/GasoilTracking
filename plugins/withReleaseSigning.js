@@ -9,6 +9,12 @@ const MARKER_END = '// gasoil-release-signing-end';
 
 function withReleaseSigning(config) {
   return withAppBuildGradle(config, (cfg) => {
+    // EAS (cloud ou --local) injecte le keystore après prebuild.
+    // Ne pas exiger credentials/keystore.properties dans ce cas.
+    if (process.env.EAS_BUILD === 'true') {
+      return cfg;
+    }
+
     let contents = cfg.modResults.contents;
 
     // Retirer un éventuel bloc déjà injecté
@@ -19,11 +25,13 @@ function withReleaseSigning(config) {
 
     const propsBlock = `${MARKER_START}
     def gasoilKeystorePropsFile = rootProject.file("../credentials/keystore.properties")
-    if (!gasoilKeystorePropsFile.exists()) {
+    if (!gasoilKeystorePropsFile.exists() && System.getenv("EAS_BUILD") != "true") {
         throw new GradleException("credentials/keystore.properties manquant — refuse debug signing")
     }
     def gasoilKeystoreProps = new Properties()
-    gasoilKeystoreProps.load(new FileInputStream(gasoilKeystorePropsFile))
+    if (gasoilKeystorePropsFile.exists()) {
+        gasoilKeystoreProps.load(new FileInputStream(gasoilKeystorePropsFile))
+    }
     ${MARKER_END}
 `;
 
