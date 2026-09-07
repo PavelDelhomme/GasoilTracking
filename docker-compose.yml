@@ -7,7 +7,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: gasoil-tracking-web:1.4.57
+    image: gasoil-tracking-web:1.4.58
     container_name: gasoil-tracking-web
     restart: unless-stopped
     expose:
@@ -21,13 +21,13 @@ services:
     labels:
       - "com.gasoiltracking.project=gasoil-tracking"
       - "com.gasoiltracking.service=web"
-      - "com.gasoiltracking.version=1.4.57"
+      - "com.gasoiltracking.version=1.4.58"
 
   api:
     build:
       context: ./api
       dockerfile: Dockerfile
-    image: gasoil-tracking-api:1.4.57
+    image: gasoil-tracking-api:1.4.58
     container_name: gasoil-tracking-api
     restart: unless-stopped
     expose:

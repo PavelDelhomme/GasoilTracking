@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gasoil — Connexion apps labo</title>
+  <style>
+    :root { color-scheme: light; --accent:#c73a52; --bg:#f8fafc; --text:#0f172a; }
+    body { font-family: system-ui, sans-serif; margin: 0; background: linear-gradient(160deg,#fff,#f1f5f9); color: var(--text); }
+    main { max-width: 420px; margin: 0 auto; padding: 28px 18px 48px; }
+    h1 { font-size: 1.35rem; margin: 0 0 8px; }
+    p { color: #475569; line-height: 1.45; }
+    label { display:block; font-size: .85rem; font-weight: 600; margin: 14px 0 6px; }
+    input { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 1rem; }
+    button, a.btn {
+      display: block; width: 100%; box-sizing: border-box; margin-top: 10px; padding: 14px;
+      border: 0; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 700;
+      text-align: center; text-decoration: none; font-size: 1rem; cursor: pointer;
+    }
+    a.btn.secondary { background: #0f172a; }
+    a.btn.teal { background: #0d9488; }
+    a.btn.gold { background: #ca8a04; }
+    .err { color: #b91c1c; margin-top: 10px; }
+    .ok { color: #15803d; margin-top: 10px; }
+    .box { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 16px; margin-top: 18px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Connexion apps Gasoil</h1>
+    <p>Pour le Nothing : connecte-toi ici, puis ouvre l’app voulue (prod / préprod / QA). La session cloud et la sync s’activent.</p>
+    <div class="box">
+      <label>Email</label>
+      <input id="email" type="email" autocomplete="username" value="paveldelhomme@gmail.com" />
+      <label>Mot de passe</label>
+      <input id="password" type="password" autocomplete="current-password" />
+      <button id="go" type="button">Obtenir les liens de connexion</button>
+      <div id="msg" class="err"></div>
+    </div>
+    <div id="links" class="box" hidden>
+      <p class="ok">Session OK — tape sur l’app à ouvrir (déjà installée) :</p>
+      <a class="btn secondary" id="link-prod" href="#">Ouvrir Gasoil Tracking (prod)</a>
+      <a class="btn teal" id="link-preprod" href="#">Ouvrir Gasoil Préprod</a>
+      <a class="btn gold" id="link-qa" href="#">Ouvrir Gasoil QA Lab</a>
+      <p style="font-size:.8rem;margin-top:12px">Si l’app ne s’ouvre pas : installe d’abord l’APK depuis la page Télécharger, puis reviens ici.</p>
+    </div>
+  </main>
+  <script>
+    const API = location.origin;
+    const $ = (id) => document.getElementById(id);
+    $('go').onclick = async () => {
+      $('msg').textContent = '';
+      $('links').hidden = true;
+      try {
+        const res = await fetch(API + '/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: $('email').value.trim(), password: $('password').value }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('Erreur ' + res.status));
+        const q = new URLSearchParams({ ok: '1', session: data.token, refresh: data.refreshToken || '' });
+        $('link-prod').href = 'gasoiltracking://verify?' + q.toString();
+        $('link-preprod').href = 'gasoiltracking-preprod://verify?' + q.toString();
+        // QA : si même compte perso sur le formulaire, le lien QA utilisera ce token — pour QA lab changer l’email
+        $('link-qa').href = 'gasoiltracking-qa://verify?' + q.toString();
+        $('links').hidden = false;
+        $('msg').className = 'ok';
+        $('msg').textContent = 'Connecté en tant que ' + (data.user && data.user.email ? data.user.email : '');
+      } catch (e) {
+        $('msg').className = 'err';
+        $('msg').textContent = e.message || String(e);
+      }
+    };
+  </script>
+</body>
+</html>

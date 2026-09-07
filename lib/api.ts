@@ -109,22 +109,43 @@ async function request(path: string, options: RequestInit = {}, retried = false)
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
-  const data = await res.json().catch(() => ({}));
+  let res: Response;
+  let data: any = {};
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      res = await fetch(`${API_URL}${path}`, { ...options, headers });
+    } catch (e) {
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, 400 * attempt));
+        continue;
+      }
+      throw e;
+    }
+    data = await res.json().catch(() => ({}));
+    // 502/503/504 = proxy temporaire (redeploy / DNS nginx) — retenter
+    if ([502, 503, 504].includes(res.status) && attempt < maxAttempts) {
+      await new Promise((r) => setTimeout(r, 500 * attempt));
+      continue;
+    }
+    break;
+  }
 
-  if (res.status === 401 && !retried && !path.startsWith('/api/auth/')) {
+  if (res!.status === 401 && !retried && !path.startsWith('/api/auth/')) {
     const ok = await refreshSession();
     if (ok) return request(path, options, true);
   }
 
-  if (!res.ok) {
+  if (!res!.ok) {
     const msg =
       (typeof data?.error === 'string' && data.error) ||
-      (res.status === 413
+      (res!.status === 413
         ? 'Payload trop volumineux'
-        : `Erreur ${res.status}`);
+        : res!.status === 502 || res!.status === 503
+          ? 'Serveur indisponible — réessayez dans un instant'
+          : `Erreur ${res!.status}`);
     const err = new Error(msg) as Error & { status?: number };
-    err.status = res.status;
+    err.status = res!.status;
     throw err;
   }
   return data;
