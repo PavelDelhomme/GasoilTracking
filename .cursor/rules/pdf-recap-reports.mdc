@@ -1,0 +1,24 @@
+---
+description: Processus obligatoire mail récap + PDF rapports (sans débordement)
+alwaysApply: true
+---
+
+# Rapports PDF + mails récap (Gasoil Tracking)
+
+Quand l’utilisateur demande un **mail récap**, un **PDF de rapport**, un **rapport complet**, ou tout envoi de **récapitulatif PDF** :
+
+1. **Lire et suivre** `.cursor/skills/gasoil-pdf-recap/SKILL.md` avant de générer quoi que ce soit.
+2. Utiliser **uniquement** le pipeline `scripts/reports/` :
+   - helpers : `pdfkit-safe.js` (`bindPdfHelpers`)
+   - génération : `generators/*.js` (jamais sous `dist/` — gitignored)
+   - vérif : `verify-overflow.py` → doit être **PASS**
+   - envoi : `send-mail.mjs` via `run-report.sh --mail`
+3. **Ne jamais** envoyer un PDF sans `RESULT PASS` overflow.
+4. Contenu : ordonné, complet (rien de perdu), marges A4 respectées.
+5. Destinataire par défaut : `PERSONAL_MAIL` / `paveldelhomme@gmail.com` (SMTP `.env`).
+
+Commande type :
+
+```bash
+./scripts/reports/run-report.sh generators/<fichier>.js --mail --subject "Gasoil Tracking — …"
+```

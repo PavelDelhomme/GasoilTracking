@@ -9,6 +9,10 @@ EXPECTED_SHA256="${GASOIL_EXPECTED_CERT_SHA256:-13c3be90a99fb1a944bc5eedd782ae15
 PROPS="$ROOT/credentials/keystore.properties"
 JKS="$ROOT/credentials/gasoil-release.jks"
 
+# Variante prod utilisateurs par défaut (package com.gasoiltracking.app)
+export APP_FLAVOR="${APP_FLAVOR:-prod}"
+node "$ROOT/scripts/apply-android-flavor.cjs"
+
 if [[ ! -f "$PROPS" || ! -f "$JKS" ]]; then
   echo "ERREUR: keystore EAS manquant ($PROPS / $JKS)"
   echo "Récupérer via: node scripts/fetch-eas-keystore.mjs"

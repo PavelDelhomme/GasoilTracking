@@ -77,7 +77,7 @@ export const QA_TEST_ACCOUNT_EMAIL = 'qa.lab@maily.ovh';
 export const QA_CHECKLIST: { id: string; label: string; hint: string }[] = [
   {
     id: 'version',
-    label: 'App en 1.4.56+ (force-update OK)',
+    label: 'App en 1.4.58+ (force-update OK)',
     hint: 'Compte → version locale = serveur',
   },
   {

@@ -27,6 +27,7 @@ expo-env.d.ts
 # @end expo-cli
 
 api/node_modules/
+scripts/reports/node_modules/
 invite-code.local
 .invite-code.local
 .admin-credentials.local

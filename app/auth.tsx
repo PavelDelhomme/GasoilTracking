@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -16,13 +16,15 @@ import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { QrWebLoginPanel } from '@/components/QrWebLoginPanel';
 import { API_URL, forgotPassword } from '@/lib/api';
+import { getAppFlavor } from '@/lib/appFlavor';
 
 export default function AuthScreen() {
   const { login, register } = useAuth();
   const { refresh } = useApp();
   const { colors } = useTheme();
+  const flavor = getAppFlavor();
   const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(flavor.defaultLoginEmail || '');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [name, setName] = useState('');
@@ -30,6 +32,12 @@ export default function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+
+  useEffect(() => {
+    if (flavor.defaultLoginEmail && !email) {
+      setEmail(flavor.defaultLoginEmail);
+    }
+  }, [flavor.defaultLoginEmail, email]);
 
   const submit = async () => {
     setError('');
@@ -83,6 +91,19 @@ export default function AuthScreen() {
         <Text style={[styles.title, { color: colors.text }]}>
           {mode === 'login' ? 'Connexion' : 'Créer un compte'}
         </Text>
+        <View
+          style={[
+            styles.flavorBanner,
+            { backgroundColor: flavor.accent + '22', borderColor: flavor.accent },
+          ]}
+        >
+          <Text style={{ color: flavor.accent, fontWeight: '800', fontSize: 13 }}>
+            {flavor.shortName} · {flavor.label}
+          </Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+            Package {flavor.androidPackage} — sessions séparées des autres apps Gasoil
+          </Text>
+        </View>
         <Text style={[styles.sub, { color: colors.textSecondary }]}>
           {mode === 'login'
             ? `Connexion cloud (sync). Serveur : ${API_URL}`
@@ -199,5 +220,11 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 20, paddingTop: 32 },
   title: { fontSize: 24, fontWeight: '700', marginBottom: 8 },
+  flavorBanner: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 14,
+  },
   sub: { fontSize: 14, marginBottom: 20, lineHeight: 20 },
 });

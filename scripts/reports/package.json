@@ -1,0 +1,10 @@
+{
+  "name": "gasoil-reports",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pipeline PDF + mail récap Gasoil Tracking (pdfkit-safe + overflow gate)",
+  "type": "commonjs",
+  "dependencies": {
+    "pdfkit": "^0.15.0"
+  }
+}

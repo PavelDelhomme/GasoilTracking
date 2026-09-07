@@ -23,6 +23,7 @@ import { useToast } from '@/context/ToastContext';
 import { Button } from '@/components/Button';
 import { CountryPickerCard } from '@/components/CountryPickerCard';
 import { isManagerEmail, API_URL, getLocalAppVersion, fetchAppVersion, compareVersions } from '@/lib/api';
+import { getAppFlavor } from '@/lib/appFlavor';
 import { notify } from '@/lib/notify';
 
 type RowProps = {
@@ -76,6 +77,7 @@ export function AccountDrawer() {
   const drawerWidth = Math.min(340, Math.max(280, width * 0.82));
   const [busy, setBusy] = useState(false);
   const isMgr = isManagerEmail(user?.email, user?.isManager);
+  const flavor = getAppFlavor();
 
   const go = (path: string) => {
     closeDrawer();
@@ -101,12 +103,15 @@ export function AccountDrawer() {
           <View style={styles.head}>
             <View style={{ flex: 1 }}>
               <Text style={[styles.headTitle, { color: colors.text }]}>Profil</Text>
+              <Text style={{ color: flavor.accent, fontSize: 12, fontWeight: '800', marginTop: 4 }}>
+                {flavor.shortName} · {flavor.label}
+              </Text>
               <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 4 }}>
                 {user ? `${user.name} · ${user.email}` : 'Non connecté — données locales'}
               </Text>
               <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }}>
-                v{getLocalAppVersion()}
-                {info?.version ? ` · prod ${info.version}` : ''}
+                v{getLocalAppVersion()} · {flavor.androidPackage}
+                {info?.version ? ` · serveur ${info.version}` : ''}
               </Text>
             </View>
             <Pressable

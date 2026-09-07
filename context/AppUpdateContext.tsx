@@ -14,6 +14,7 @@ import {
   getLocalAppVersion,
   type AppVersionInfo,
 } from '@/lib/api';
+import { followsProductionOta } from '@/lib/appFlavor';
 import { openExternalDownload, performSafeApkUpdate, performWebHardReload, type UpdateProgress } from '@/lib/appUpdate';
 
 const SNOOZE_KEY = 'gasoil_update_snooze_v1';
@@ -92,6 +93,16 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
   const checkNow = useCallback(
     async (opts?: { ignoreSnooze?: boolean }) => {
       try {
+        // Variantes qa/admin/dev/preprod/feat : packages distincts — ne pas forcer
+        // l’APK prod utilisateurs (mauvais applicationId).
+        if (!followsProductionOta() && opts?.ignoreSnooze !== true) {
+          const remote = await fetchAppVersion().catch(() => null);
+          if (remote) setInfo(remote);
+          setUpdateAvailable(false);
+          setVisible(false);
+          setForce(false);
+          return false;
+        }
         const remote = await fetchAppVersion();
         setInfo(remote);
         return evaluate(remote, opts?.ignoreSnooze === true);

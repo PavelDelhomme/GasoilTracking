@@ -1,0 +1,46 @@
+---
+description: Labo devices — Nothing / Blackview / Samsung — flavors & comptes
+alwaysApply: true
+---
+
+# Devices labo & multi-apps Gasoil Tracking
+
+## Rôles appareils
+
+| Device | Rôle |
+|--------|------|
+| **Nothing** | Canal **stable avancé** (préprod = juste avant prod) + **prod** (parité utilisateurs) + apps **compte** (perso / admin / QA). Pas le terrain « feature cassante ». |
+| **Blackview BV9700** | Terrain dur : **dev, prod, feat, preprod, qa, admin** — local + distant. |
+| **Samsung SM-G990B2** | Labo autorisé (mêmes builds que Blackview si besoin). |
+| **Xiaomi** | **Ne pas installer.** |
+
+## Multi-apps (sessions séparées)
+
+Package Android distinct = AsyncStorage / JWT séparés → plusieurs comptes en parallèle.
+
+| Flavor `APP_FLAVOR` | Package | Compte par défaut | OTA force prod |
+|---------------------|---------|-------------------|----------------|
+| `prod` | `com.gasoiltracking.app` | paveldelhomme@gmail.com | oui |
+| `preprod` | `com.gasoiltracking.preprod` | perso | non |
+| `dev` | `com.gasoiltracking.dev` | perso | non |
+| `feat` | `com.gasoiltracking.feat` | perso | non |
+| `qa` | `com.gasoiltracking.qa` | qa.lab@maily.ovh | non |
+| `admin` | `com.gasoiltracking.admin` | admin@delhomme.ovh | non |
+
+Build :
+
+```bash
+./scripts/build-flavor-apk.sh qa
+./scripts/build-flavor-apk.sh admin
+./scripts/build-flavor-apk.sh prod
+./scripts/build-flavor-apk.sh preprod
+```
+
+Nothing cible minimale : **prod + preprod + qa + admin**.  
+Blackview : toutes les flavors utiles au test en cours.
+
+## Comptes (.env)
+
+- Perso / manager : `PERSONAL_MAIL` / `PERSONAL_PASSWORD`
+- Admin : `ADMIN_EMAIL` / `ADMIN_PASSWORD`
+- QA lab : `QA_LAB_EMAIL` / `QA_LAB_PASSWORD` (+ `scripts/qa-lab-account.sh`)

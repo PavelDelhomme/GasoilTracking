@@ -51,6 +51,10 @@ export default function VerifyScreen() {
         }
       }
       setDone(true);
+      if (ok && session) {
+        // Labo / deep-link session : enchaîner sans tap manuel
+        setTimeout(() => router.replace('/' as never), 400);
+      }
     })();
   }, [ok, params.session, params.refresh, applySession]);
 

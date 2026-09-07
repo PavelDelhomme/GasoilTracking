@@ -2,7 +2,8 @@
 	docker-build docker-up docker-down docker-restart docker-logs docker-status \
 	portainer-info release push deploy update status-prod \
 	mobile-start mobile-android mobile-devices mobile-install-expo mobile-tunnel \
-	clean clean-all
+	clean clean-all report report-mail \
+	apk-prod apk-preprod apk-dev apk-feat apk-qa apk-admin
 
 PROJECT_NAME := gasoil-tracking
 COMPOSE := docker compose -p $(PROJECT_NAME) -f docker-compose.local.yml
@@ -60,6 +61,8 @@ help:
 	@echo "${YELLOW}💻 DEV:${NC} install start web typecheck build-web check"
 	@echo "${YELLOW}📱 MOBILE:${NC} mobile-devices mobile-install-expo mobile-start"
 	@echo "${YELLOW}🐳 LOCAL:${NC} docker-up → http://localhost:3340"
+	@echo "${YELLOW}📄 RAPPORTS:${NC} report GEN=generators/… | report-mail GEN=… SUBJECT=…"
+	@echo "${YELLOW}📦 APK FLAVORS:${NC} apk-prod apk-preprod apk-dev apk-feat apk-qa apk-admin"
 	@echo ""
 
 portainer-info:
@@ -152,6 +155,24 @@ docker-logs:
 
 docker-status:
 	@$(COMPOSE) ps
+
+# Rapports PDF (pipeline : generate → verify overflow → optional mail)
+# Ex: make report GEN=generators/rapport-complet-2026-09.js
+# Ex: make report-mail GEN=generators/_template.js SUBJECT="Gasoil — test"
+GEN ?= generators/_template.js
+SUBJECT ?= Gasoil Tracking — rapport récapitulatif
+
+report:
+	@chmod +x scripts/reports/run-report.sh
+	./scripts/reports/run-report.sh $(GEN)
+
+report-mail:
+	@chmod +x scripts/reports/run-report.sh
+	./scripts/reports/run-report.sh $(GEN) --mail --subject "$(SUBJECT)"
+
+apk-prod apk-preprod apk-dev apk-feat apk-qa apk-admin:
+	@chmod +x scripts/build-flavor-apk.sh
+	./scripts/build-flavor-apk.sh $(subst apk-,,$@)
 
 clean:
 	rm -rf dist .expo web-build .tmp
