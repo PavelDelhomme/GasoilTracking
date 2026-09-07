@@ -42,7 +42,8 @@ import { useToast } from '@/context/ToastContext';
 import type { BudgetStatus, FillUp, Place, RecurringRoute } from '@/types';
 
 const FUEL_ZONE_KEY = 'gasoil_fuel_zone';
-const STATIONS_CACHE_TTL_MS = 4 * 60 * 1000;
+const STATIONS_CACHE_TTL_MS = 15 * 60 * 1000;
+const STATIONS_DISK_KEY = 'gasoil_stations_cache_v1';
 
 type StationsCache = {
   key: string;
@@ -266,16 +267,36 @@ export default function BudgetScreen() {
       const radiusKm = zone.radiusKm ?? 12;
       const fuel = activeVehicle?.fuelType || 'diesel';
       const cacheKey = `${zone.mode}:${lat.toFixed(3)},${lon.toFixed(3)}:${radiusKm}:${fuel}`;
-      if (
-        allowCache &&
-        stationsMemoryCache &&
-        stationsMemoryCache.key === cacheKey &&
-        Date.now() - stationsMemoryCache.at < STATIONS_CACHE_TTL_MS
-      ) {
-        setStations(stationsMemoryCache.list);
-        setZoneHint(stationsMemoryCache.hint || hint);
-        setFuelLoading(false);
-        return;
+      if (allowCache) {
+        if (
+          stationsMemoryCache &&
+          stationsMemoryCache.key === cacheKey &&
+          Date.now() - stationsMemoryCache.at < STATIONS_CACHE_TTL_MS
+        ) {
+          setStations(stationsMemoryCache.list);
+          setZoneHint(stationsMemoryCache.hint || hint);
+          setFuelLoading(false);
+          return;
+        }
+        try {
+          const raw = await AsyncStorage.getItem(STATIONS_DISK_KEY);
+          if (raw) {
+            const disk = JSON.parse(raw) as StationsCache;
+            if (
+              disk.key === cacheKey &&
+              Date.now() - disk.at < STATIONS_CACHE_TTL_MS &&
+              Array.isArray(disk.list)
+            ) {
+              stationsMemoryCache = disk;
+              setStations(disk.list);
+              setZoneHint(disk.hint || hint);
+              setFuelLoading(false);
+              return;
+            }
+          }
+        } catch {
+          /* ignore disk cache */
+        }
       }
 
       setZoneHint(hint);
@@ -294,6 +315,9 @@ export default function BudgetScreen() {
         list,
         hint,
       };
+      void AsyncStorage.setItem(STATIONS_DISK_KEY, JSON.stringify(stationsMemoryCache)).catch(
+        () => undefined
+      );
       if (!list.length) {
         setFuelError(`Aucune station dans un rayon de ${radiusKm} km autour de cette zone.`);
       }

@@ -6,7 +6,7 @@ import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { useToast } from '@/context/ToastContext';
 import { ThemeToggleButton } from '@/components/ThemeToggleButton';
-import { syncFailureMessage } from '@/lib/api';
+import { pingApiHealth, syncFailureMessage } from '@/lib/api';
 
 /** Sync manuelle (icône animée) + toggle thème — header droite. */
 export function HeaderActions() {
@@ -18,6 +18,17 @@ export function HeaderActions() {
   const [offline, setOffline] = React.useState(false);
   const spin = useRef(new Animated.Value(0)).current;
   const loop = useRef<Animated.CompositeAnimation | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const ok = await pingApiHealth();
+      if (!cancelled && ok) setOffline(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const startSpin = () => {
     spin.setValue(0);

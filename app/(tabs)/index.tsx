@@ -300,33 +300,11 @@ export default function HomeScreen() {
               >
                 <FuelGaugeSlider
                   compact
+                  requireConfirm
                   tankCapacity={activeVehicle.tankCapacity}
                   liters={homeFuelDraft}
                   accentColor={fuelColor}
-                  onChange={(L) => {
-                    setHomeFuelDraft(L);
-                    // Aperçu immédiat autonomie / L restants pendant le drag
-                    setSinceFill((prev) => {
-                      const l100 =
-                        prev?.tripKm && prev.tripKm > 0 && prev.fuelUsedEst > 0
-                          ? (prev.fuelUsedEst / prev.tripKm) * 100
-                          : activeVehicle.consumptionPer100 || 8;
-                      const rangeKm =
-                        l100 > 0 ? Math.round((Math.max(0, L) / l100) * 1000) / 10 : 0;
-                      if (prev) {
-                        return { ...prev, fuelRemainingEst: L, rangeKm };
-                      }
-                      return {
-                        lastFill: null,
-                        tripKm: 0,
-                        tripCount: 0,
-                        fuelUsedEst: 0,
-                        costEst: 0,
-                        fuelRemainingEst: L,
-                        rangeKm,
-                      };
-                    });
-                  }}
+                  onChange={setHomeFuelDraft}
                   onChangeEnd={async (L) => {
                     setHomeFuelDraft(L);
                     await setFuelLiters(activeVehicle, L);
@@ -586,18 +564,37 @@ export default function HomeScreen() {
                     {formatEuro(mainBudget.spent)} dépensés sur {formatEuro(mainBudget.budget.amount)}
                   </Text>
                   {budgetOutlook && budgetOutlook.rangeKm > 0 && (
-                    <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 6, lineHeight: 17 }}>
-                      Autonomie ~{formatDistance(budgetOutlook.rangeKm)}
-                      {budgetOutlook.fuelStockValue > 0
-                        ? ` (stock ${formatEuro(budgetOutlook.fuelStockValue)})`
-                        : ''}
-                      {' · '}
-                      {Math.ceil(budgetOutlook.remainingDays)} j. restants
-                      {' · '}
-                      {budgetOutlook.adjustedRemaining >= 0
-                        ? `reste estimé ${formatEuro(budgetOutlook.adjustedRemaining)}`
-                        : `manque estimé ${formatEuro(Math.abs(budgetOutlook.adjustedRemaining))}`}
-                    </Text>
+                    <View
+                      style={{
+                        marginTop: 10,
+                        padding: 10,
+                        borderRadius: 12,
+                        backgroundColor: colors.background,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                      }}
+                    >
+                      <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>
+                        {budgetOutlook.adjustedRemaining >= 0
+                          ? `Reste estimé ${formatEuro(budgetOutlook.adjustedRemaining)}`
+                          : `Manque estimé ${formatEuro(Math.abs(budgetOutlook.adjustedRemaining))}`}
+                      </Text>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontSize: 12,
+                          marginTop: 4,
+                          lineHeight: 17,
+                        }}
+                      >
+                        Autonomie ~{formatDistance(budgetOutlook.rangeKm)}
+                        {budgetOutlook.fuelStockValue > 0
+                          ? ` · stock ${formatEuro(budgetOutlook.fuelStockValue)}`
+                          : ''}
+                        {' · '}
+                        {Math.ceil(budgetOutlook.remainingDays)} j. restants dans le mois
+                      </Text>
+                    </View>
                   )}
                   <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700', marginTop: 8 }}>
                     Voir le budget →

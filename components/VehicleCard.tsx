@@ -17,6 +17,7 @@ interface VehicleCardProps {
   onLongPress?: () => void;
   onSelect?: () => void;
   onEdit?: () => void;
+  onView?: () => void;
   onMaintenance?: () => void;
   onDelete?: () => void;
   /** Après changement rapide de jauge. */
@@ -30,6 +31,7 @@ export function VehicleCard({
   onLongPress,
   onSelect,
   onEdit,
+  onView,
   onMaintenance,
   onDelete,
   onFuelUpdated,
@@ -118,6 +120,7 @@ export function VehicleCard({
       >
         <FuelGaugeSlider
           compact
+          requireConfirm
           tankCapacity={vehicle.tankCapacity}
           liters={draftLiters}
           accentColor={fuelColor}
@@ -156,6 +159,15 @@ export function VehicleCard({
             color={colors.text}
             borderColor={colors.border}
             onPress={onEdit}
+          />
+        )}
+        {onView && (
+          <ActionBtn
+            icon="eye-outline"
+            label="Voir"
+            color={colors.accent}
+            borderColor={colors.accent}
+            onPress={onView}
           />
         )}
         {onMaintenance && (

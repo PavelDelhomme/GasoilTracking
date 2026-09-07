@@ -312,13 +312,37 @@ export function syncFailureMessage(err: unknown): { offline: boolean; message: s
   if (status != null && status >= 500) {
     return { offline: false, message: 'Serveur indisponible — réessayez dans un instant' };
   }
-  if (/network request failed|failed to fetch|timeout|timed out|ECONNREFUSED|ENOTFOUND/i.test(msg)) {
+  // Failed to fetch couvre aussi CORS / mauvaise URL / abort — ne pas coller « hors ligne ».
+  if (/ECONNREFUSED|ENOTFOUND|ERR_INTERNET_DISCONNECTED|network is offline/i.test(msg)) {
     return { offline: true, message: 'Hors ligne — données locales affichées' };
+  }
+  if (/timeout|timed out/i.test(msg)) {
+    return { offline: false, message: 'Délai serveur dépassé — réessayez' };
+  }
+  if (/network request failed|failed to fetch/i.test(msg)) {
+    return { offline: false, message: 'Connexion cloud impossible — données locales OK' };
   }
   if (msg && msg.length < 120 && !/^Error$/i.test(msg)) {
     return { offline: false, message: msg };
   }
   return { offline: false, message: 'Sync impossible — données locales conservées' };
+}
+
+/** Ping léger pour savoir si l’API répond (ne bloque pas l’UI longtemps). */
+export async function pingApiHealth(timeoutMs = 4000): Promise<boolean> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const res = await fetch(`${API_URL}/health`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 export type AdminOverview = {

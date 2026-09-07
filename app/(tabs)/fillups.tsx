@@ -30,20 +30,27 @@ import type { FillUp, MonthFillStats } from '@/types';
 const PAGE = 25;
 
 export default function FillUpsScreen() {
-  const { activeVehicle, budgetStatuses, refresh } = useApp();
+  const { activeVehicle, vehicles, budgetStatuses, refresh } = useApp();
   const { colors } = useTheme();
   const { formatPerLiter, locale } = useLocale();
   const [allFillUps, setAllFillUps] = useState<FillUp[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<string | 'all'>('all');
+  const [filterVehicleId, setFilterVehicleId] = useState<number | 'all' | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE);
   const [initialized, setInitialized] = useState(false);
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState('');
 
+  const effectiveVehicleFilter =
+    filterVehicleId === null ? activeVehicle?.id ?? 'all' : filterVehicleId;
+
   const loadFillUps = useCallback(async () => {
     try {
-      const data = await getFillUps(activeVehicle?.id);
+      const data =
+        effectiveVehicleFilter === 'all'
+          ? await getFillUps()
+          : await getFillUps(effectiveVehicleFilter);
       setAllFillUps(data);
       setListError('');
       return data;
@@ -51,7 +58,7 @@ export default function FillUpsScreen() {
       setListError(e instanceof Error ? e.message : 'Impossible de charger les pleins.');
       return [] as FillUp[];
     }
-  }, [activeVehicle?.id]);
+  }, [effectiveVehicleFilter]);
 
   useEffect(() => {
     void (async () => {
@@ -154,6 +161,70 @@ export default function FillUpsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
+      {vehicles.length > 1 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.chipsScroll}
+          contentContainerStyle={styles.chipsRow}
+        >
+          <Pressable
+            onPress={() => {
+              setFilterVehicleId('all');
+              setVisibleCount(PAGE);
+            }}
+            accessibilityRole="button"
+            accessibilityState={{ selected: effectiveVehicleFilter === 'all' }}
+            style={[
+              styles.chip,
+              {
+                backgroundColor: effectiveVehicleFilter === 'all' ? colors.accent : colors.card,
+                borderColor: effectiveVehicleFilter === 'all' ? colors.accent : colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={{
+                color: effectiveVehicleFilter === 'all' ? '#fff' : colors.text,
+                fontWeight: '800',
+                fontSize: 14,
+              }}
+            >
+              Tous véhicules
+            </Text>
+          </Pressable>
+          {vehicles.map((v) => {
+            const active = effectiveVehicleFilter === v.id;
+            return (
+              <Pressable
+                key={v.id}
+                onPress={() => {
+                  setFilterVehicleId(v.id);
+                  setVisibleCount(PAGE);
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={v.name}
+                style={[
+                  styles.chip,
+                  {
+                    backgroundColor: active ? colors.accent : colors.card,
+                    borderColor: active ? colors.accent : colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={{ color: active ? '#fff' : colors.text, fontWeight: '800', fontSize: 14 }}
+                  numberOfLines={1}
+                >
+                  {v.name}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      )}
+
       {monthKeys.length > 0 && (
         <ScrollView
           horizontal
@@ -388,6 +459,11 @@ export default function FillUpsScreen() {
                 <Text style={[styles.fillDate, { color: colors.text }]}>
                   {formatRelativeDay(fill.date)}
                 </Text>
+                {effectiveVehicleFilter === 'all' && (
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                    {vehicles.find((v) => v.id === fill.vehicleId)?.name || `Véhicule #${fill.vehicleId}`}
+                  </Text>
+                )}
                 <View
                   style={[
                     styles.badge,

@@ -11,7 +11,10 @@ import {
   Platform,
   AppState,
   RefreshControl,
+  PanResponder,
   type AppStateStatus,
+  type GestureResponderEvent,
+  type PanResponderGestureState,
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -64,12 +67,15 @@ import {
   SIM_HOME,
   SIM_WORK,
 } from '@/lib/gpsCarSimulator';
-import { applyTripFuelBurn } from '@/lib/fuelLevel';
+import { applyTripFuelBurn, fuelRemainingTone, fuelToneColor, setFuelLiters } from '@/lib/fuelLevel';
 import { askFuelGaugeApprox } from '@/lib/fuelGaugePrompt';
+import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   estimateTripFuelLiters,
   fetchElevationAscentM,
+  averageMovingSpeedKmh,
+  idleRatioFromPoints,
 } from '@/lib/consumptionModel';
 import {
   fetchDrivingRoute,
@@ -468,11 +474,11 @@ export default function TripScreen() {
   );
 
   const alternateMapRoutes = useMemo(() => {
-    if (!routeOptions.length || !selectedRoute) return [];
-    // Une seule alternative allégée — éviter le crash WebView multi-tracés.
-    const alt = routeOptions.find((r) => r.id !== selectedRoute.id);
-    if (!alt) return [];
-    return [downsampleRoute(alt.coordinates, 48)];
+    if (!routeOptions.length) return [];
+    // Toutes les alternatives (hors sélection) — tracés visibles pour comparer.
+    return routeOptions
+      .filter((r) => r.id !== selectedRoute?.id)
+      .map((r) => downsampleRoute(r.coordinates, 72));
   }, [routeOptions, selectedRoute?.id]);
 
   const applyRouteSelection = useCallback((route: DrivingRoute) => {
@@ -512,9 +518,10 @@ export default function TripScreen() {
         const alts = await fetchDrivingRouteAlternatives(from, to);
         setRouteOptions(alts);
         const prefer =
-          alts.find((a) => a.kind === 'eco') ||
           alts.find((a) => a.kind === 'fastest') ||
+          alts.find((a) => a.kind === 'eco') ||
           alts[0];
+        // Ne force plus l’éco : laisse l’utilisateur choisir ; fastest = défaut neutre.
         if (prefer) applyRouteSelection(prefer);
         else {
           setSelectedRouteId(null);
@@ -856,10 +863,14 @@ export default function TripScreen() {
         (vehicleSnapshot && (await getVehicleById(vehicleSnapshot.id).catch(() => null))) ||
         vehicleSnapshot;
       const ascentM = await fetchElevationAscentM(pts).catch(() => 0);
+      const avgSpeedKmh = averageMovingSpeedKmh(trip.distanceKm, pts);
+      const idleRatio = idleRatioFromPoints(pts);
       const fuelUsed = vehicle
         ? estimateTripFuelLiters(vehicle, trip.distanceKm, {
             ascentM,
             learnedFactor: vehicle.consumptionLearnFactor,
+            avgSpeedKmh,
+            idleRatio,
           })
         : trip.estimatedFuelUsed;
       const fills = vehicle ? await getFillUps(vehicle.id).catch(() => []) : [];
@@ -888,8 +899,10 @@ export default function TripScreen() {
 
       if (vehicle && trip.distanceKm > 0) {
         // Jamais de modal jauge pendant Terminer (Alert/Modal + GPS/WebView = crash Android).
-        // La conso est appliquée automatiquement ; la jauge se règle sur l’accueil.
-        await applyTripFuelBurn(vehicle, trip.distanceKm, ascentM).catch(() => null);
+        await applyTripFuelBurn(vehicle, trip.distanceKm, ascentM, {
+          avgSpeedKmh,
+          idleRatio,
+        }).catch(() => null);
       }
 
       const noteParts = [
@@ -1379,6 +1392,24 @@ export default function TripScreen() {
 
   const smartHint = useMemo(() => commuteHintLabel(), [tab, activeTrip?.id]);
 
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const tabSwipe = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (
+          _e: GestureResponderEvent,
+          g: PanResponderGestureState
+        ) => Math.abs(g.dx) > 28 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4,
+        onPanResponderRelease: (_e, g) => {
+          if (Math.abs(g.dx) < 56) return;
+          if (g.dx < 0 && tabRef.current === 'live') setTab('history');
+          else if (g.dx > 0 && tabRef.current === 'history') setTab('live');
+        },
+      }),
+    []
+  );
+
   // Quand la position arrive après le choix d’une destination
   useEffect(() => {
     if (activeTrip || !destCoords || !userLocation) return;
@@ -1516,7 +1547,11 @@ export default function TripScreen() {
             )}
           </View>
 
-          <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
+          <ScrollView
+            style={styles.panel}
+            contentContainerStyle={styles.panelContent}
+            {...tabSwipe.panHandlers}
+          >
             {activeTrip && navGuidance ? (
               <Pressable
                 onPress={() => {
@@ -1947,7 +1982,10 @@ export default function TripScreen() {
                 {startMode === 'nav' && destinationHabit && destinationHabit.count >= 1 && (
                   <Card style={{ marginBottom: 10 }}>
                     <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700' }}>
-                      HABITUDE SUR CE TRAJET · {destinationHabit.count}×
+                      HABITUDE
+                      {selectedRoute ? ` · ${selectedRoute.label}` : ' SUR CE TRAJET'}
+                      {' · '}
+                      {destinationHabit.count}×
                     </Text>
                     <View style={styles.habitStatsRow}>
                       <View style={styles.habitStat}>
@@ -2109,6 +2147,7 @@ export default function TripScreen() {
         <FlatList
           style={styles.panel}
           contentContainerStyle={styles.panelContent}
+          {...tabSwipe.panHandlers}
           data={filteredHistory}
           keyExtractor={(t) => String(t.id)}
           initialNumToRender={3}
@@ -2211,44 +2250,37 @@ export default function TripScreen() {
                   </Text>
                   {(() => {
                     const tank = activeVehicle?.tankCapacity || 50;
-                    const rem = sinceFill.fuelRemainingEst;
-                    const tone =
-                      rem <= tank * 0.25
-                        ? 'critical'
-                        : rem <= tank * (1 / 3)
-                          ? 'warn'
-                          : 'ok';
-                    const toneColor =
-                      tone === 'critical'
-                        ? colors.danger
-                        : tone === 'warn'
-                          ? colors.warning
-                          : colors.success;
-                    const pct = Math.min(100, Math.max(0, (rem / tank) * 100));
+                    const rem =
+                      activeVehicle?.estimatedFuelLiters != null
+                        ? activeVehicle.estimatedFuelLiters
+                        : sinceFill.fuelRemainingEst;
+                    const tone = fuelRemainingTone({
+                      litersRemaining: rem,
+                      tankCapacity: tank,
+                      lowLitersThreshold: activeVehicle?.lowFuelThresholdLiters,
+                      rangeKm: sinceFill.rangeKm,
+                    });
+                    const toneColor = fuelToneColor(tone, colors);
                     return (
                       <View style={{ marginBottom: 10 }}>
-                        <Text style={{ color: toneColor, fontWeight: '800', fontSize: 20 }}>
+                        <Text style={{ color: toneColor, fontWeight: '800', fontSize: 18, marginBottom: 6 }}>
                           ~{rem.toFixed(1)} L restants
                           {sinceFill.rangeKm > 0 ? ` · ~${Math.round(sinceFill.rangeKm)} km` : ''}
                         </Text>
-                        <View
-                          style={{
-                            height: 10,
-                            borderRadius: 5,
-                            backgroundColor: colors.border,
-                            marginTop: 8,
-                            overflow: 'hidden',
+                        <FuelGaugeSlider
+                          compact
+                          requireConfirm
+                          tankCapacity={tank}
+                          liters={rem}
+                          accentColor={toneColor}
+                          onChange={() => undefined}
+                          onChangeEnd={async (L) => {
+                            if (!activeVehicle) return;
+                            await setFuelLiters(activeVehicle, L);
+                            await refresh();
+                            notify('Réservoir', `${L.toFixed(1)} L enregistrés`);
                           }}
-                        >
-                          <View
-                            style={{
-                              width: `${pct}%`,
-                              height: '100%',
-                              backgroundColor: toneColor,
-                              borderRadius: 5,
-                            }}
-                          />
-                        </View>
+                        />
                         <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }}>
                           {tone === 'critical'
                             ? 'Réservoir bas — pensez à faire le plein'
@@ -2362,7 +2394,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   segments: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth },
   segment: { flex: 1, alignItems: 'center', paddingVertical: 12 },
-  map: { height: '36%', position: 'relative' },
+  map: { height: '46%', minHeight: 260, position: 'relative' },
   mapHint: {
     position: 'absolute',
     bottom: 8,

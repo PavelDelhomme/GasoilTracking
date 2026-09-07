@@ -83,7 +83,14 @@ export async function fetchCheapestStations(opts: {
     'prix-des-carburants-en-france-flux-instantane-v2/records' +
     `?where=${encodeURIComponent(where)}&limit=${limit * 2}`;
 
-  const res = await fetch(url);
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), 12000) : null;
+  let res: Response;
+  try {
+    res = await fetch(url, ctrl ? { signal: ctrl.signal } : undefined);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   if (!res.ok) throw new Error(`API prix carburants ${res.status}`);
   const data = await res.json();
   const results = (data.results || []) as Record<string, unknown>[];

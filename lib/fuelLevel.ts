@@ -85,12 +85,15 @@ export async function reapplyFillUpFuelEstimate(
 export async function applyTripFuelBurn(
   vehicle: Vehicle,
   distanceKm: number,
-  ascentM = 0
+  ascentM = 0,
+  opts?: { avgSpeedKmh?: number; idleRatio?: number }
 ): Promise<number | null> {
   if (vehicle.estimatedFuelLiters == null || distanceKm <= 0) return vehicle.estimatedFuelLiters;
   const burned = estimateTripFuelLiters(vehicle, distanceKm, {
     ascentM,
     learnedFactor: vehicle.consumptionLearnFactor,
+    avgSpeedKmh: opts?.avgSpeedKmh,
+    idleRatio: opts?.idleRatio,
   });
   const next = Math.max(0, Math.round((vehicle.estimatedFuelLiters - burned) * 10) / 10);
   await updateVehicle(vehicle.id, { estimatedFuelLiters: next });

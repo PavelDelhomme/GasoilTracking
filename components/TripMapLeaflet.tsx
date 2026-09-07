@@ -121,10 +121,21 @@ function buildHtml(
 
     function setPlanned(pts) {
       if (plannedLayer) { map.removeLayer(plannedLayer); plannedLayer = null; }
+      if (startMarker && !routeLayer) { map.removeLayer(startMarker); startMarker = null; }
+      if (endMarker && !routeLayer) { map.removeLayer(endMarker); endMarker = null; }
       if (!pts || pts.length < 2) return;
       plannedLayer = L.polyline(pts, {
         color: accent, weight: 5, opacity: 0.9
       }).addTo(map);
+      // Départ / arrivée visibles sur l’itinéraire prévu (avant démarrage).
+      if (!routeLayer || !routeLayer.getLayers || routeLayer.getLayers().length === 0) {
+        startMarker = L.circleMarker(pts[0], {
+          radius: 8, color: '#fff', weight: 2, fillColor: '#22c55e', fillOpacity: 1
+        }).addTo(map).bindPopup('Départ');
+        endMarker = L.circleMarker(pts[pts.length-1], {
+          radius: 8, color: '#fff', weight: 2, fillColor: '#ef4444', fillOpacity: 1
+        }).addTo(map).bindPopup('Arrivée');
+      }
     }
 
     function setUser(pt, paused) {

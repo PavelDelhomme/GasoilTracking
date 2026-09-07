@@ -51,17 +51,28 @@ export type ConsumptionContext = {
   learnedFactor?: number;
   /** Vitesse moyenne en mouvement (km/h) — impact conso */
   avgSpeedKmh?: number;
+  /** Part du temps quasi à l’arrêt (0–1) — embouteillage / feux */
+  idleRatio?: number;
 };
 
 /** Surconso vs vitesse : ville lente / autoroute rapide. */
 export function speedConsumptionFactor(avgKmh: number): number {
   if (!Number.isFinite(avgKmh) || avgKmh <= 0) return 1;
+  if (avgKmh < 15) return 1.28; // bouchon / file d’attente
   if (avgKmh < 35) return 1.16;
   if (avgKmh < 55) return 1.08;
   if (avgKmh < 95) return 1;
   if (avgKmh < 115) return 1.1;
   if (avgKmh < 130) return 1.2;
   return 1.28;
+}
+
+/** Surconso moteur tournant à l’arrêt / très lent (bouchons). */
+export function trafficIdleFactor(idleRatio: number): number {
+  if (!Number.isFinite(idleRatio) || idleRatio <= 0) return 1;
+  const r = Math.max(0, Math.min(0.85, idleRatio));
+  // Jusqu’à +22 % si beaucoup d’arrêt moteur allumé
+  return 1 + r * 0.22;
 }
 
 export function estimateTripFuelLiters(
@@ -81,7 +92,8 @@ export function estimateTripFuelLiters(
         : 1;
   const elev = elevationFactor(ctx.ascentM ?? 0, distanceKm);
   const speed = speedConsumptionFactor(ctx.avgSpeedKmh ?? 0);
-  const l100 = base * age * gear * REAL_WORLD_MARGIN * learned * elev * speed;
+  const traffic = trafficIdleFactor(ctx.idleRatio ?? 0);
+  const l100 = base * age * gear * REAL_WORLD_MARGIN * learned * elev * speed * traffic;
   return Math.round(((distanceKm * l100) / 100) * 100) / 100;
 }
 
@@ -105,6 +117,25 @@ export function averageMovingSpeedKmh(distanceKm: number, points: PointLike[]): 
   const mins = movingDurationMinutes(points);
   if (mins <= 0 || distanceKm <= 0) return 0;
   return (distanceKm / mins) * 60;
+}
+
+/** Ratio de temps passé quasi à l’arrêt (< 5 km/h) sur la durée totale du tracé. */
+export function idleRatioFromPoints(points: PointLike[]): number {
+  if (points.length < 2) return 0;
+  let totalMs = 0;
+  let idleMs = 0;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const dt = b.timestamp - a.timestamp;
+    if (!Number.isFinite(dt) || dt <= 0 || dt > 180_000) continue;
+    totalMs += dt;
+    const dKm = haversineKm(a.latitude, a.longitude, b.latitude, b.longitude);
+    const speedKmh = dKm / (dt / 3600000);
+    if (speedKmh < 5) idleMs += dt;
+  }
+  if (totalMs <= 0) return 0;
+  return Math.min(0.9, idleMs / totalMs);
 }
 
 export type RouteSpeedStats = {
