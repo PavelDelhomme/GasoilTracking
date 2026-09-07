@@ -299,6 +299,28 @@ export function isPayloadTooLargeError(err: unknown): boolean {
   return status === 413 || /413|volumineux|too large|payload/i.test(msg);
 }
 
+/** Message utilisateur pour une erreur de sync (évite le faux « hors ligne »). */
+export function syncFailureMessage(err: unknown): { offline: boolean; message: string } {
+  if (isPayloadTooLargeError(err)) {
+    return { offline: false, message: 'Sauvegarde trop lourde — tracés compressés, réessayez' };
+  }
+  const status = (err as { status?: number } | null)?.status;
+  const msg = err instanceof Error ? err.message : String(err || '');
+  if (status === 401 || status === 403) {
+    return { offline: false, message: 'Session expirée — reconnectez-vous' };
+  }
+  if (status != null && status >= 500) {
+    return { offline: false, message: 'Serveur indisponible — réessayez dans un instant' };
+  }
+  if (/network request failed|failed to fetch|timeout|timed out|ECONNREFUSED|ENOTFOUND/i.test(msg)) {
+    return { offline: true, message: 'Hors ligne — données locales affichées' };
+  }
+  if (msg && msg.length < 120 && !/^Error$/i.test(msg)) {
+    return { offline: false, message: msg };
+  }
+  return { offline: false, message: 'Sync impossible — données locales conservées' };
+}
+
 export type AdminOverview = {
   adminEmail: string;
   personalMail: string | null;

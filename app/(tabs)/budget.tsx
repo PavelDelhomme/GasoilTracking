@@ -368,14 +368,20 @@ export default function BudgetScreen() {
     : currentMonthSpent > monthlyAllocation * 0.8 && monthlyAllocation > 0
       ? colors.warning
       : colors.success;
+  const outlookVehicles = activeVehicle ? [activeVehicle] : vehicles;
   const outlook = computeBudgetOutlook({
     allocation: monthlyAllocation,
     spent: currentMonthSpent,
     startDate: globalStatus?.budget.startDate,
     endDate: globalStatus?.budget.endDate,
-    vehicles,
-    plannedMonthSpend: plannedMonthSpendFromRoutes(routes, vehicles),
+    vehicles: outlookVehicles,
+    plannedMonthSpend: plannedMonthSpendFromRoutes(routes, outlookVehicles),
   });
+  const displayRemaining =
+    outlook.rangeKm > 0 || outlook.plannedRemainingSpend > 0
+      ? outlook.adjustedRemaining
+      : currentRemaining;
+  const displayOver = displayRemaining < 0;
 
   const vehicleName = (id: number) => vehicles.find((v) => v.id === id)?.name || `Véhicule #${id}`;
 
@@ -403,12 +409,15 @@ export default function BudgetScreen() {
               {globalStatus ? ` · ${globalStatus.budget.name}` : ''}
             </Text>
             <Text style={{ color: statusColor, fontWeight: '800', fontSize: 28, marginTop: 4, letterSpacing: -0.5 }}>
-              {overBudget
-                ? `Dépassé de ${formatEuro(currentMonthSpent - monthlyAllocation)}`
-                : `Il reste ${formatEuro(currentRemaining)}`}
+              {displayOver
+                ? `Manque estimé ${formatEuro(Math.abs(displayRemaining))}`
+                : overBudget
+                  ? `Dépassé de ${formatEuro(currentMonthSpent - monthlyAllocation)}`
+                  : `Il reste ${formatEuro(displayRemaining)}`}
             </Text>
             <Text style={{ color: colors.text, marginTop: 4, fontSize: 14 }}>
               {formatEuro(currentMonthSpent)} dépensés sur {formatEuro(monthlyAllocation)}
+              {activeVehicle ? ` · ${activeVehicle.name}` : ''}
             </Text>
             <ProgressBar
               percent={monthlyAllocation > 0 ? (currentMonthSpent / monthlyAllocation) * 100 : 0}

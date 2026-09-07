@@ -6,7 +6,7 @@ import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { useToast } from '@/context/ToastContext';
 import { ThemeToggleButton } from '@/components/ThemeToggleButton';
-import { isPayloadTooLargeError } from '@/lib/api';
+import { syncFailureMessage } from '@/lib/api';
 
 /** Sync manuelle (icône animée) + toggle thème — header droite. */
 export function HeaderActions() {
@@ -51,13 +51,9 @@ export function HeaderActions() {
       else if (result === 'pushed') showToast(`Sauvegarde envoyée · ${hhmm}`);
       else showToast(`Synchronisation à jour · ${hhmm}`);
     } catch (e) {
-      if (isPayloadTooLargeError(e)) {
-        setOffline(false);
-        showToast('Sauvegarde trop lourde — tracés compressés, réessayez');
-      } else {
-        setOffline(true);
-        showToast(e instanceof Error ? e.message : 'Hors ligne — sync impossible');
-      }
+      const fail = syncFailureMessage(e);
+      setOffline(fail.offline);
+      showToast(fail.message);
     } finally {
       stopSpin();
       setBusy(false);

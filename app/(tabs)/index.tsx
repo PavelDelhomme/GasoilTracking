@@ -25,7 +25,7 @@ import { seedDemoData } from '@/lib/seedDemo';
 import { seedTodayCommuteAndFillUp } from '@/lib/seedToday';
 import { notify } from '@/lib/notify';
 import { getPlaces, getMaintenances, getTrips, reconcileTrackedKmFromTrips } from '@/lib/database';
-import { isPayloadTooLargeError } from '@/lib/api';
+import { syncFailureMessage } from '@/lib/api';
 import { computeBudgetOutlook } from '@/lib/budgetOutlook';
 import { fuelRemainingTone, fuelToneColor, setFuelLiters } from '@/lib/fuelLevel';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
@@ -129,11 +129,8 @@ export default function HomeScreen() {
       else if (result === 'pushed') showToast('Sauvegarde envoyée au cloud');
       else showToast('Synchronisation à jour');
     } catch (e) {
-      if (isPayloadTooLargeError(e)) {
-        showToast('Sauvegarde trop lourde — tracés compressés, réessayez');
-      } else {
-        showToast('Hors ligne — données locales affichées');
-      }
+      const fail = syncFailureMessage(e);
+      showToast(fail.message);
     }
     try {
       await checkNow();
@@ -188,14 +185,16 @@ export default function HomeScreen() {
 
   const startNavToPlace = (p: Place) => {
     const dest = p.address?.trim() || p.name;
+    const hasCoords = p.latitude != null && p.longitude != null;
     router.push({
       pathname: '/(tabs)/trip' as never,
       params: {
         mode: 'nav',
         dest,
-        destLat: p.latitude != null ? String(p.latitude) : '',
-        destLon: p.longitude != null ? String(p.longitude) : '',
-        autoStart: '1',
+        destLat: hasCoords ? String(p.latitude) : '',
+        destLon: hasCoords ? String(p.longitude) : '',
+        // Auto-start seulement si coords GPS connues (évite POI Google fantôme).
+        autoStart: hasCoords ? '1' : '0',
       },
     } as never);
   };
@@ -210,7 +209,7 @@ export default function HomeScreen() {
         spent: mainBudget.spent,
         startDate: mainBudget.budget.startDate,
         endDate: mainBudget.budget.endDate,
-        vehicles,
+        vehicles: activeVehicle ? [activeVehicle] : [],
         plannedMonthSpend: 0,
       })
     : null;
