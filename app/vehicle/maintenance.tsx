@@ -13,6 +13,7 @@ import {
   deleteMaintenance,
   getMaintenances,
   updateMaintenance,
+  updateVehicle,
 } from '@/lib/database';
 import { formatEuro } from '@/lib/calculations';
 import { formatDateSlash, toLocalYmd } from '@/lib/dates';
@@ -23,7 +24,10 @@ import {
   MAINTENANCE_KIND_LABELS,
   MAINTENANCE_STATUS_LABELS,
   maintenanceIsUrgent,
+  nextPeriodicCtDue,
 } from '@/lib/vehicleMaintenance';
+import { MaintenanceStatusPanel } from '@/components/MaintenanceStatusPanel';
+import * as ImagePicker from 'expo-image-picker';
 import type { MaintenanceKind, VehicleMaintenance } from '@/types';
 
 const KINDS: MaintenanceKind[] = [
@@ -50,7 +54,40 @@ export default function VehicleMaintenanceScreen() {
   const [doneAt, setDoneAt] = useState(toLocalYmd(new Date()));
   const [dueDate, setDueDate] = useState('');
   const [note, setNote] = useState('');
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const pickPhoto = async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      notify('Caméra', 'Autorisez la caméra pour photographier le CT / la carte grise.');
+      return;
+    }
+    const shot = await ImagePicker.launchCameraAsync({
+      quality: 0.7,
+      allowsEditing: false,
+    });
+    if (!shot.canceled && shot.assets?.[0]?.uri) {
+      setPhotoUri(shot.assets[0].uri);
+      notify('Photo', 'Jointe à l’entrée (sauvegarde locale)');
+    }
+  };
+
+  const pickRegistration = async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      notify('Caméra', 'Autorisez la caméra.');
+      return;
+    }
+    const shot = await ImagePicker.launchCameraAsync({ quality: 0.75 });
+    if (shot.canceled || !shot.assets?.[0]?.uri) return;
+    await updateVehicle(vehicleId, { registrationPhotoUri: shot.assets[0].uri });
+    await refresh();
+    notify(
+      'Carte grise',
+      'Photo enregistrée. Saisissez l’immat. dans Modifier véhicule (OCR auto à venir).'
+    );
+  };
 
   const reload = useCallback(async () => {
     if (!Number.isFinite(vehicleId)) return;
@@ -97,12 +134,29 @@ export default function VehicleMaintenanceScreen() {
         dueDate: due,
         status: done ? 'done' : 'pending',
         note: note.trim() || undefined,
+        photoUri,
       });
+      if (kind === 'controle_technique' && done) {
+        // Propose prochain CT +2 ans si pas d’échéance
+        if (!due) {
+          await createMaintenance({
+            vehicleId,
+            kind: 'controle_technique',
+            title: 'Prochain contrôle technique',
+            amount: null,
+            doneAt: null,
+            dueDate: nextPeriodicCtDue(done),
+            status: 'pending',
+            note: 'Généré après CT favorable',
+          });
+        }
+      }
       await refresh();
       await reload();
       void refreshVehicleReminders();
       setAmount('');
       setNote('');
+      setPhotoUri(null);
       notify('Enregistré', title.trim());
     } catch (e) {
       notify('Erreur', e instanceof Error ? e.message : 'Échec');
@@ -169,6 +223,39 @@ export default function VehicleMaintenanceScreen() {
         CT, contre-visite, contrôle pollution, assurance, entretien… L’app rappelle les échéances
         (notifications si activées sur le véhicule).
       </Text>
+
+      <MaintenanceStatusPanel
+        upToDate={vehicle.maintenanceUpToDate}
+        checklist={vehicle.maintenanceChecklist}
+        onChangeUpToDate={async (v) => {
+          await updateVehicle(vehicleId, { maintenanceUpToDate: v });
+          await refresh();
+        }}
+        onChangeChecklist={async (next) => {
+          await updateVehicle(vehicleId, { maintenanceChecklist: next });
+          await refresh();
+        }}
+      />
+
+      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
+        <Button title="Photo CT / facture" variant="secondary" onPress={pickPhoto} style={{ flex: 1 }} />
+        <Button
+          title="Photo carte grise"
+          variant="secondary"
+          onPress={pickRegistration}
+          style={{ flex: 1 }}
+        />
+      </View>
+      {photoUri ? (
+        <Text style={{ color: colors.success, marginBottom: 8, fontSize: 12 }}>
+          Photo prête à joindre à la prochaine entrée.
+        </Text>
+      ) : null}
+      {vehicle.registrationPhotoUri ? (
+        <Text style={{ color: colors.textSecondary, marginBottom: 8, fontSize: 12 }}>
+          Carte grise : photo enregistrée sur le véhicule.
+        </Text>
+      ) : null}
 
       <Text style={[styles.section, { color: colors.text }]}>À faire / historique</Text>
       {items.length === 0 ? (

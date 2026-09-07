@@ -162,6 +162,11 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
   await alterSafe('ALTER TABLE vehicles ADD COLUMN low_fuel_threshold_liters REAL');
   await alterSafe('ALTER TABLE vehicles ADD COLUMN consumption_learn_factor REAL NOT NULL DEFAULT 1');
   await alterSafe('ALTER TABLE vehicles ADD COLUMN transmission_gears INTEGER');
+  await alterSafe('ALTER TABLE vehicles ADD COLUMN maintenance_up_to_date INTEGER');
+  await alterSafe('ALTER TABLE vehicles ADD COLUMN maintenance_checklist TEXT');
+  await alterSafe('ALTER TABLE vehicles ADD COLUMN plate_number TEXT');
+  await alterSafe('ALTER TABLE vehicles ADD COLUMN registration_photo_uri TEXT');
+  await alterSafe('ALTER TABLE vehicle_maintenances ADD COLUMN photo_uri TEXT');
 }
 
 function mapVehicle(row: unknown): Vehicle {
@@ -204,6 +209,27 @@ function mapVehicle(row: unknown): Vehicle {
       r.transmission_gears === null || r.transmission_gears === undefined
         ? null
         : (r.transmission_gears as number),
+    maintenanceUpToDate:
+      r.maintenance_up_to_date === null || r.maintenance_up_to_date === undefined
+        ? null
+        : Boolean(r.maintenance_up_to_date),
+    maintenanceChecklist: (() => {
+      const raw = r.maintenance_checklist as string | null | undefined;
+      if (!raw) return undefined;
+      try {
+        return JSON.parse(raw) as Record<string, boolean>;
+      } catch {
+        return undefined;
+      }
+    })(),
+    plateNumber:
+      r.plate_number === null || r.plate_number === undefined
+        ? null
+        : String(r.plate_number),
+    registrationPhotoUri:
+      r.registration_photo_uri === null || r.registration_photo_uri === undefined
+        ? null
+        : String(r.registration_photo_uri),
     isActive: Boolean(r.is_active),
     createdAt: r.created_at as string,
   };
@@ -221,6 +247,8 @@ function mapMaintenance(row: unknown): VehicleMaintenance {
     dueDate: (r.due_date as string) || null,
     status: (r.status as VehicleMaintenance['status']) || 'pending',
     note: (r.note as string) || undefined,
+    photoUri:
+      r.photo_uri === null || r.photo_uri === undefined ? null : String(r.photo_uri),
     createdAt: (r.created_at as string) || new Date().toISOString(),
   };
   return { ...base, status: refreshMaintenanceStatus(base) };
@@ -269,8 +297,8 @@ export async function createMaintenance(
     createdAt: new Date().toISOString(),
   });
   const result = await database.runAsync(
-    `INSERT INTO vehicle_maintenances (vehicle_id, kind, title, amount, done_at, due_date, status, note)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO vehicle_maintenances (vehicle_id, kind, title, amount, done_at, due_date, status, note, photo_uri)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       m.vehicleId,
       m.kind,
@@ -280,6 +308,7 @@ export async function createMaintenance(
       m.dueDate,
       status,
       m.note ?? null,
+      m.photoUri ?? null,
     ]
   );
   return Number(result.lastInsertRowId);
@@ -319,6 +348,10 @@ export async function updateMaintenance(
   if (patch.note !== undefined) {
     fields.push('note = ?');
     values.push(patch.note ?? null);
+  }
+  if (patch.photoUri !== undefined) {
+    fields.push('photo_uri = ?');
+    values.push(patch.photoUri ?? null);
   }
   if (!fields.length) return;
   values.push(id);
@@ -503,6 +536,24 @@ export async function updateVehicle(id: number, vehicle: Partial<Vehicle>): Prom
   if (vehicle.transmissionGears !== undefined) {
     fields.push('transmission_gears = ?');
     values.push(vehicle.transmissionGears);
+  }
+  if (vehicle.maintenanceUpToDate !== undefined) {
+    fields.push('maintenance_up_to_date = ?');
+    values.push(
+      vehicle.maintenanceUpToDate === null ? null : vehicle.maintenanceUpToDate ? 1 : 0
+    );
+  }
+  if (vehicle.maintenanceChecklist !== undefined) {
+    fields.push('maintenance_checklist = ?');
+    values.push(JSON.stringify(vehicle.maintenanceChecklist ?? {}));
+  }
+  if (vehicle.plateNumber !== undefined) {
+    fields.push('plate_number = ?');
+    values.push(vehicle.plateNumber);
+  }
+  if (vehicle.registrationPhotoUri !== undefined) {
+    fields.push('registration_photo_uri = ?');
+    values.push(vehicle.registrationPhotoUri);
   }
   if (vehicle.isActive !== undefined) { fields.push('is_active = ?'); values.push(vehicle.isActive ? 1 : 0); }
 

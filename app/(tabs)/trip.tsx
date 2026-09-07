@@ -76,6 +76,8 @@ import {
   fetchElevationAscentM,
   averageMovingSpeedKmh,
   idleRatioFromPoints,
+  accelAggressionFactor,
+  stopAndGoFactor,
 } from '@/lib/consumptionModel';
 import {
   fetchDrivingRoute,
@@ -865,12 +867,16 @@ export default function TripScreen() {
       const ascentM = await fetchElevationAscentM(pts).catch(() => 0);
       const avgSpeedKmh = averageMovingSpeedKmh(trip.distanceKm, pts);
       const idleRatio = idleRatioFromPoints(pts);
+      const accelFactor = accelAggressionFactor(pts);
+      const stopGoFactor = stopAndGoFactor(pts);
       const fuelUsed = vehicle
         ? estimateTripFuelLiters(vehicle, trip.distanceKm, {
             ascentM,
             learnedFactor: vehicle.consumptionLearnFactor,
             avgSpeedKmh,
             idleRatio,
+            accelFactor,
+            stopGoFactor,
           })
         : trip.estimatedFuelUsed;
       const fills = vehicle ? await getFillUps(vehicle.id).catch(() => []) : [];

@@ -53,6 +53,10 @@ export type ConsumptionContext = {
   avgSpeedKmh?: number;
   /** Part du temps quasi à l’arrêt (0–1) — embouteillage / feux */
   idleRatio?: number;
+  /** Facteur accélérations / freinages (1 = neutre) */
+  accelFactor?: number;
+  /** Facteur stop-and-go (1 = neutre) */
+  stopGoFactor?: number;
 };
 
 /** Surconso vs vitesse : ville lente / autoroute rapide. */
@@ -75,6 +79,59 @@ export function trafficIdleFactor(idleRatio: number): number {
   return 1 + r * 0.22;
 }
 
+/**
+ * Style de conduite (accélérations / freinages) à partir des vitesses segment.
+ * Compte les |Δv| élevés → jusqu’à +12 %.
+ */
+export function accelAggressionFactor(points: PointLike[]): number {
+  if (points.length < 3) return 1;
+  let samples = 0;
+  let harsh = 0;
+  for (let i = 2; i < points.length; i++) {
+    const a = points[i - 2];
+    const b = points[i - 1];
+    const c = points[i];
+    const dt1 = b.timestamp - a.timestamp;
+    const dt2 = c.timestamp - b.timestamp;
+    if (dt1 <= 0 || dt1 > 30_000 || dt2 <= 0 || dt2 > 30_000) continue;
+    const d1 = haversineKm(a.latitude, a.longitude, b.latitude, b.longitude);
+    const d2 = haversineKm(b.latitude, b.longitude, c.latitude, c.longitude);
+    const v1 = d1 / (dt1 / 3_600_000);
+    const v2 = d2 / (dt2 / 3_600_000);
+    if (v1 > 130 || v2 > 130) continue;
+    samples += 1;
+    const dv = Math.abs(v2 - v1);
+    // ~+15 km/h en < 4 s ≈ agressif
+    if (dv >= 15 && Math.min(dt1, dt2) < 4000) harsh += 1;
+  }
+  if (samples < 8) return 1;
+  const ratio = Math.min(0.45, harsh / samples);
+  return 1 + ratio * 0.27;
+}
+
+/**
+ * Stop-and-go : transitions arrêt → mouvement (feux / bouchon).
+ * Jusqu’à +10 %.
+ */
+export function stopAndGoFactor(points: PointLike[]): number {
+  if (points.length < 4) return 1;
+  let transitions = 0;
+  let wasIdle = false;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const dt = b.timestamp - a.timestamp;
+    if (!Number.isFinite(dt) || dt <= 0 || dt > 180_000) continue;
+    const dKm = haversineKm(a.latitude, a.longitude, b.latitude, b.longitude);
+    const speedKmh = dKm / (dt / 3600000);
+    const idle = speedKmh < 5;
+    if (wasIdle && !idle) transitions += 1;
+    wasIdle = idle;
+  }
+  const per10kmProxy = Math.min(25, transitions); // borne
+  return 1 + (per10kmProxy / 25) * 0.1;
+}
+
 export function estimateTripFuelLiters(
   vehicle: Vehicle,
   distanceKm: number,
@@ -93,7 +150,10 @@ export function estimateTripFuelLiters(
   const elev = elevationFactor(ctx.ascentM ?? 0, distanceKm);
   const speed = speedConsumptionFactor(ctx.avgSpeedKmh ?? 0);
   const traffic = trafficIdleFactor(ctx.idleRatio ?? 0);
-  const l100 = base * age * gear * REAL_WORLD_MARGIN * learned * elev * speed * traffic;
+  const accel = ctx.accelFactor && ctx.accelFactor > 0.9 ? ctx.accelFactor : 1;
+  const stopGo = ctx.stopGoFactor && ctx.stopGoFactor > 0.9 ? ctx.stopGoFactor : 1;
+  const l100 =
+    base * age * gear * REAL_WORLD_MARGIN * learned * elev * speed * traffic * accel * stopGo;
   return Math.round(((distanceKm * l100) / 100) * 100) / 100;
 }
 
@@ -235,4 +295,27 @@ export function learnedFactorFromGauge(
   if (estimatedLitersBurned <= 0.2 || gaugeDropLiters <= 0) return 1;
   const raw = gaugeDropLiters / estimatedLitersBurned;
   return Math.min(1.55, Math.max(0.85, raw));
+}
+
+/**
+ * Calibration conso à partir des pleins complets (L/100 réelle vs catalogue).
+ * Retourne un facteur ~0.85–1.55 ou null si pas assez d’échantillons.
+ */
+export function learnFactorFromFullFillUps(
+  fillUps: Array<{ liters: number; distanceSinceLastKm: number | null; isFull: boolean }>,
+  catalogueL100: number
+): number | null {
+  const base = catalogueL100 > 0 ? catalogueL100 : 7.5;
+  const ratios: number[] = [];
+  for (const f of fillUps) {
+    if (!f.isFull) continue;
+    const d = f.distanceSinceLastKm;
+    if (d == null || d < 40 || f.liters < 5) continue;
+    const real = (f.liters / d) * 100;
+    if (!Number.isFinite(real) || real < 2 || real > 25) continue;
+    ratios.push(real / base);
+  }
+  if (ratios.length < 2) return null;
+  const avg = ratios.reduce((a, b) => a + b, 0) / ratios.length;
+  return Math.round(Math.min(1.55, Math.max(0.85, avg)) * 1000) / 1000;
 }

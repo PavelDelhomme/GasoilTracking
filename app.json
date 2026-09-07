@@ -2,7 +2,7 @@
   "expo": {
     "name": "Gasoil Tracking",
     "slug": "gasoil-tracking",
-    "version": "1.4.58",
+    "version": "1.4.59",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "gasoiltracking",
@@ -52,7 +52,7 @@
           "apiKey": "VOTRE_CLE_GOOGLE_MAPS_ANDROID"
         }
       },
-      "versionCode": 84
+      "versionCode": 85
     },
     "web": {
       "bundler": "metro",
@@ -88,6 +88,12 @@
         {
           "cameraPermission": "Gasoil Tracking utilise la caméra pour scanner le QR de connexion du site web.",
           "barcodeScannerEnabled": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Gasoil Tracking utilise la caméra pour photographier le CT ou la carte grise."
         }
       ],
       "expo-asset",

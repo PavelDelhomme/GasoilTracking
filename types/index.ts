@@ -39,6 +39,16 @@ export interface Vehicle {
   consumptionLearnFactor?: number;
   /** Nombre de rapports (4 / 5 / 6…) pour affiner la conso. */
   transmissionGears?: number | null;
+  /**
+   * Entretien régulier à jour ? null = non renseigné, true = Oui, false = Non.
+   */
+  maintenanceUpToDate?: boolean | null;
+  /** Checklist entretien (JSON keys → boolean). */
+  maintenanceChecklist?: Record<string, boolean>;
+  /** Immatriculation (carte grise). */
+  plateNumber?: string | null;
+  /** URI locale photo carte grise / CT. */
+  registrationPhotoUri?: string | null;
   isActive: boolean;
   createdAt: string;
 }
@@ -200,5 +210,7 @@ export interface VehicleMaintenance {
   dueDate: string | null;
   status: MaintenanceStatus;
   note?: string;
+  /** Photo jointe (PV CT, facture, etc.) — URI locale. */
+  photoUri?: string | null;
   createdAt: string;
 }

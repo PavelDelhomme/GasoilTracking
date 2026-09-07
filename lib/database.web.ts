@@ -70,6 +70,10 @@ async function load(): Promise<Store> {
         lowFuelThresholdLiters: v.lowFuelThresholdLiters ?? null,
         consumptionLearnFactor: v.consumptionLearnFactor ?? 1,
         transmissionGears: v.transmissionGears ?? null,
+        maintenanceUpToDate: v.maintenanceUpToDate ?? null,
+        maintenanceChecklist: v.maintenanceChecklist,
+        plateNumber: v.plateNumber ?? null,
+        registrationPhotoUri: v.registrationPhotoUri ?? null,
       }));
       cache = parsed;
       return cache;

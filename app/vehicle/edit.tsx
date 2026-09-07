@@ -50,6 +50,7 @@ export default function EditVehicleScreen() {
   const [notifyFuel, setNotifyFuel] = useState(false);
   const [fuelThreshold, setFuelThreshold] = useState('');
   const [gears, setGears] = useState('');
+  const [plate, setPlate] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
@@ -86,6 +87,8 @@ export default function EditVehicleScreen() {
         v.lowFuelThresholdLiters != null ? String(v.lowFuelThresholdLiters) : ''
       );
       setGears(v.transmissionGears != null ? String(v.transmissionGears) : '');
+      setPlate(v.plateNumber || '');
+      setSearch('');
       setVehicle(v);
       setReady(true);
       void getConsumptionStats(v.id).then((s) => {
@@ -140,6 +143,7 @@ export default function EditVehicleScreen() {
         transmissionGears: gears.trim()
           ? parseInt(gears.replace(',', '.'), 10) || null
           : null,
+        plateNumber: plate.trim() || null,
       });
       await refresh();
       void refreshVehicleReminders();
@@ -210,6 +214,13 @@ export default function EditVehicleScreen() {
       <Input label="Nom" value={name} onChangeText={setName} />
       <Input label="Marque" value={brand} onChangeText={setBrand} />
       <Input label="Modèle" value={model} onChangeText={setModel} />
+      <Input
+        label="Immatriculation (carte grise)"
+        value={plate}
+        onChangeText={setPlate}
+        autoCapitalize="characters"
+        placeholder="AA-123-BB"
+      />
       <Input label="Année" value={year} onChangeText={setYear} keyboardType="numeric" />
 
       <Text style={[styles.label, { color: colors.text }]}>Carburant</Text>

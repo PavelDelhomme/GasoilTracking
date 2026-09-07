@@ -28,6 +28,8 @@ import { getFillUps, getTrips } from '@/lib/database';
 import { fuelRemainingTone, fuelToneColor, setFuelLiters } from '@/lib/fuelLevel';
 import { formatRelativeDay } from '@/lib/dates';
 import { notify } from '@/lib/notify';
+import { updateVehicle } from '@/lib/database';
+import { MaintenanceStatusPanel } from '@/components/MaintenanceStatusPanel';
 import type { FillUp, SinceLastFillStats, Trip } from '@/types';
 
 export default function VehicleDetailScreen() {
@@ -212,6 +214,29 @@ export default function VehicleDetailScreen() {
           ))
         )}
       </Card>
+
+      <MaintenanceStatusPanel
+        upToDate={vehicle.maintenanceUpToDate}
+        checklist={vehicle.maintenanceChecklist}
+        onChangeUpToDate={async (v) => {
+          await updateVehicle(vehicle.id, { maintenanceUpToDate: v });
+          await refresh();
+          notify('Entretien', v === true ? 'Marqué à jour' : v === false ? 'Marqué non à jour' : 'Non renseigné');
+        }}
+        onChangeChecklist={async (next) => {
+          await updateVehicle(vehicle.id, { maintenanceChecklist: next });
+          await refresh();
+        }}
+      />
+
+      {vehicle.plateNumber ? (
+        <Card>
+          <Text style={[styles.section, { color: colors.text }]}>Immatriculation</Text>
+          <Text style={{ color: colors.text, fontWeight: '700', letterSpacing: 1 }}>
+            {vehicle.plateNumber}
+          </Text>
+        </Card>
+      ) : null}
 
       <View style={{ gap: 10, marginTop: 4 }}>
         {!isActive && (
