@@ -19,6 +19,7 @@ import {
   resendVerificationEmail,
 } from '@/lib/api';
 import { notify, confirm } from '@/lib/notify';
+import { isQaLabDevice } from '@/lib/qaLabAccess';
 
 export default function AccountScreen() {
   const { colors } = useTheme();
@@ -30,6 +31,7 @@ export default function AccountScreen() {
   const [newPassword2, setNewPassword2] = useState('');
   const [deletePassword, setDeletePassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const showQaLab = isQaLabDevice();
 
   if (!user) {
     return (
@@ -89,6 +91,17 @@ export default function AccountScreen() {
           }}
         />
       </Card>
+
+      {showQaLab && (
+        <Card style={{ marginBottom: 12, borderWidth: 1, borderColor: colors.accent }}>
+          <Text style={[styles.section, { color: colors.text }]}>Labo QA (appareils labo)</Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 10 }}>
+            Checklist + smoke tests — visible seulement sur Nothing / Blackview BV9700 / Samsung
+            SM-G990B2.
+          </Text>
+          <Button title="Ouvrir le labo QA" onPress={() => router.push('/qa/lab' as never)} />
+        </Card>
+      )}
 
       <Card style={{ marginBottom: 12 }}>
         <Text style={[styles.section, { color: colors.text }]}>Mise à jour</Text>

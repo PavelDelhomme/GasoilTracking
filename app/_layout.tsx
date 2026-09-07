@@ -80,6 +80,13 @@ function RootNavigation() {
           }}
         />
         <Stack.Screen
+          name="qa/lab"
+          options={{
+            title: 'Labo QA',
+            headerLeft: () => <HeaderBackButton fallbackHref="/account" />,
+          }}
+        />
+        <Stack.Screen
           name="reset-password"
           options={{
             title: 'Nouveau mot de passe',
