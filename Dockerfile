@@ -12,6 +12,7 @@ ENV EXPO_NO_TELEMETRY=1
 RUN npx expo export --platform web --output-dir dist \
   && mkdir -p dist \
   && cp -f public/download.html dist/download.html \
+  && cp -f public/lab-connect.html dist/lab-connect.html \
   && cp -f public/manifest.webmanifest dist/manifest.webmanifest \
   && cp -f public/sw.js dist/sw.js \
   && cp -f assets/icon.png dist/icon.png \
