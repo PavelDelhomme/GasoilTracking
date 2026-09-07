@@ -20,7 +20,9 @@ import {
   displayOdometerKm,
   getConsumptionStats,
   getSinceLastFillStats,
+  estimateCost,
 } from '@/lib/calculations';
+import { estimateTripFuelLiters } from '@/lib/consumptionModel';
 import { seedDemoData } from '@/lib/seedDemo';
 import { seedTodayCommuteAndFillUp } from '@/lib/seedToday';
 import { notify } from '@/lib/notify';
@@ -218,6 +220,22 @@ export default function HomeScreen() {
   const todayFuel = todayTrips.reduce((s, t) => s + t.estimatedFuelUsed, 0);
   const todayCost = todayTrips.reduce((s, t) => s + t.estimatedCost, 0);
 
+  /** Pendant un trajet actif, recalcule conso si pas encore persistée (évite 0,02 L fantômes). */
+  const activeTripFuel =
+    activeTrip && activeVehicle
+      ? activeTrip.estimatedFuelUsed > 0.05
+        ? activeTrip.estimatedFuelUsed
+        : estimateTripFuelLiters(activeVehicle, activeTrip.distanceKm, {
+            learnedFactor: activeVehicle.consumptionLearnFactor,
+          })
+      : 0;
+  const activeTripCost =
+    activeTrip && activeVehicle
+      ? activeTrip.estimatedCost > 0.05
+        ? activeTrip.estimatedCost
+        : estimateCost(activeTripFuel, activeVehicle.defaultFuelPrice)
+      : 0;
+
   const fuelTone = activeVehicle
     ? fuelRemainingTone({
         litersRemaining:
@@ -233,7 +251,7 @@ export default function HomeScreen() {
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <ScrollView
         style={styles.container}
-        contentContainerStyle={{ paddingBottom: 120 }}
+        contentContainerStyle={{ paddingBottom: 200 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <PendingAccountsBanner />
@@ -391,10 +409,10 @@ export default function HomeScreen() {
                     {formatDistance(activeTrip.distanceKm)}
                   </Text>
                   <Text style={[styles.tripStat, { color: colors.text }]}>
-                    {activeTrip.estimatedFuelUsed.toFixed(2)} L
+                    {activeTripFuel.toFixed(2)} L
                   </Text>
                   <Text style={[styles.tripStat, { color: colors.text }]}>
-                    {formatEuro(activeTrip.estimatedCost)}
+                    {formatEuro(activeTripCost)}
                   </Text>
                 </View>
                 <Button
@@ -740,18 +758,25 @@ export default function HomeScreen() {
               router.push('/fillup/add');
             },
           },
-          {
-            key: 'trip',
-            label: 'Démarrer trajet',
-            icon: 'navigate',
-            onPress: () => {
-              if (!activeVehicle) {
-                router.push('/(tabs)/vehicles' as never);
-                return;
+          activeTrip
+            ? {
+                key: 'trip',
+                label: 'Voir trajet',
+                icon: 'navigate',
+                onPress: () => router.push('/(tabs)/trip'),
               }
-              router.push('/(tabs)/trip');
-            },
-          },
+            : {
+                key: 'trip',
+                label: 'Démarrer trajet',
+                icon: 'navigate',
+                onPress: () => {
+                  if (!activeVehicle) {
+                    router.push('/(tabs)/vehicles' as never);
+                    return;
+                  }
+                  router.push('/(tabs)/trip');
+                },
+              },
         ]}
       />
     </View>

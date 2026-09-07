@@ -63,7 +63,7 @@ import {
   parseRoutePoints,
 } from '@/lib/calculations';
 import {
-  buildDrivingPoints,
+  buildWorkCommuteRoundTrip,
   SIM_HOME,
   SIM_WORK,
 } from '@/lib/gpsCarSimulator';
@@ -139,7 +139,9 @@ export default function TripScreen() {
     destLon?: string;
     autoStart?: string;
     runSim?: string;
+    runSimNonce?: string;
     purgeSim?: string;
+    purgeFirst?: string;
   }>();
   const { activeVehicle, activeTrip, refresh } = useApp();
   const { colors } = useTheme();
@@ -780,30 +782,57 @@ export default function TripScreen() {
     });
   }, [params.autoStart, params.destLat, params.destLon, destination, destCoords, activeVehicle?.id, activeTrip?.id]);
 
-  const simAutoDone = useRef(false);
+  const simAutoKey = useRef<string | null>(null);
   useEffect(() => {
     if (!gpsSimEnabled) return;
-    if (params.runSim !== '1' || simAutoDone.current) return;
+    if (params.runSim !== '1') return;
     if (!activeVehicle || simRunning) return;
-    simAutoDone.current = true;
+    const nonce = typeof params.runSimNonce === 'string' ? params.runSimNonce : '';
+    const key = nonce || '__once__';
+    if (simAutoKey.current === key) return;
+    simAutoKey.current = key;
     setTab('live');
     const t = setTimeout(() => {
-      void handleRunCarSimulator();
-    }, 600);
+      void (async () => {
+        try {
+          if (params.purgeSim === '1' || params.purgeFirst === '1') {
+            await stopActiveTrips();
+            await purgeSimulatorTrips(activeVehicle.id);
+            await refresh();
+            await loadLists();
+          }
+          await handleRunCarSimulator();
+        } catch (e) {
+          showToast(e instanceof Error ? e.message : 'Échec sim auto');
+        }
+      })();
+    }, 700);
     return () => clearTimeout(t);
-  }, [params.runSim, activeVehicle?.id, gpsSimEnabled]);
+  }, [
+    params.runSim,
+    params.runSimNonce,
+    params.purgeSim,
+    params.purgeFirst,
+    activeVehicle?.id,
+    gpsSimEnabled,
+  ]);
 
   const purgeAutoDone = useRef(false);
   useEffect(() => {
+    // Si runSim est aussi demandé, la purge est faite dans l’effet sim (évite Alert/race)
+    if (params.runSim === '1') return;
     if (params.purgeSim !== '1' || purgeAutoDone.current) return;
     purgeAutoDone.current = true;
     void (async () => {
+      await stopActiveTrips();
       const n = await purgeSimulatorTrips(activeVehicle?.id);
       await refresh();
       await loadLists();
-      notify('Purge test', n > 0 ? `${n} trajet(s) simulateur supprimé(s).` : 'Aucun trajet simulateur.');
+      showToast(
+        n > 0 ? `${n} trajet(s) simulateur purgé(s)` : 'Aucun trajet simulateur'
+      );
     })();
-  }, [params.purgeSim, activeVehicle?.id]);
+  }, [params.purgeSim, params.runSim, activeVehicle?.id]);
 
   const handlePause = async (withFillUp: boolean) => {
     if (!activeTrip) return;
@@ -1134,33 +1163,42 @@ export default function TripScreen() {
     }
   };
 
-  /** Simulateur voiture (tests) — injecte un trajet domicile→Inter à ~72 km/h. */
+  /** Simulateur voiture (tests) — aller/retour domicile↔travail + feux + pause.
+   * Injection synchrone (rapide) : évite les trajets zombies si Samsung Freecess
+   * gèle le JS en arrière-plan pendant une sim lente. */
   const handleRunCarSimulator = async () => {
     if (!activeVehicle || simRunning) return;
     simAbort.current.aborted = false;
     setSimRunning(true);
-    setSimProgress('Démarrage sim…');
+    setSimProgress('Démarrage sim commute…');
+    let tripId: number | null = null;
     try {
       await stopBackgroundTracking();
+      await purgeSimulatorTrips(activeVehicle.id);
       await stopActiveTrips();
 
-      const points = buildDrivingPoints(SIM_HOME, SIM_WORK, {
-        speedKmh: 72,
-        stepMeters: 110,
+      const points = buildWorkCommuteRoundTrip({
+        stepMeters: 120,
+        trafficLightsEveryKm: 6.5,
+        workPauseMs: 6 * 60 * 1000,
       });
       setDestCoords(SIM_WORK);
-      setDestination('Intermarché La Guerche (sim)');
-      setPlannedRoute(points.map((p) => ({ latitude: p.latitude, longitude: p.longitude })));
+      setDestination('Travail puis retour domicile (sim)');
+      setPlannedRoute(
+        points
+          .filter((_, i) => i % 8 === 0 || i === points.length - 1)
+          .map((p) => ({ latitude: p.latitude, longitude: p.longitude }))
+      );
       setUserLocation(SIM_HOME);
       setCurrentRegion({
         latitude: SIM_HOME.latitude,
         longitude: SIM_HOME.longitude,
-        latitudeDelta: 0.35,
-        longitudeDelta: 0.35,
+        latitudeDelta: 0.45,
+        longitudeDelta: 0.45,
       });
 
       const first = points[0];
-      const tripId = await createTrip({
+      tripId = await createTrip({
         vehicleId: activeVehicle.id,
         startTime: new Date(first.timestamp).toISOString(),
         endTime: null,
@@ -1175,7 +1213,7 @@ export default function TripScreen() {
           },
         ]),
         originName: 'Domicile (sim)',
-        destinationName: 'Intermarché La Guerche (sim)',
+        destinationName: 'Travail A/R (sim)',
         isActive: true,
         isPaused: false,
         status: 'confirmed',
@@ -1185,23 +1223,36 @@ export default function TripScreen() {
       });
       await refresh();
 
-      // Mode rapide : injecte tout le trajet d’un coup (fiable pour tests Samsung)
-      let routeJson = JSON.stringify(
-        points.map((p) => ({
-          latitude: p.latitude,
-          longitude: p.longitude,
-          timestamp: p.timestamp,
-        }))
-      );
-      // Repasse par le filtre GPS point à point pour coller au vrai pipeline
-      routeJson = JSON.stringify([
+      let routeJson = JSON.stringify([
         {
           latitude: first.latitude,
           longitude: first.longitude,
           timestamp: first.timestamp,
         },
       ]);
-      setSimProgress('Injection GPS…');
+      setSimProgress(`Injection GPS 0/${points.length}…`);
+
+      const persistPartial = async (idx: number) => {
+        const dist = calculateRouteDistance(routeJson);
+        const fuel = estimateTripFuelLiters(activeVehicle, dist, {
+          learnedFactor: activeVehicle.consumptionLearnFactor,
+        });
+        const cost = estimateCost(fuel, activeVehicle.defaultFuelPrice);
+        await updateTrip(tripId!, {
+          routePoints: routeJson,
+          distanceKm: dist,
+          estimatedFuelUsed: fuel,
+          estimatedCost: cost,
+          isActive: true,
+        });
+        setUserLocation({
+          latitude: points[idx].latitude,
+          longitude: points[idx].longitude,
+        });
+        setSimProgress(`Sim ${idx + 1}/${points.length} · ${formatDistance(dist)}`);
+        await refresh();
+      };
+
       for (let i = 1; i < points.length; i++) {
         if (simAbort.current.aborted) break;
         const point = points[i];
@@ -1212,20 +1263,29 @@ export default function TripScreen() {
           accuracy: point.accuracy ?? 8,
           speed: point.speed ?? 20,
         });
-        if (i % 40 === 0) {
-          setSimProgress(`Sim ${i}/${points.length}`);
-          setUserLocation({ latitude: point.latitude, longitude: point.longitude });
+        // Yield UI régulièrement sans ralentir au point de se faire freezer
+        if (i % 80 === 0 || i === points.length - 1) {
+          await persistPartial(i);
+          await new Promise((r) => setTimeout(r, 16));
         }
-      }
-
-      if (simAbort.current.aborted) {
-        notify('Sim annulée', 'Trajet sim laissé actif — terminez-le ou supprimez-le.');
-        return;
       }
 
       routeJson = compactRoutePointsJson(routeJson);
       const distanceKm = calculateRouteDistance(routeJson);
-      const fuelUsed = estimateTripFuelLiters(activeVehicle, distanceKm);
+      const pts = JSON.parse(routeJson) as {
+        latitude: number;
+        longitude: number;
+        timestamp: number;
+      }[];
+      const idleRatio = idleRatioFromPoints(pts);
+      const accelFactor = accelAggressionFactor(pts);
+      const stopGoFactor = stopAndGoFactor(pts);
+      const fuelUsed = estimateTripFuelLiters(activeVehicle, distanceKm, {
+        idleRatio,
+        accelFactor,
+        stopGoFactor,
+        learnedFactor: activeVehicle.consumptionLearnFactor,
+      });
       const cost = estimateCost(fuelUsed, activeVehicle.defaultFuelPrice);
       const stats = calculateTripStats(
         activeVehicle,
@@ -1234,6 +1294,8 @@ export default function TripScreen() {
         new Date().toISOString(),
         routeJson
       );
+
+      // Toujours finaliser (même si abort partiel) — jamais de zombie 0 L
       await updateTrip(tripId, {
         routePoints: routeJson,
         distanceKm,
@@ -1243,8 +1305,10 @@ export default function TripScreen() {
         isPaused: false,
         endTime: new Date().toISOString(),
         originName: 'Domicile (sim)',
-        destinationName: 'Intermarché La Guerche (sim)',
-        note: `SIMULATEUR · ${formatDistance(distanceKm)} · ${stats.movingSpeedKmh.toFixed(0)} km/h moy. · ~${fuelUsed.toFixed(1)} L`,
+        destinationName: 'Travail A/R (sim)',
+        note: simAbort.current.aborted
+          ? `SIMULATEUR (interrompu) · ${formatDistance(distanceKm)} · ~${fuelUsed.toFixed(1)} L`
+          : `SIMULATEUR commute · ${formatDistance(distanceKm)} · ${stats.movingSpeedKmh.toFixed(0)} km/h moy. · idle ${(idleRatio * 100).toFixed(0)}% · ~${fuelUsed.toFixed(1)} L`,
       });
       setUserLocation({
         latitude: points[points.length - 1].latitude,
@@ -1254,12 +1318,29 @@ export default function TripScreen() {
       await refresh();
       await loadLists();
       setTab('history');
-      notify(
-        'Sim OK',
-        `${formatDistance(distanceKm)} · ~${fuelUsed.toFixed(1)} L · ${formatEuro(cost)} · ${stats.movingSpeedKmh.toFixed(0)} km/h — vérifiez l’historique.`
-      );
+      if (simAbort.current.aborted) {
+        showToast(
+          `Sim interrompue · ${formatDistance(distanceKm)} · ~${fuelUsed.toFixed(1)} L`
+        );
+      } else {
+        showToast(
+          `Sim OK · ${formatDistance(distanceKm)} · ~${fuelUsed.toFixed(1)} L · ${formatEuro(cost)}`
+        );
+      }
     } catch (e) {
-      notify('Sim erreur', e instanceof Error ? e.message : 'Échec simulateur');
+      if (tripId != null) {
+        try {
+          await updateTrip(tripId, {
+            isActive: false,
+            isPaused: false,
+            endTime: new Date().toISOString(),
+            note: 'SIMULATEUR — erreur / finalisé auto',
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+      showToast(e instanceof Error ? e.message : 'Échec simulateur');
     } finally {
       setSimRunning(false);
       setSimProgress('');
@@ -1313,6 +1394,21 @@ export default function TripScreen() {
       ? tripStats.movingSpeedKmh > 0
         ? tripStats.movingSpeedKmh
         : (activeTrip.distanceKm / Math.max(tripStats.durationMinutes, 0.01)) * 60
+      : 0;
+
+  const liveActiveFuel =
+    activeTrip && activeVehicle
+      ? activeTrip.estimatedFuelUsed > 0.05
+        ? activeTrip.estimatedFuelUsed
+        : estimateTripFuelLiters(activeVehicle, activeTrip.distanceKm, {
+            learnedFactor: activeVehicle.consumptionLearnFactor,
+          })
+      : 0;
+  const liveActiveCost =
+    activeTrip && activeVehicle
+      ? activeTrip.estimatedCost > 0.05
+        ? activeTrip.estimatedCost
+        : estimateCost(liveActiveFuel, activeVehicle.defaultFuelPrice)
       : 0;
 
   const routePoints = activeTrip ? parseRoutePoints(activeTrip.routePoints) : [];
@@ -1698,9 +1794,9 @@ export default function TripScreen() {
                 <View style={styles.statsRow}>
                   <StatCard
                     label="Carburant est."
-                    value={`${activeTrip.estimatedFuelUsed.toFixed(2)} L`}
+                    value={`${liveActiveFuel.toFixed(2)} L`}
                   />
-                  <StatCard label="Coût est." value={formatEuro(activeTrip.estimatedCost)} />
+                  <StatCard label="Coût est." value={formatEuro(liveActiveCost)} />
                 </View>
                 <Text style={{ color: colors.textSecondary, marginBottom: 12, fontSize: 13 }}>
                   Durée : {Math.floor(tripStats?.durationMinutes ?? 0)} min

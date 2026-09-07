@@ -31,6 +31,8 @@ module.exports = ({ config }) => {
       flavorAccent: flavor.accentHint,
       defaultLoginEmail: flavor.defaultLoginEmail,
       followsProdOta: flavor.followsProdOta,
+      // Simu GPS trajet (tests labo) — jamais sur prod utilisateurs
+      enableGpsSimulator: ['preprod', 'dev', 'feat', 'qa'].includes(flavor.key),
     },
   };
 };
