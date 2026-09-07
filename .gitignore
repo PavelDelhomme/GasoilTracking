@@ -3,6 +3,8 @@ node_modules/
 dist/
 web-build/
 .tmp/
+*.pdf
+!scripts/reports/**
 npm-debug.*
 *.jks
 *.p8

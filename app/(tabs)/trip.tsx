@@ -1110,7 +1110,8 @@ export default function TripScreen() {
     }
     const onChange = (state: AppStateStatus) => {
       if (state === 'active' && activeTrip && !activeTrip.isPaused) {
-        // Retour depuis Maps → vérifier arrivée
+        // Reprend le FGS si l’OS l’a coupé (Freecess Samsung / doze) — critique aussi Nothing
+        void startBackgroundTracking();
         void checkArrivalProximity();
       }
     };

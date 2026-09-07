@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const { bindPdfHelpers } = require('../pdfkit-safe');
 
-const OUT_NAME = process.env.REPORT_OUT || 'GasoilTracking-Rapport-complet-1-7-septembre-2026-v6.pdf';
+const OUT_NAME = process.env.REPORT_OUT || 'GasoilTracking-Rapport-complet-1-7-septembre-2026.pdf';
 const outDir = process.env.REPORT_DIR
   ? path.resolve(process.env.REPORT_DIR)
   : path.join(__dirname, '../../../dist/reports');
@@ -23,7 +23,7 @@ const doc = new PDFDocument({
   info: {
     Title: 'Gasoil Tracking — Rapport complet 1–7 septembre 2026',
     Author: 'Gasoil Tracking',
-    Subject: 'Semaine + week-end + suite 1.4.50–57 — sans débordement',
+    Subject: 'Semaine + week-end + suite 1.4.50–60 — sans débordement',
   },
 });
 
@@ -73,10 +73,10 @@ doc
   .text('Rapport récapitulatif complet — 1er au 7 septembre 2026', LEFT(), doc.y, {
     width: WIDTH(),
   });
-note('Semaine intensive + week-end · suite 1.4.50–56 · Mobile · API · Web · Infra · Labo QA');
+note('Semaine intensive + week-end · suite 1.4.50–60 · Mobile · API · Web · Infra · Labo QA');
 callout(
   'Version live au moment du rapport',
-  '1.4.57 (force-update) — https://gasoil-tracking.delhomme.ovh\nAPK : …/api/download/gasoil-tracking-1.4.57.apk\nLabo QA : Nothing / Blackview BV9700 / Samsung SM-G990B2 uniquement',
+  '1.4.60 (force-update) — https://gasoil-tracking.delhomme.ovh\nAPK : …/api/download/gasoil-tracking-1.4.60.apk\nLabo QA : Nothing / Blackview BV9700 / Samsung SM-G990B2 uniquement\nFlavors : prod · preprod · qa · admin · dev (packages séparés)',
   '#16a34a'
 );
 kvList([
@@ -88,7 +88,7 @@ kvList([
   ['Compte QA', 'qa.lab@maily.ovh (jetable — create/reset/delete via script / admin)'],
 ]);
 para(
-  'Ce PDF reprend le rapport technique & produit densifié du 6 septembre (20:05) — semaine entière, features, données, infra, checklist — et y ajoute la vague 1.4.50→1.4.56. Les tableaux sont clipés avec retour à la ligne : plus de débordement à droite.'
+  'Ce PDF reprend le rapport technique & produit densifié du 6 septembre (20:05) — semaine entière, features, données, infra, checklist — et y ajoute la vague 1.4.50→1.4.60 (multi-apps labo, backlog entretien/conso/photos, sim commute). Les tableaux sont clipés avec retour à la ligne : plus de débordement à droite.'
 );
 callout(
   'Mails / PDF déjà envoyés (contexte)',
@@ -101,19 +101,19 @@ h2('Sommaire');
 bullets([
   '1. Synthèse exécutive & chiffres clés',
   '2. État de la production (URLs, force-update, stack)',
-  '3. Chronologie détaillée des versions (1.0 → 1.4.56)',
+  '3. Chronologie détaillée des versions (1.0 → 1.4.60)',
   '4. Semaine Mardi–Vendredi (2–4 septembre)',
   '5. Week-end Vendredi soir–Dimanche (5–6 septembre)',
-  '6. Suite lundi 7 septembre (1.4.50 → 1.4.56)',
+  '6. Suite lundi 7 septembre (1.4.50 → 1.4.60)',
   '7. Fonctionnalités majeures (Maps, jauge, QR, budget, sync)',
   '8. Correction données : pleins 806 / Touran / 206 & budget 250 €',
   '9. Accessibilité, polish UX, messages API',
   '10. Déploiement, Docker, Portainer, releases APK',
-  '11. Devices, signature EAS, Labo QA',
+  '11. Devices, flavors multi-apps, signature EAS, Labo QA',
   '12. Checklist de vérification terrain',
   '13. Inventaire API / modèle données / runbook ops',
   '14. Annexe commits & pistes suivantes',
-  '15. Backlog terrain : conso réelle, CT photo, carte grise, entretien',
+  '15. Backlog terrain : conso, CT photo, carte grise, entretien (état 1.4.60)',
 ]);
 
 // ===================== 1 =====================
@@ -124,8 +124,8 @@ para(
 table(
   ['Indicateur', 'Valeur'],
   [
-    ['Versions livrées (période)', '~55+ commits majeurs / releases 1.x→1.4.56'],
-    ['Version live', '1.4.56 (forceUpdate = true)'],
+    ['Versions livrées (période)', '~60+ commits majeurs / releases 1.x→1.4.60'],
+    ['Version live', '1.4.60 (forceUpdate = true)'],
     ['Budget carburant mensuel', '250 € total (806 + Touran + 206 cumulés)'],
     ['Surfaces touchées', 'Mobile + API + Web + Infra VPS'],
     ['Nouveauté auth', 'QR login web scanné depuis l’app'],
@@ -150,7 +150,7 @@ table(
   [
     ['URL app/web', 'https://gasoil-tracking.delhomme.ovh'],
     ['Download', 'https://gasoil-tracking.delhomme.ovh/download'],
-    ['APK 1.4.56', '…/api/download/gasoil-tracking-1.4.57.apk'],
+    ['APK 1.4.60', '…/api/download/gasoil-tracking-1.4.60.apk'],
     ['API version', 'GET /api/version (forceUpdate, releaseNotes, apkUrl)'],
     ['Health', 'GET /health → « ok » ; JSON {status,version}'],
     ['Stack', 'Docker Compose api + web · Portainer Git refs/heads/prod'],
@@ -176,6 +176,9 @@ table(
     ['1.4.32 → 1.4.41', '6 sept. matin', 'Maps nav, jauge visuelle, bilan jour (1er mail récap)'],
     ['1.4.42 → 1.4.49', '6 sept. soir', 'Itinéraires génériques, QR, a11y, budget 250€, icône pompe'],
     ['1.4.50 → 1.4.56', '6–7 sept.', 'Prix 2,25 €/L, trajets/offline, jauge confirm, Labo QA, PDF cadré'],
+    ['1.4.57 → 1.4.58', '7 sept.', '502 nginx DNS, multi-apps flavors, pipeline PDF'],
+    ['1.4.59', '7 sept.', 'Entretien checklist, conso accel/stop-go, photos CT/carte grise'],
+    ['1.4.60', '7 sept. soir', 'Sim commute anti-zombie Samsung, conso live, FAB Accueil'],
   ],
   [1.1, 0.9, 2.2]
 );
@@ -309,7 +312,7 @@ bullets([
 ]);
 
 // ===================== 6 =====================
-h2('5 bis. Suite lundi 7 septembre (1.4.50 → 1.4.56)');
+h2('5 bis. Suite lundi 7 septembre (1.4.50 → 1.4.60)');
 para(
   'Après le rapport du 6 sept. ~20:05 (jusqu’à 1.4.49), une vague de correctifs usage a suivi : données gazole réalistes, trajets/Maps/offline, jauge type tableau de bord, budget, stations, puis Labo QA réservé aux appareils labo.'
 );
@@ -323,6 +326,9 @@ table(
     ['1.4.54', 'Skip jauge Terminer, suivi libre, alts carte, messages sync'],
     ['1.4.55', 'Offline/ping, jauge 0·¼·½·1 + confirm, swipe, Voir véhicule, stations cache, conso trafic'],
     ['1.4.56', 'Labo QA gated (Nothing/BV9700/G990B2), checklist, compte qa.lab, PDF cadrés'],
+    ['1.4.57–58', 'Fix 502 nginx, flavors multi-apps (prod/preprod/qa/admin/dev), PDF pipeline'],
+    ['1.4.59', 'Entretien Oui/Non+checklist, conso accel/stop-go+calibration pleins, photos CT/CG'],
+    ['1.4.60', 'Sim commute A/R fiable (Samsung), conso live trajet actif, FAB Accueil'],
   ],
   [0.7, 3.3]
 );
@@ -472,7 +478,7 @@ para(
 table(
   ['#', 'À vérifier', 'Où'],
   [
-    ['1', 'Version 1.4.56+', 'Compte'],
+    ['1', 'Version 1.4.60+', 'Compte'],
     ['2', 'Pas de faux hors-ligne', 'Sync header'],
     ['3', 'Routes multi carte', 'Trajet → destination'],
     ['4', 'Maps sans arrêt fantôme', 'Démarrer + Maps'],
@@ -493,9 +499,9 @@ table(
 table(
   ['Appareil', 'Rôle', 'État'],
   [
-    ['Nothing Phone', 'Usage quotidien + Labo QA', 'Installer 1.4.57 (force-update)'],
-    ['Blackview BV9700 Pro', 'Labo QA / GPS / Maps', '1.4.56 installé'],
-    ['Samsung SM-G990B2', 'Labo QA', '1.4.56 installé'],
+    ['Nothing Phone', 'Usage quotidien + Labo QA (prod/preprod/qa/admin)', 'Installer 1.4.60 (force-update)'],
+    ['Blackview BV9700 Pro', 'Labo QA / GPS / Maps / toutes flavors', '1.4.60 installé'],
+    ['Samsung SM-G990B2', 'Labo QA (sim commute validée)', '1.4.60 installé'],
     ['Xiaomi', 'Exclu (consigne)', 'Ne pas installer'],
   ],
   [1.4, 1.6, 1.4]
@@ -632,36 +638,38 @@ bullets([
   'Mipmaps mdpi→xxxhdpi : ic_launcher, round, foreground (webp)',
   'Splash logos drawable-* mis à jour · iconBackground / splashscreen_background = #1a1a2e',
 ]);
-h3('Pistes suivantes / backlog terrain (demandes 7 sept.)');
+h3('Pistes suivantes / backlog terrain (état 1.4.60)');
 para(
-  'Etat au 7 septembre 2026 : une partie de la conso « réelle » existe déjà (dénivelé Open-Meteo, idle/bouchons via points GPS, facteur âge / boîte). L’entretien / CT existe en rappels manuels. Les points ci-dessous restent A FAIRE (pas encore livrés).'
+  'Etat au soir du 7 septembre 2026 (v1.4.60) : une grande partie du backlog terrain est livrée en v1. Ce qui reste est surtout OCR texte auto et raffinements conso.'
 );
-h3('A) Consommation carburant plus réaliste (priorité)');
+h3('A) Consommation carburant plus réaliste');
 bullets([
-  'DEJA PARTIEL : dénivelé (ascent), idle/bouchons (vitesse < 5 km/h), âge véhicule, nb rapports, vitesse moyenne',
-  'A FAIRE : modèle plus riche - accélérations / freinages, pente continue (pas seulement ascent total), température / clim, charge (passagers / coffre), type de route (ville / voie rapide), style de conduite',
-  'A FAIRE : boîte auto vs manuelle + régime estimé (pas seulement nb de rapports)',
-  'A FAIRE : calibration par véhicule à partir des pleins réels (apprendre la conso vraie vs estimée)',
-  'A FAIRE : détection bouchons plus fine (stop-and-go, durée à l’arrêt moteur allumé)',
+  'FAIT (1.4.59) : accélération / freinage (accelAggressionFactor), stop-and-go, calibration après pleins (learnFactor)',
+  'DEJA : dénivelé (ascent), idle/bouchons, âge véhicule, nb rapports, vitesse moyenne',
+  'A FAIRE : température / clim, charge (passagers / coffre), type de route plus fin, boîte auto vs manuelle + régime',
 ]);
 h3('B) Entretien régulier');
 bullets([
+  'FAIT (1.4.59) : Oui / Non / N/R « entretien à jour » + checklist cochable par véhicule',
   'DEJA : rappels CT / entretien (dates, urgences, écran vehicle/maintenance)',
-  'A FAIRE : case Oui / Non « entretien régulier à jour » par véhicule, avec historique',
-  'A FAIRE : checklist entretien (vidange, freins, pneus, filtres…) cochable',
   'A FAIRE : rappels kilométriques + calendaires plus configurables',
 ]);
-h3('C) Contrôle technique en photo (OCR)');
+h3('C) Contrôle technique en photo');
 bullets([
-  'A FAIRE : photo du PV de CT -> extraction auto (date, résultat favorable/défavorable, prochain CT, km, observations)',
-  'A FAIRE : attacher la photo au véhicule + préremplir les champs entretien / CT',
+  'FAIT (1.4.59) : photo CT attachée au véhicule (expo-image-picker)',
+  'A FAIRE : OCR texte auto (date, résultat, prochain CT, km, observations) → préremplir',
   'A FAIRE : alerte si prochain CT approche (déjà partiel via rappels manuels)',
 ]);
-h3('D) Carte grise / infos véhicule (OCR)');
+h3('D) Carte grise / infos véhicule');
 bullets([
-  'A FAIRE : photo carte grise -> récupération auto (immat, marque, modèle, année, puissance, énergie, CO2, masse…)',
-  'A FAIRE : préremplir / mettre à jour la fiche véhicule (éviter la saisie manuelle)',
-  'A FAIRE : optionnellement croiser avec base SIV / open data si dispo (France)',
+  'FAIT (1.4.59) : photo carte grise + champ immatriculation saisie manuelle',
+  'A FAIRE : OCR carte grise (immat, marque, modèle, année…) → préremplir fiche',
+]);
+h3('E) Labo / sim / multi-apps (livré 1.4.58–60)');
+bullets([
+  'FAIT : flavors prod/preprod/qa/admin/dev (packages + sessions séparées)',
+  'FAIT : sim commute A/R + feux + finalisation anti-zombie (Samsung Freecess)',
+  'FAIT : pipeline PDF mail avec gate overflow PASS obligatoire',
 ]);
 bullets([
   'Export CSV / PDF mensuel des dépenses carburant',
@@ -672,8 +680,8 @@ bullets([
   'Mode hors-ligne renforcé (file d’attente sync + conflits)',
 ]);
 callout(
-  'Document v6 - rapport complet + backlog terrain + PDF sans debordement',
-  'Contenu densifie type 6 sept. 20:05 + vague 1.4.50-57 + backlog conso/CT/carte grise.\nPDF : helpers marges forcees + test auto 0 encre marge droite.\nGenere le 7 septembre 2026 - paveldelhomme@gmail.com',
+  'Document v7 - rapport complet à jour 1.4.60 + PDF sans débordement',
+  'Contenu densifié type 6 sept. 20:05 + vague 1.4.50-60 (multi-apps, backlog partiel livré, sim commute).\nPDF : helpers marges forcées + test auto 0 encre marge droite.\nGénéré le 7 septembre 2026 soir - paveldelhomme@gmail.com',
   ACCENT
 );
 
@@ -688,7 +696,7 @@ for (let i = 0; i < range.count; i++) {
     .fontSize(7)
     .fillColor(MUTED)
     .text(
-      `Gasoil Tracking — Rapport complet 1–7 sept. 2026 (v6 backlog + marges OK) — ${i + 1}/${range.count}`,
+      `Gasoil Tracking — Rapport complet 1–7 sept. 2026 (v7 · 1.4.60 · marges OK) — ${i + 1}/${range.count}`,
       LEFT(),
       doc.page.height - 28,
       { width: WIDTH(), align: 'center', lineBreak: false, height: 12 }
