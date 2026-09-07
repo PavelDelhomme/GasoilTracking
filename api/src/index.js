@@ -1755,6 +1755,106 @@ app.post('/api/admin/reject-pending', auth, requireManager, (req, res) => {
   res.json({ ok: true, message: `Inscription refusée / annulée : ${email}` });
 });
 
+/** Compte QA labo jetable — create / reset / delete / status (managers only). */
+const QA_LAB_EMAIL_DEFAULT = String(process.env.QA_LAB_EMAIL || 'qa.lab@maily.ovh')
+  .toLowerCase()
+  .trim();
+const QA_LAB_NAME_DEFAULT = process.env.QA_LAB_NAME || 'QA Lab Gasoil';
+
+function randomQaPassword() {
+  return crypto.randomBytes(16).toString('base64url').slice(0, 20);
+}
+
+app.get('/api/admin/qa-lab', auth, requireManager, (_req, res) => {
+  const email = QA_LAB_EMAIL_DEFAULT;
+  const u = db
+    .prepare('SELECT id, email, name, email_verified, created_at FROM users WHERE email = ?')
+    .get(email);
+  const sync = u
+    ? db.prepare('SELECT updated_at, length(payload) as bytes FROM sync_data WHERE user_id = ?').get(u.id)
+    : null;
+  res.json({
+    email,
+    exists: Boolean(u),
+    user: u || null,
+    sync: sync || null,
+  });
+});
+
+app.post('/api/admin/qa-lab', auth, requireManager, (req, res) => {
+  try {
+    const action = String(req.body?.action || '').toLowerCase().trim();
+    const email = QA_LAB_EMAIL_DEFAULT;
+    const name = QA_LAB_NAME_DEFAULT;
+    if (!['create', 'reset', 'delete', 'status'].includes(action)) {
+      return res.status(400).json({ error: 'action = create|reset|delete|status' });
+    }
+    if (action === 'status') {
+      const u = db
+        .prepare('SELECT id, email, name, email_verified, created_at FROM users WHERE email = ?')
+        .get(email);
+      return res.json({ ok: true, action: 'status', email, exists: Boolean(u), user: u || null });
+    }
+    if (action === 'delete') {
+      const u = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+      if (!u) return res.json({ ok: true, action: 'delete', email, deleted: false });
+      db.prepare('DELETE FROM sync_data WHERE user_id = ?').run(u.id);
+      db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(u.id);
+      try {
+        db.prepare('DELETE FROM qr_login_challenges WHERE user_id = ?').run(u.id);
+      } catch {
+        /* table optionnelle */
+      }
+      db.prepare('DELETE FROM users WHERE id = ?').run(u.id);
+      db.prepare('DELETE FROM pending_registrations WHERE email = ?').run(email);
+      return res.json({ ok: true, action: 'delete', email, deleted: true, id: u.id });
+    }
+    // create | reset
+    const pass =
+      String(req.body?.password || '').trim().length >= 12
+        ? String(req.body.password).trim()
+        : randomQaPassword();
+    const hash = bcrypt.hashSync(pass, 12);
+    const now = new Date().toISOString();
+    db.prepare('DELETE FROM pending_registrations WHERE email = ?').run(email);
+    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    if (existing) {
+      db.prepare('UPDATE users SET password_hash = ?, email_verified = 1, name = ? WHERE email = ?').run(
+        hash,
+        name,
+        email
+      );
+      return res.json({
+        ok: true,
+        action: 'reset',
+        email,
+        id: existing.id,
+        password: pass,
+        message: 'Mot de passe QA régénéré (affiché une seule fois).',
+      });
+    }
+    const id = uuid();
+    db.prepare(
+      'INSERT INTO users (id, email, password_hash, name, email_verified, created_at) VALUES (?, ?, ?, ?, 1, ?)'
+    ).run(id, email, hash, name, now);
+    db.prepare(
+      `INSERT INTO sync_data (user_id, payload, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(user_id) DO NOTHING`
+    ).run(id, JSON.stringify({ vehicles: [], fillUps: [], budgets: [], trips: [] }), now);
+    return res.json({
+      ok: true,
+      action: 'create',
+      email,
+      id,
+      password: pass,
+      message: 'Compte QA créé (mot de passe affiché une seule fois).',
+    });
+  } catch (e) {
+    console.error('qa-lab', e);
+    return res.status(500).json({ error: 'Impossible de gérer le compte QA' });
+  }
+});
+
 app.post('/api/admin/releases', auth, requireAdmin, upload.single('apk'), (req, res) => {
   const version = req.body?.version || APP_VERSION;
   const notes = req.body?.releaseNotes || '';

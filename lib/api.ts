@@ -453,6 +453,32 @@ export function resendPendingVerification(email: string) {
   }) as Promise<{ ok: boolean; mailed?: boolean; message: string }>;
 }
 
+export type QaLabStatus = {
+  email: string;
+  exists: boolean;
+  user?: { id: string; email: string; name: string; created_at?: string } | null;
+  sync?: { updated_at?: string; bytes?: number } | null;
+};
+
+export function fetchQaLabStatus() {
+  return request('/api/admin/qa-lab') as Promise<QaLabStatus>;
+}
+
+export function manageQaLab(action: 'create' | 'reset' | 'delete' | 'status', password?: string) {
+  return request('/api/admin/qa-lab', {
+    method: 'POST',
+    body: JSON.stringify({ action, password: password || undefined }),
+  }) as Promise<{
+    ok: boolean;
+    action: string;
+    email: string;
+    password?: string;
+    message?: string;
+    deleted?: boolean;
+    exists?: boolean;
+  }>;
+}
+
 /** Gestionnaires : admin@… + paveldelhomme@gmail.com (+ EXPO_PUBLIC / extra). */
 export function isManagerEmail(email?: string | null, userFlag?: boolean | null): boolean {
   if (userFlag === true) return true;

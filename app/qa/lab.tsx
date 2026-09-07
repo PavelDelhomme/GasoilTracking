@@ -19,7 +19,14 @@ import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { InlineBackBar } from '@/components/HeaderBackButton';
 import { notify, confirm } from '@/lib/notify';
-import { fetchAppVersion, getLocalAppVersion, pingApiHealth } from '@/lib/api';
+import {
+  fetchAppVersion,
+  getLocalAppVersion,
+  pingApiHealth,
+  manageQaLab,
+  fetchQaLabStatus,
+  isManagerEmail,
+} from '@/lib/api';
 import {
   QA_CHECKLIST,
   QA_TEST_ACCOUNT_EMAIL,
@@ -43,9 +50,12 @@ export default function QaLabScreen() {
   const { user } = useAuth();
   const device = useMemo(() => getDeviceIdentity(), []);
   const allowed = useMemo(() => isQaLabDevice(device), [device]);
+  const isManager = isManagerEmail(user?.email, user?.isManager);
   const [checks, setChecks] = useState<CheckMap>({});
   const [runs, setRuns] = useState<SmokeRun[]>([]);
   const [busy, setBusy] = useState(false);
+  const [qaStatus, setQaStatus] = useState<string>('');
+  const [revealedPass, setRevealedPass] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -162,9 +172,9 @@ export default function QaLabScreen() {
       <Card style={{ marginBottom: 12 }}>
         <Text style={[styles.section, { color: colors.text }]}>Compte de test</Text>
         <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18 }}>
-          Utilise le compte dédié <Text style={{ fontWeight: '700', color: colors.text }}>{QA_TEST_ACCOUNT_EMAIL}</Text>{' '}
-          pour les essais (données jetables). Ton compte perso reste intact. Quand tout est
-          validé, on pourra supprimer ce compte et ses données cloud.
+          Compte dédié <Text style={{ fontWeight: '700', color: colors.text }}>{QA_TEST_ACCOUNT_EMAIL}</Text>
+          . Mot de passe dans <Text style={{ fontWeight: '700' }}>.env → QA_LAB_PASSWORD</Text> (ou
+          régénéré ci‑dessous si manager). Données jetables : on les efface après ta validation.
         </Text>
         {user?.email === QA_TEST_ACCOUNT_EMAIL ? (
           <Text style={{ color: colors.success || colors.accent, marginTop: 8, fontWeight: '700' }}>
@@ -172,9 +182,93 @@ export default function QaLabScreen() {
           </Text>
         ) : (
           <Text style={{ color: colors.warning || colors.textSecondary, marginTop: 8 }}>
-            Connecté : {user?.email || 'aucun'} — déconnecte-toi puis reconnecte avec le compte QA
-            pour les tests cloud.
+            Connecté : {user?.email || 'aucun'} — pour tester le cloud, reconnecte avec qa.lab.
           </Text>
+        )}
+        {isManager && (
+          <View style={{ marginTop: 12, gap: 8 }}>
+            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+              Gestion manager (créer / reset MDP / supprimer)
+            </Text>
+            <Button
+              title="Statut compte QA"
+              variant="secondary"
+              onPress={async () => {
+                try {
+                  const s = await fetchQaLabStatus();
+                  setQaStatus(
+                    s.exists
+                      ? `Existe · ${s.user?.name || ''} · sync ${s.sync?.updated_at || 'vide'}`
+                      : 'Absent — créer pour tester'
+                  );
+                } catch (e) {
+                  notify('QA', e instanceof Error ? e.message : 'Erreur statut');
+                }
+              }}
+            />
+            <Button
+              title="Créer / reset MDP (aléatoire)"
+              onPress={() => {
+                confirm(
+                  'Reset compte QA ?',
+                  'Génère un nouveau mot de passe (affiché une fois). Mets-le aussi dans .env QA_LAB_PASSWORD.',
+                  async () => {
+                    try {
+                      const r = await manageQaLab('reset');
+                      if (r.password) setRevealedPass(r.password);
+                      setQaStatus(r.message || 'OK');
+                      notify('QA', r.message || 'Mot de passe régénéré');
+                    } catch (e) {
+                      notify('Erreur', e instanceof Error ? e.message : 'Échec');
+                    }
+                  }
+                );
+              }}
+            />
+            <Button
+              title="Supprimer compte QA + sync"
+              variant="secondary"
+              onPress={() => {
+                confirm(
+                  'Supprimer qa.lab ?',
+                  'Efface le compte cloud et ses données sync. Irréversible.',
+                  async () => {
+                    try {
+                      const r = await manageQaLab('delete');
+                      setRevealedPass(null);
+                      setQaStatus(r.deleted ? 'Supprimé' : 'Déjà absent');
+                      notify('QA', r.deleted ? 'Compte QA supprimé' : 'Déjà absent');
+                    } catch (e) {
+                      notify('Erreur', e instanceof Error ? e.message : 'Échec');
+                    }
+                  },
+                  'Supprimer'
+                );
+              }}
+            />
+            {qaStatus ? (
+              <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{qaStatus}</Text>
+            ) : null}
+            {revealedPass ? (
+              <View
+                style={{
+                  marginTop: 6,
+                  padding: 10,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: colors.accent,
+                }}
+              >
+                <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Mot de passe (une fois)</Text>
+                <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15, marginTop: 4 }}>
+                  {revealedPass}
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 6 }}>
+                  Copie-le dans .env → QA_LAB_PASSWORD puis reconnecte-toi.
+                </Text>
+              </View>
+            ) : null}
+          </View>
         )}
       </Card>
 
