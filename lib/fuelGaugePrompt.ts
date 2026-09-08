@@ -21,9 +21,10 @@ export async function shouldSkipFuelGauge(
   const maxAge = (opts?.maxAgeHours ?? 18) * 3600_000;
   try {
     const raw = await AsyncStorage.getItem(GAUGE_ASKED_KEY(vehicle.id));
-    if (!raw) return true;
+    // Jamais saisi → demander au moins une fois (ne pas skipper sur une estimation seule).
+    if (!raw) return false;
     const ts = Number(raw);
-    if (!Number.isFinite(ts)) return true;
+    if (!Number.isFinite(ts)) return false;
     return Date.now() - ts < maxAge;
   } catch {
     return true;
@@ -39,8 +40,8 @@ async function markGaugeAsked(vehicleId: number) {
 }
 
 /**
- * Demande le niveau essence via jauge visuelle (modal).
- * `force: false` + jauge récente → skip auto.
+ * Demande le niveau de carburant via jauge visuelle (modal).
+ * `force: false` + saisie récente → skip auto.
  */
 export async function askFuelGaugeApprox(
   vehicle: Vehicle,

@@ -62,11 +62,11 @@ export function AppUpdateModal({
           </Text>
           <Text style={[styles.safe, { color: colors.textSecondary }]}>
             {Platform.OS === 'android'
-              ? 'Téléchargement automatique depuis gasoil-tracking.delhomme.ovh. Votre session reste connectée (même application, pas de désinstallation).'
+              ? 'Mise à jour en un tap : vos trajets, véhicules et connexion sont conservés.'
               : Platform.OS === 'web'
-                ? 'Version web : rechargement live. Si le message revient, le site n’a pas encore été rebuildé côté serveur — « Plus tard » laisse utiliser l’app.'
-                : 'Données conservées. Vous pourrez aussi installer plus tard depuis Mon compte.'}
-            {!force ? ' « Plus tard » : rappel dans 2 heures.' : ''}
+                ? 'Rechargement de la version web. « Plus tard » pour continuer sans mettre à jour.'
+                : 'Vos données restent sur l’appareil. Vous pourrez aussi mettre à jour depuis Mon compte.'}
+            {!force ? ' Rappel dans 2 h si vous reportez.' : ''}
           </Text>
 
           {busy && (

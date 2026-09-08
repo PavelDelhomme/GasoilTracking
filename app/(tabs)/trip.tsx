@@ -658,8 +658,8 @@ export default function TripScreen() {
       if (mode === 'nav') {
         const gauge = await askFuelGaugeApprox(
           activeVehicle,
-          'Niveau d’essence au départ',
-          'Indiquez approximativement la jauge pour affiner la conso (passable).',
+          'Niveau de carburant au départ',
+          'Réglez la jauge pour affiner la consommation estimée.',
           { softSkip: true }
         );
         startFuel = gauge.skipped ? activeVehicle.estimatedFuelLiters : gauge.liters;
@@ -2200,16 +2200,75 @@ export default function TripScreen() {
                   )}
                 </Card>
 
+                {startMode === 'nav' && routeOptions.length > 0 && (
+                  <Card style={{ marginBottom: 10 }}>
+                    <Text
+                      style={{
+                        color: colors.textSecondary,
+                        fontSize: 11,
+                        fontWeight: '700',
+                        marginBottom: 8,
+                      }}
+                    >
+                      ITINÉRAIRE
+                      {selectedRoute ? ` · ${selectedRoute.label}` : ''}
+                    </Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      {routeOptions.map((r) => {
+                        const selected = r.id === selectedRoute?.id;
+                        return (
+                          <Pressable
+                            key={`panel-${r.id}`}
+                            onPress={() => applyRouteSelection(r)}
+                            style={{
+                              marginRight: 8,
+                              paddingHorizontal: 12,
+                              paddingVertical: 8,
+                              borderRadius: 10,
+                              borderWidth: 1,
+                              borderColor: selected ? colors.accent : colors.border,
+                              backgroundColor: selected ? colors.accent + '22' : colors.card,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                color: selected ? colors.accent : colors.text,
+                                fontWeight: '800',
+                                fontSize: 12,
+                              }}
+                            >
+                              {r.label}
+                            </Text>
+                            <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                              {r.distanceKm.toFixed(1)} km
+                              {r.durationMinutes != null ? ` · ${r.durationMinutes} min` : ''}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </ScrollView>
+                  </Card>
+                )}
+
                 <Button
                   title={
                     startMode === 'free'
                       ? 'Démarrer le suivi GPS libre'
-                      : selectedRoute
-                        ? `Démarrer · ${selectedRoute.label} + Maps`
-                        : 'Démarrer + navigation Maps'
+                      : routesLoading
+                        ? 'Calcul des itinéraires…'
+                        : selectedRoute
+                          ? `Démarrer · ${selectedRoute.label} + Maps`
+                          : destination.trim()
+                            ? 'Choisissez un itinéraire ci-dessus'
+                            : 'Démarrer + navigation Maps'
                   }
                   onPress={handleStartTrip}
                   loading={isStarting}
+                  disabled={
+                    startMode === 'nav' &&
+                    (!!destination.trim() || !!destCoords) &&
+                    (routesLoading || (routeOptions.length > 1 && !selectedRouteId))
+                  }
                   style={{ marginBottom: 8 }}
                 />
 

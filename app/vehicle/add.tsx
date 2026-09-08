@@ -17,7 +17,7 @@ import { Button } from '@/components/Button';
 import { createVehicle, getVehicles } from '@/lib/database';
 import { confirm, notify } from '@/lib/notify';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
-import { PRESET_VEHICLES, searchVehicles, type VehiclePreset } from '@/constants/vehicles';
+import { PRESET_VEHICLES, searchVehicles, presetDisplayName, type VehiclePreset } from '@/constants/vehicles';
 import type { FuelType } from '@/types';
 
 export default function AddVehicleScreen() {
@@ -119,10 +119,9 @@ export default function AddVehicleScreen() {
     }
   };
 
-  /** Un tap = ajout immédiat (favoris / recherche) */
   const addPresetNow = async (preset: VehiclePreset) => {
     if (loading) return;
-    const vehicleName = `${preset.brand} ${preset.model}`;
+    const vehicleName = presetDisplayName(preset);
     await saveVehicle({
       name: vehicleName,
       brand: preset.brand,
@@ -149,8 +148,8 @@ export default function AddVehicleScreen() {
     setConsumption(String(preset.consumption));
     setTankCapacity(String(preset.tank));
     setHasOdometer(!preset.odometerUnreliable);
-    setName(`${preset.brand} ${preset.model}`);
-    setStatus(`Formulaire rempli : ${preset.brand} ${preset.model} — cliquez Enregistrer`);
+    setName(presetDisplayName(preset));
+    setStatus(`Formulaire rempli : ${presetDisplayName(preset)} — cliquez Enregistrer`);
   };
 
   const handleSave = async () => {
@@ -221,7 +220,7 @@ export default function AddVehicleScreen() {
               {preset.brand} {preset.model}
             </Text>
             <Text style={[styles.presetDetail, { color: colors.textSecondary }]}>
-              {preset.year} • {preset.consumption} L/100 • {preset.tank} L
+              {preset.year} · {preset.fuel} · {preset.consumption} L/100 · {preset.tank} L
             </Text>
             <Text style={{ color: colors.accent, fontSize: 12, marginTop: 8, fontWeight: '700' }}>
               + Ajouter
@@ -254,7 +253,7 @@ export default function AddVehicleScreen() {
           >
             <View style={{ flex: 1 }}>
               <Text style={{ color: colors.text, fontWeight: '600' }}>
-                {preset.brand} {preset.model} ({preset.year})
+                {preset.brand} {preset.model} ({preset.year}) · {preset.fuel}
               </Text>
             <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
               {preset.consumption} L/100 · réservoir {preset.tank} L

@@ -334,9 +334,26 @@ export const PRESET_VEHICLES: VehiclePreset[] = [
 export function searchVehicles(query: string): VehiclePreset[] {
   const q = query.trim().toLowerCase();
   if (!q) return VEHICLE_CATALOG.slice(0, 60);
-  return VEHICLE_CATALOG.filter((v) =>
-    `${v.brand} ${v.model} ${v.year} ${v.fuel}`.toLowerCase().includes(q)
-  ).slice(0, 80);
+  const scored = VEHICLE_CATALOG.map((v) => {
+    const model = v.model.toLowerCase();
+    const blob = `${v.brand} ${v.model} ${v.year} ${v.fuel}`.toLowerCase();
+    let score = 0;
+    if (model === q) score = 100;
+    else if (model.startsWith(q)) score = 80;
+    else if (new RegExp(`(?:^|\\s)${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|$)`).test(model))
+      score = 70;
+    else if (blob.includes(q)) score = 40;
+    else return null;
+    // Évite 108 quand on cherche 208 (et inverse) : match modèle exact prioritaire
+    return { v, score };
+  }).filter(Boolean) as { v: VehiclePreset; score: number }[];
+  scored.sort((a, b) => b.score - a.score || b.v.year - a.v.year);
+  return scored.map((s) => s.v).slice(0, 80);
+}
+
+/** Libellé distinct (208 essence ≠ 208 diesel ≠ 108). */
+export function presetDisplayName(preset: VehiclePreset): string {
+  return `${preset.brand} ${preset.model} · ${preset.year} ${preset.fuel}`;
 }
 
 export function listBrands(): string[] {

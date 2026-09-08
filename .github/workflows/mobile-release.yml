@@ -68,7 +68,7 @@ jobs:
           curl -fsS -X POST "https://gasoil-tracking.delhomme.ovh/api/ci/releases/pending" \
             -H "X-Release-Token: $TOKEN" \
             -H "Content-Type: application/json" \
-            -d "{\"version\":\"$VERSION\",\"releaseNotes\":\"Build APK GitHub Actions (local)\",\"sha\":\"$GITHUB_SHA\"}" \
+            -d "{\"version\":\"$VERSION\",\"releaseNotes\":\"Mise à jour en préparation\",\"sha\":\"$GITHUB_SHA\"}" \
             || echo "Annonce pending échouée — on continue"
 
       - name: Build Android APK (EAS local, sans quota cloud)
@@ -92,7 +92,7 @@ jobs:
             -H "X-Release-Token: $TOKEN" \
             -F "version=$VERSION" \
             -F "forceUpdate=1" \
-            -F "releaseNotes=v$VERSION — trajets/Maps/sync 413/jauge/budget (GitHub Actions $GITHUB_SHA)" \
+            -F "releaseNotes=Améliorations trajets, navigation et stabilité — version $VERSION." \
             -F "apk=@/tmp/gasoil.apk"
           echo "APK $VERSION publié"
           curl -sf "https://gasoil-tracking.delhomme.ovh/api/version" || true

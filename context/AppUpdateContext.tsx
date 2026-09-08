@@ -105,7 +105,7 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
       setForce(false);
       setVisible(false);
       setError(
-        `Site web pas encore déployé en v${remote.version} (bundle local v${local}). Réessayez dans quelques minutes après le rebuild Docker web.`
+        `La version web ${remote.version} n’est pas encore en ligne. Réessayez un peu plus tard.`
       );
       return false;
     }

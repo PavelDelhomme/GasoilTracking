@@ -1,5 +1,5 @@
 /**
- * Jauge visuelle réglable — niveau essence (marques 0 · 1/4 · 1/2 · 3/4 · 1).
+ * Jauge visuelle réglable — niveau de carburant (marques 0 · 1/4 · 1/2 · 3/4 · 1).
  * Avec requireConfirm : verrouillée jusqu’à « Modifier le niveau », puis Confirmer / Annuler.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -265,7 +265,7 @@ export function FuelGaugeSlider({
               }}
               style={[styles.confirmBtn, { borderColor: colors.accent, backgroundColor: colors.accent + '18' }]}
               accessibilityRole="button"
-              accessibilityLabel="Modifier le niveau d’essence"
+              accessibilityLabel="Modifier le niveau de carburant"
             >
               <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 13 }}>
                 Modifier le niveau
