@@ -218,7 +218,9 @@ export async function createFillUp(fillUp: Omit<FillUp, 'id'>): Promise<number> 
   s.fillUps.push({ ...fillUp, id });
   if (fillUp.odometer != null) {
     s.vehicles = s.vehicles.map((v) =>
-      v.id === fillUp.vehicleId ? { ...v, currentOdometer: fillUp.odometer! } : v
+      v.id === fillUp.vehicleId
+        ? { ...v, currentOdometer: fillUp.odometer!, trackedKm: 0 }
+        : v
     );
   }
   if (fillUp.tripId) {
@@ -521,9 +523,15 @@ export async function replaceAllData(data: {
 
 export async function getMaintenances(vehicleId?: number): Promise<VehicleMaintenance[]> {
   const s = await load();
+  const odoById = new Map(
+    s.vehicles.map((v) => [
+      v.id,
+      Math.round((Number(v.currentOdometer) || 0) + (Number(v.trackedKm) || 0)),
+    ])
+  );
   const list = (s.maintenances || []).map((m) => ({
     ...m,
-    status: refreshMaintenanceStatus(m),
+    status: refreshMaintenanceStatus(m, odoById.get(m.vehicleId) ?? null),
   }));
   return (vehicleId ? list.filter((m) => m.vehicleId === vehicleId) : list).sort((a, b) =>
     String(b.dueDate || b.doneAt || b.createdAt).localeCompare(
@@ -543,7 +551,15 @@ export async function createMaintenance(
     ...m,
     id,
     createdAt,
-    status: refreshMaintenanceStatus({ ...m, id, createdAt }),
+    status: refreshMaintenanceStatus(
+      { ...m, id, createdAt },
+      (() => {
+        const v = s.vehicles.find((x) => x.id === m.vehicleId);
+        return v
+          ? Math.round((Number(v.currentOdometer) || 0) + (Number(v.trackedKm) || 0))
+          : null;
+      })()
+    ),
   };
   s.maintenances = [...(s.maintenances || []), row];
   await save(s);
@@ -558,7 +574,11 @@ export async function updateMaintenance(
   s.maintenances = (s.maintenances || []).map((m) => {
     if (m.id !== id) return m;
     const next = { ...m, ...patch, id };
-    return { ...next, status: refreshMaintenanceStatus(next) };
+    const v = s.vehicles.find((x) => x.id === next.vehicleId);
+    const odo = v
+      ? Math.round((Number(v.currentOdometer) || 0) + (Number(v.trackedKm) || 0))
+      : null;
+    return { ...next, status: refreshMaintenanceStatus(next, odo) };
   });
   await save(s);
 }

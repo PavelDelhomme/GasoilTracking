@@ -19,7 +19,7 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { formatEuro, getActiveMonthlyAllocation, formatDistance, compareMonthFillStats } from '@/lib/calculations';
 import { computeBudgetOutlook, plannedMonthSpendFromRoutes } from '@/lib/budgetOutlook';
-import { currentMonthKey, formatMonthChip, formatMonthLabel, monthKeyFromDate, formatDateSlash, formatRelativeDay, previousMonthKey } from '@/lib/dates';
+import { currentMonthKey, formatMonthChip, formatMonthLabel, monthKeyFromDate, formatDateSlash, formatRelativeDay, previousMonthKey, toLocalYmd } from '@/lib/dates';
 import {
   deleteBudget,
   deleteFillUp,
@@ -194,7 +194,7 @@ export default function BudgetScreen() {
 
   const estimateMonthlyFromRoutes = () => {
     if (!activeVehicle) return { week: 0, month: 0 };
-    const today = new Date().toISOString().slice(0, 10);
+    const today = toLocalYmd(new Date());
     let kmWeek = 0;
     for (const r of routes) {
       const onVac =
@@ -210,7 +210,7 @@ export default function BudgetScreen() {
 
   const routeWeeklyCost = (r: RecurringRoute) => {
     if (!activeVehicle) return 0;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = toLocalYmd(new Date());
     const onVac =
       r.isOnVacation && (!r.vacationUntil || r.vacationUntil >= today);
     if (onVac) return 0;
@@ -808,7 +808,7 @@ export default function BudgetScreen() {
             routes.map((r) => {
               const from = places.find((p) => p.id === r.fromPlaceId);
               const to = places.find((p) => p.id === r.toPlaceId);
-              const today = new Date().toISOString().slice(0, 10);
+              const today = toLocalYmd(new Date());
               const onVac =
                 r.isOnVacation && (!r.vacationUntil || r.vacationUntil >= today);
               const days = r.workDaysPerWeek || r.timesPerWeek;

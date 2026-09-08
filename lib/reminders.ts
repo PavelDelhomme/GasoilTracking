@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import type { Vehicle, VehicleMaintenance } from '@/types';
 import { getMaintenances, getVehicles } from '@/lib/database';
-import { displayOdometerKm, refreshAllBudgets } from '@/lib/calculations';
+import { displayOdometerKm, refreshAllBudgets, budgetPeriodKey } from '@/lib/calculations';
 import { MAINTENANCE_KIND_LABELS, maintenanceIsUrgent } from '@/lib/vehicleMaintenance';
 
 const SCHEDULED_KEY = 'gasoil_reminder_ids_v1';
@@ -15,10 +15,16 @@ const BUDGET_THRESH_KEY = 'gasoil_budget_thresh_v1';
 /** Anti-spam pour notifs « immédiates » (km / bas réservoir) — une fois / 12 h / clé. */
 const STICKY_KEY = 'gasoil_sticky_notif_v1';
 const STICKY_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+/** Debounce : évite cancelAll juste après un scheduleSoon (plein → double refresh). */
+const REFRESH_DEBOUNCE_MS = 4_000;
 
 type ScheduledMap = Record<string, string>;
 type BudgetThreshMap = Record<string, number>;
 type StickyMap = Record<string, number>; // key → firedAt ms
+
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+let refreshInflight: Promise<{ scheduled: number }> | null = null;
+let refreshWaiters: Array<(v: { scheduled: number }) => void> = [];
 
 export async function ensureNotificationPermissions(): Promise<boolean> {
   if (Platform.OS === 'web') return false;
@@ -97,14 +103,34 @@ function stickyReady(map: StickyMap, key: string): boolean {
 async function cancelAllTracked() {
   if (Platform.OS === 'web') return;
   const map = await readScheduled();
+  // Ne pas annuler les TIME_INTERVAL encore dans la fenêtre (~1 min) :
+  // un 2ᵉ refresh < 5 s après scheduleSoon tuait la notif alors que sticky
+  // était déjà posé → silence jusqu’au cooldown 12 h.
+  let keepIds = new Set<string>();
   try {
-    for (const id of Object.values(map)) {
+    const pending = await Notifications.getAllScheduledNotificationsAsync();
+    for (const n of pending) {
+      const t = n.trigger as { type?: string; seconds?: number } | null;
+      if (t && typeof t.seconds === 'number' && t.seconds > 0 && t.seconds <= 60) {
+        keepIds.add(n.identifier);
+      }
+    }
+  } catch {
+    keepIds = new Set();
+  }
+  const next: ScheduledMap = {};
+  try {
+    for (const [key, id] of Object.entries(map)) {
+      if (keepIds.has(id)) {
+        next[key] = id;
+        continue;
+      }
       await Notifications.cancelScheduledNotificationAsync(id).catch(() => undefined);
     }
   } catch {
     /* ignore */
   }
-  await writeScheduled({});
+  await writeScheduled(next);
 }
 
 function daysUntil(ymd: string): number {
@@ -138,17 +164,38 @@ async function scheduleSoon(
 /** Recalcule et planifie les rappels selon les prefs véhicule + seuils budget. */
 export async function refreshVehicleReminders(): Promise<{ scheduled: number }> {
   if (Platform.OS === 'web') return { scheduled: 0 };
+  if (refreshInflight) return refreshInflight;
+  return new Promise((resolve) => {
+    refreshWaiters.push(resolve);
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null;
+      const waiters = refreshWaiters;
+      refreshWaiters = [];
+      refreshInflight = refreshVehicleRemindersNow().finally(() => {
+        refreshInflight = null;
+      });
+      void refreshInflight.then((r) => {
+        for (const w of waiters) w(r);
+      });
+    }, REFRESH_DEBOUNCE_MS);
+  });
+}
+
+async function refreshVehicleRemindersNow(): Promise<{ scheduled: number }> {
+  if (Platform.OS === 'web') return { scheduled: 0 };
 
   await configureNotificationHandler();
   const ok = await ensureNotificationPermissions();
   if (!ok) return { scheduled: 0 };
 
+  const preserved = await readScheduled();
   await cancelAllTracked();
   const vehicles = await getVehicles();
   const maintenances = await getMaintenances();
   const sticky = await readSticky();
   let stickyDirty = false;
-  const map: ScheduledMap = {};
+  const map: ScheduledMap = { ...preserved };
   let scheduled = 0;
 
   for (const v of vehicles) {
@@ -174,7 +221,7 @@ export async function refreshVehicleReminders(): Promise<{ scheduled: number }> 
               const id = await Notifications.scheduleNotificationAsync({
                 content: {
                   title:
-                    m.status === 'overdue' || maintenanceIsUrgent(m)
+                    m.status === 'overdue' || maintenanceIsUrgent(m, 14, displayOdometerKm(v))
                       ? `Urgent · ${v.name}`
                       : `Rappel · ${v.name}`,
                   body:
@@ -262,7 +309,7 @@ export async function refreshVehicleReminders(): Promise<{ scheduled: number }> 
     for (const s of statuses) {
       if (!s.budget.isActive) continue;
       const pct = s.percentUsed;
-      const periodKey = `${s.budget.id}:${s.budget.startDate.slice(0, 10)}`;
+      const periodKey = budgetPeriodKey(s.budget.id, s.budget.startDate);
       const last = thresh[periodKey] ?? 0;
       let hit: 80 | 100 | null = null;
       if (pct >= 100 && last < 100) hit = 100;
@@ -282,7 +329,7 @@ export async function refreshVehicleReminders(): Promise<{ scheduled: number }> 
       threshDirty = true;
     }
     const alive = new Set(
-      statuses.map((s) => `${s.budget.id}:${s.budget.startDate.slice(0, 10)}`)
+      statuses.map((s) => budgetPeriodKey(s.budget.id, s.budget.startDate))
     );
     for (const k of Object.keys(thresh)) {
       if (!alive.has(k)) {

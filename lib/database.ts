@@ -236,7 +236,7 @@ function mapVehicle(row: unknown): Vehicle {
   };
 }
 
-function mapMaintenance(row: unknown): VehicleMaintenance {
+function mapMaintenance(row: unknown, currentOdometer?: number | null): VehicleMaintenance {
   const r = row as Record<string, unknown>;
   const base: VehicleMaintenance = {
     id: r.id as number,
@@ -256,7 +256,12 @@ function mapMaintenance(row: unknown): VehicleMaintenance {
         : Number(r.due_odometer),
     createdAt: (r.created_at as string) || new Date().toISOString(),
   };
-  return { ...base, status: refreshMaintenanceStatus(base) };
+  return { ...base, status: refreshMaintenanceStatus(base, currentOdometer) };
+}
+
+/** Compteur affiché sans importer calculations (évite cycle). */
+function vehicleDisplayOdo(row: { current_odometer?: unknown; tracked_km?: unknown }): number {
+  return Math.round((Number(row.current_odometer) || 0) + (Number(row.tracked_km) || 0));
 }
 
 function mapFillUp(row: unknown): FillUp {
@@ -289,18 +294,39 @@ export async function getMaintenances(vehicleId?: number): Promise<VehicleMainte
     : await database.getAllAsync(
         'SELECT * FROM vehicle_maintenances ORDER BY COALESCE(due_date, done_at, created_at) DESC'
       );
-  return (rows || []).map(mapMaintenance);
+  const vehicles = await database.getAllAsync(
+    'SELECT id, current_odometer, tracked_km FROM vehicles'
+  );
+  const odoById = new Map<number, number>();
+  for (const v of vehicles || []) {
+    const r = v as { id: number; current_odometer?: unknown; tracked_km?: unknown };
+    odoById.set(r.id, vehicleDisplayOdo(r));
+  }
+  return (rows || []).map((row) => {
+    const r = row as { vehicle_id: number };
+    return mapMaintenance(row, odoById.get(r.vehicle_id) ?? null);
+  });
 }
 
 export async function createMaintenance(
   m: Omit<VehicleMaintenance, 'id' | 'createdAt'>
 ): Promise<number> {
   const database = await getDatabase();
-  const status = refreshMaintenanceStatus({
-    ...m,
-    id: 0,
-    createdAt: new Date().toISOString(),
-  });
+  const vrow = await database.getFirstAsync(
+    'SELECT current_odometer, tracked_km FROM vehicles WHERE id = ?',
+    [m.vehicleId]
+  );
+  const odo = vrow
+    ? vehicleDisplayOdo(vrow as { current_odometer?: unknown; tracked_km?: unknown })
+    : null;
+  const status = refreshMaintenanceStatus(
+    {
+      ...m,
+      id: 0,
+      createdAt: new Date().toISOString(),
+    },
+    odo
+  );
   const result = await database.runAsync(
     `INSERT INTO vehicle_maintenances (vehicle_id, kind, title, amount, done_at, due_date, status, note, photo_uri, due_odometer)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -612,10 +638,12 @@ export async function createFillUp(fillUp: Omit<FillUp, 'id'>): Promise<number> 
     ]
   );
   if (fillUp.odometer != null) {
-    await database.runAsync('UPDATE vehicles SET current_odometer = ? WHERE id = ?', [
-      fillUp.odometer,
-      fillUp.vehicleId,
-    ]);
+    // odometer = compteur affiché (base + trajets). On fige la base et on remet
+    // tracked_km à 0 sinon le prochain affichage double-compte les km GPS.
+    await database.runAsync(
+      'UPDATE vehicles SET current_odometer = ?, tracked_km = 0 WHERE id = ?',
+      [fillUp.odometer, fillUp.vehicleId]
+    );
   }
   if (fillUp.tripId) {
     await database.runAsync('UPDATE trips SET fill_up_id = ? WHERE id = ?', [

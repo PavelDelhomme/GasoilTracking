@@ -3,6 +3,7 @@
  * encore estimées sur le reste du mois.
  */
 import type { RecurringRoute, Vehicle } from '@/types';
+import { toLocalYmd } from '@/lib/dates';
 
 export type BudgetOutlook = {
   allocation: number;
@@ -46,7 +47,7 @@ export function remainingMonthFraction(startDate?: string, endDate?: string, now
 export function plannedMonthSpendFromRoutes(
   routes: RecurringRoute[],
   vehicles: Vehicle[],
-  todayIso = new Date().toISOString().slice(0, 10)
+  todayIso = toLocalYmd(new Date())
 ): number {
   if (!routes.length || !vehicles.length) return 0;
   const byId = new Map(vehicles.map((v) => [v.id, v]));

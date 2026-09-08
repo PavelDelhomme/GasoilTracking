@@ -174,7 +174,7 @@ export default function VehicleMaintenanceScreen() {
   const addCtWithContreVisite = async () => {
     setLoading(true);
     try {
-      const done = doneAt.trim() || '2026-08-05';
+      const done = doneAt.trim() || toLocalYmd(new Date());
       const amt = amount.trim() ? parseFloat(amount.replace(',', '.')) : 63;
       await createMaintenance({
         vehicleId,
@@ -211,7 +211,7 @@ export default function VehicleMaintenanceScreen() {
   const markDone = async (m: VehicleMaintenance) => {
     await updateMaintenance(m.id, {
       status: 'done',
-      doneAt: new Date().toISOString().slice(0, 10),
+      doneAt: toLocalYmd(new Date()),
     });
     await reload();
     void refreshVehicleReminders();
@@ -270,7 +270,7 @@ export default function VehicleMaintenanceScreen() {
         </Text>
       ) : (
         items.map((m) => {
-          const urgent = maintenanceIsUrgent(m);
+          const urgent = maintenanceIsUrgent(m, 14, displayOdometerKm(vehicle));
           return (
             <Card
               key={m.id}

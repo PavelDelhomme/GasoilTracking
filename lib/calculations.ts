@@ -17,7 +17,7 @@ import {
   updateVehicle,
   getVehicleById,
 } from './database';
-import { monthKeyFromDate } from './dates';
+import { monthKeyFromDate, toLocalYmd } from './dates';
 import {
   calculateFilteredRouteDistance,
   evaluateGpsSample,
@@ -555,27 +555,35 @@ export function displayOdometerKm(vehicle: {
   return Math.round(base + tracked);
 }
 
-/** Dates de début/fin pour un budget mensuel ou annuel */
+/** Dates de début/fin pour un budget mensuel ou annuel (calendrier local). */
 export function getBudgetPeriodDates(period: Budget['period']): { startDate: string; endDate: string } {
   const now = new Date();
   let start: Date;
   let end: Date;
 
   if (period === 'monthly') {
-    start = new Date(now.getFullYear(), now.getMonth(), 1);
-    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
   } else if (period === 'yearly') {
-    start = new Date(now.getFullYear(), 0, 1);
-    end = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+    start = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+    end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
   } else {
-    start = now;
-    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
   }
 
   return {
+    // ISO depuis minuit/fin de journée *locale* — string-compare OK avec les fill.date ISO
     startDate: start.toISOString(),
     endDate: end.toISOString(),
   };
+}
+
+/** Clé de période budget stable (jour local), pas le slice UTC de toISOString. */
+export function budgetPeriodKey(budgetId: number, startDate: string): string {
+  const d = new Date(startDate);
+  const ymd = Number.isNaN(d.getTime()) ? startDate.slice(0, 10) : toLocalYmd(d);
+  return `${budgetId}:${ymd}`;
 }
 
 export interface RoutePoint {

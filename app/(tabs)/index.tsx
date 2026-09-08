@@ -81,9 +81,16 @@ export default function HomeScreen() {
     try {
       const list = await getMaintenances();
       setDueMaintenances(
-        list.filter(
-          (m) => m.status !== 'done' && m.status !== 'cancelled' && (m.dueDate || maintenanceIsUrgent(m))
-        )
+        list.filter((m) => {
+          if (m.status === 'done' || m.status === 'cancelled') return false;
+          if (m.dueDate || m.status === 'overdue') return true;
+          const v = vehicles.find((x) => x.id === m.vehicleId);
+          const odo = v ? displayOdometerKm(v) : null;
+          return (
+            (m.dueOdometer != null && m.dueOdometer > 0) ||
+            maintenanceIsUrgent(m, 14, odo)
+          );
+        })
       );
     } catch {
       setDueMaintenances([]);
@@ -651,7 +658,9 @@ export default function HomeScreen() {
                 </View>
                 {dueMaintenances.slice(0, 4).map((m) => {
                   const v = vehicles.find((x) => x.id === m.vehicleId);
-                  const urgent = maintenanceIsUrgent(m) || m.status === 'overdue';
+                  const urgent =
+                    maintenanceIsUrgent(m, 14, v ? displayOdometerKm(v) : null) ||
+                    m.status === 'overdue';
                   return (
                     <Pressable
                       key={m.id}

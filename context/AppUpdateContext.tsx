@@ -97,16 +97,17 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
           return false;
         }
       }
+      // Auto-snooze + masquer : sinon la modale se rouvre en boucle après hard-reload.
       await writeSnooze({
         version: remote.version,
         until: Date.now() + WEB_DEPLOY_SNOOZE_MS,
       });
       setForce(false);
-      setVisible(true);
+      setVisible(false);
       setError(
         `Site web pas encore déployé en v${remote.version} (bundle local v${local}). Réessayez dans quelques minutes après le rebuild Docker web.`
       );
-      return true;
+      return false;
     }
 
     setForce(must);
@@ -196,7 +197,7 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
             until: Date.now() + WEB_DEPLOY_SNOOZE_MS,
           });
           setForce(false);
-          setVisible(true);
+          setVisible(false);
           return;
         }
         setProgress({
