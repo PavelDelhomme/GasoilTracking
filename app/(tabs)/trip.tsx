@@ -42,10 +42,12 @@ import {
   updateVehicle,
   getVehicleById,
   purgeSimulatorTrips,
+  getTripById,
 } from '@/lib/database';
 import {
   startBackgroundTracking,
   stopBackgroundTracking,
+  flushTripUpdates,
   getCurrentLocation,
   openGoogleMapsSearch,
 } from '@/lib/locationService';
@@ -161,6 +163,8 @@ export default function TripScreen() {
   const [nearDestination, setNearDestination] = useState(false);
   const [smartDismissed, setSmartDismissed] = useState(false);
   const arrivalPromptedRef = useRef(false);
+  const startingRef = useRef(false);
+  const fittedTripIdRef = useRef<number | null>(null);
   const [isStopping, setIsStopping] = useState(false);
   const [stopConfirm, setStopConfirm] = useState(false);
   const [tripStartFuelLiters, setTripStartFuelLiters] = useState<number | null>(null);
@@ -441,19 +445,23 @@ export default function TripScreen() {
         navigator.geolocation.clearWatch(webWatch);
       }
     };
-  }, [isWeb, activeTrip?.id, activeTrip?.isPaused, activeTrip?.routePoints]);
+  }, [isWeb, activeTrip?.id, activeTrip?.isPaused]);
 
   useEffect(() => {
-    if (activeTrip) {
-      const points = parseRoutePoints(activeTrip.routePoints);
-      if (points.length > 0) {
-        mapRef.current?.fitToCoordinates(
-          points.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
-          { edgePadding: { top: 50, right: 50, bottom: 50, left: 50 }, animated: true }
-        );
-      }
+    if (!activeTrip) {
+      fittedTripIdRef.current = null;
+      return;
     }
-  }, [activeTrip?.routePoints]);
+    // Fit une seule fois par trajet (évite caméra qui saute à chaque poll GPS).
+    if (fittedTripIdRef.current === activeTrip.id) return;
+    const points = parseRoutePoints(activeTrip.routePoints);
+    if (points.length < 2) return;
+    fittedTripIdRef.current = activeTrip.id;
+    mapRef.current?.fitToCoordinates(
+      points.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
+      { edgePadding: { top: 50, right: 50, bottom: 50, left: 50 }, animated: true }
+    );
+  }, [activeTrip?.id, activeTrip?.routePoints]);
 
   useEffect(() => {
     if (!activeTrip) {
@@ -552,6 +560,11 @@ export default function TripScreen() {
     dest?: GeoCoords | null;
     mode?: StartMode;
   }) => {
+    if (startingRef.current || isStarting) return;
+    if (activeTrip?.isActive) {
+      notify('Trajet', 'Un trajet est déjà en cours.');
+      return;
+    }
     if (!activeVehicle) {
       notify('Erreur', 'Sélectionnez un véhicule avant de démarrer un trajet.');
       return;
@@ -569,6 +582,7 @@ export default function TripScreen() {
 
     if (mode === 'nav') persistStartMode('nav');
 
+    startingRef.current = true;
     setIsStarting(true);
     // Capturer l’itinéraire choisi avant les await (évite state stale)
     let routeForNav: DrivingRoute | null =
@@ -723,6 +737,7 @@ export default function TripScreen() {
       await loadLists();
     } catch {
       notify('Erreur', 'Impossible de démarrer le trajet.');
+      startingRef.current = false;
       setIsStarting(false);
       return;
     }
@@ -758,6 +773,7 @@ export default function TripScreen() {
         'Maps n’a pas pu s’ouvrir. Le suivi GPS continue dans l’app.'
       );
     } finally {
+      startingRef.current = false;
       setIsStarting(false);
     }
   };
@@ -862,8 +878,7 @@ export default function TripScreen() {
   const finishTripCore = useCallback(
     async (opts?: { openRecap?: boolean; skipGauge?: boolean }) => {
       if (!activeTrip) return;
-      const trip = activeTrip;
-      const finishedId = trip.id;
+      const finishedId = activeTrip.id;
       const vehicleSnapshot = activeVehicle;
 
       try {
@@ -871,6 +886,15 @@ export default function TripScreen() {
       } catch {
         /* GPS déjà arrêté */
       }
+      try {
+        await flushTripUpdates();
+      } catch {
+        /* ignore */
+      }
+
+      // Toujours lire la DB après drain GPS — le state React peut être en retard.
+      const fresh = await getTripById(finishedId).catch(() => null);
+      const trip = fresh || activeTrip;
 
       const pts = parseRoutePoints(compactRoutePointsJson(trip.routePoints || '[]'));
       const last = pts.length > 0 ? pts[pts.length - 1] : userLocation;
@@ -1056,14 +1080,20 @@ export default function TripScreen() {
     if (!target) return;
 
     let loc = userLocation;
-    try {
-      const fresh = await getCurrentLocation({ fresh: true });
-      if (fresh?.coords) {
-        loc = { latitude: fresh.coords.latitude, longitude: fresh.coords.longitude };
-        setUserLocation(loc);
+    // Préférer le dernier point du trajet (FGS) plutôt qu’un GPS High frais toutes les 20 s.
+    const lastPt = parseRoutePoints(activeTrip.routePoints).slice(-1)[0];
+    if (lastPt) {
+      loc = { latitude: lastPt.latitude, longitude: lastPt.longitude };
+    } else if (!loc) {
+      try {
+        const fresh = await getCurrentLocation({ fresh: true });
+        if (fresh?.coords) {
+          loc = { latitude: fresh.coords.latitude, longitude: fresh.coords.longitude };
+          setUserLocation(loc);
+        }
+      } catch {
+        /* keep */
       }
-    } catch {
-      /* keep */
     }
     if (!loc) return;
 

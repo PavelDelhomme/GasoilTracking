@@ -3,6 +3,7 @@ import type { BudgetStatus, Trip, Vehicle } from '@/types';
 import {
   getActiveVehicle,
   getActiveTrip,
+  getTripById,
   getVehicles,
   setActiveVehicle as dbSetActiveVehicle,
   updateTrip,
@@ -11,7 +12,7 @@ import {
 import { parseRoutePoints, ensureDefaultBudgets, refreshAllBudgets, calculateTripStats } from '@/lib/calculations';
 import { recoverDataAfterUpdateIfNeeded, getUpdatePending } from '@/lib/backup';
 import { confirm, notify } from '@/lib/notify';
-import { stopBackgroundTracking } from '@/lib/locationService';
+import { flushTripUpdates, stopBackgroundTracking } from '@/lib/locationService';
 import { reverseGeocode } from '@/lib/geocode';
 import { applyTripFuelBurn } from '@/lib/fuelLevel';
 import { refreshVehicleReminders } from '@/lib/reminders';
@@ -49,7 +50,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       if (!staleTripChecked.current) {
         try {
-          await finalizeStaleActiveTrip();
+          const closed = await finalizeStaleActiveTrip();
+          if (closed) {
+            await stopBackgroundTracking().catch(() => undefined);
+          } else {
+            // FGS orphelin possible (trajet déjà inactif)
+            const live = await getActiveTrip();
+            if (!live?.isActive) {
+              await stopBackgroundTracking().catch(() => undefined);
+            }
+          }
           staleTripChecked.current = true;
         } catch (e) {
           console.warn('finalizeStaleActiveTrip', e);
@@ -110,11 +120,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             () => {
               void (async () => {
                 await stopBackgroundTracking();
+                await flushTripUpdates().catch(() => undefined);
+                const fresh = (await getTripById(activeTrip.id).catch(() => null)) || activeTrip;
 
-                  const pts = parseRoutePoints(activeTrip.routePoints);
+                  const pts = parseRoutePoints(fresh.routePoints);
                   const last = pts.length > 0 ? pts[pts.length - 1] : null;
 
-                  let destName = activeTrip.destinationName?.trim();
+                  let destName = fresh.destinationName?.trim();
                   if (!destName && last) {
                     destName =
                       (await reverseGeocode(last.latitude, last.longitude).catch(() => null)) ||
@@ -122,13 +134,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   }
                   if (!destName) destName = 'Lieu d’arrivée';
 
-                  let originName = activeTrip.originName?.trim();
+                  let originName = fresh.originName?.trim();
                   if (!originName && pts[0]) {
                     originName =
                       (await reverseGeocode(pts[0].latitude, pts[0].longitude).catch(() => null)) ||
                       'Lieu de départ';
                   }
-                  if (!originName) originName = activeTrip.originName;
+                  if (!originName) originName = fresh.originName;
 
                   if (!activeVehicle) {
                     await dbSetActiveVehicle(id);
@@ -139,35 +151,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
                   const live = calculateTripStats(
                     activeVehicle,
-                    activeTrip.distanceKm,
-                    activeTrip.startTime,
+                    fresh.distanceKm,
+                    fresh.startTime,
                     new Date().toISOString(),
-                    activeTrip.routePoints
+                    fresh.routePoints
                   );
                   const speed =
                     live.movingSpeedKmh > 0
                       ? live.movingSpeedKmh
-                      : (activeTrip.distanceKm / Math.max(live.durationMinutes, 0.01)) * 60;
+                      : (fresh.distanceKm / Math.max(live.durationMinutes, 0.01)) * 60;
                   const noteParts = [
-                    activeTrip.note,
+                    fresh.note,
                     speed > 0 ? `Vitesse moy. ${speed.toFixed(0)} km/h` : null,
                   ].filter(Boolean);
 
-                  await updateTrip(activeTrip.id, {
+                  await updateTrip(fresh.id, {
                     isActive: false,
                     isPaused: false,
                     endTime: new Date().toISOString(),
                     status: 'confirmed',
-                    originName: originName || activeTrip.originName,
+                    originName: originName || fresh.originName,
                     destinationName: destName,
+                    routePoints: fresh.routePoints,
+                    estimatedFuelUsed: live.fuelUsed,
+                    estimatedCost: live.cost,
                     note: noteParts.join(' · ') || undefined,
                   });
 
-                  if (activeVehicle && activeTrip.distanceKm > 0) {
-                    await applyTripFuelBurn(activeVehicle, activeTrip.distanceKm);
+                  if (activeVehicle && fresh.distanceKm > 0) {
+                    await applyTripFuelBurn(activeVehicle, fresh.distanceKm);
                   }
-                  if (activeTrip.distanceKm > 0) {
-                    await addTrackedKm(activeTrip.vehicleId, activeTrip.distanceKm);
+                  if (fresh.distanceKm > 0) {
+                    await addTrackedKm(fresh.vehicleId, fresh.distanceKm);
                   }
 
                 await dbSetActiveVehicle(id);
@@ -211,15 +226,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     })();
   }, [refresh]);
 
-  // Pendant un trajet : ne recharge QUE le trajet actif (léger).
-  // Un refresh() complet toutes les 3 s + GPS bg = OOM / ANR observés sur Nothing.
+  // Pendant un trajet : poll léger du trajet actif. Idle : pas de refresh budgets toutes les 90 s.
   useEffect(() => {
     const live = !!activeTrip?.isActive && !activeTrip?.isPaused;
     if (!live) {
-      const interval = setInterval(() => {
-        void refresh();
+      const lightIdle = setInterval(() => {
+        void (async () => {
+          try {
+            const trip = await getActiveTrip();
+            setActiveTrip(trip);
+          } catch {
+            /* ignore */
+          }
+        })();
       }, 90000);
-      return () => clearInterval(interval);
+      return () => clearInterval(lightIdle);
     }
 
     const light = setInterval(() => {
@@ -233,9 +254,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       })();
     }, 8000);
 
+    // Budgets / véhicules : moins souvent pendant un trajet (évite thrash SQLite).
     const full = setInterval(() => {
       void refresh();
-    }, 45000);
+    }, 180000);
 
     return () => {
       clearInterval(light);

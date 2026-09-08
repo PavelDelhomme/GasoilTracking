@@ -31,6 +31,11 @@ function enqueueTripUpdate(fn: () => Promise<void>): Promise<void> {
   return tripWriteChain;
 }
 
+/** Attend la fin de toutes les écritures GPS en file (avant clôture trajet). */
+export async function flushTripUpdates(): Promise<void> {
+  await tripWriteChain;
+}
+
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   if (error) {
     console.warn('[gps-bg] task error', error);

@@ -16,7 +16,7 @@ import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { DatePickerField } from '@/components/DatePickerField';
 import { createFillUp, getFillUps, updateVehicle, updateTrip } from '@/lib/database';
-import { adaptVehicleConsumption, formatEuro, refreshBudgets } from '@/lib/calculations';
+import { adaptVehicleConsumption, displayOdometerKm, formatEuro, refreshBudgets } from '@/lib/calculations';
 import { applyFillUpToFuelEstimate, fuelLevelLabel, previewFillUpFuel } from '@/lib/fuelLevel';
 import {
   fetchCheapestStations,
@@ -52,7 +52,7 @@ export default function AddFillUpScreen() {
   /** Qui a été modifié en dernier pour recalculer le 3e champ */
   const [lastEdited, setLastEdited] = useState<'liters' | 'total' | 'ppl'>('liters');
   const [odometer, setOdometer] = useState(
-    activeVehicle?.hasOdometer ? String(activeVehicle.currentOdometer || '') : ''
+    activeVehicle?.hasOdometer ? String(displayOdometerKm(activeVehicle) || '') : ''
   );
   const [distanceKm, setDistanceKm] = useState('');
   const [dateLocal, setDateLocal] = useState(() => toLocalYmd(new Date()));
@@ -73,7 +73,7 @@ export default function AddFillUpScreen() {
       const fills = await getFillUps(activeVehicle.id);
       const last = fills[0] || null;
       setLastFill(last);
-      const currentOdo = activeVehicle.currentOdometer || 0;
+      const currentOdo = displayOdometerKm(activeVehicle);
 
       if (hasOdo) {
         if (currentOdo > 0) {
@@ -93,7 +93,7 @@ export default function AddFillUpScreen() {
         setKmHint('Suggestion basée sur le dernier plein');
       }
     })();
-  }, [activeVehicle?.id, hasOdo]);
+  }, [activeVehicle?.id, activeVehicle?.currentOdometer, activeVehicle?.trackedKm, hasOdo]);
 
   const fuelKey =
     activeVehicle?.fuelType === 'diesel'

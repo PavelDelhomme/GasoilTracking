@@ -138,6 +138,11 @@ export async function stopBackgroundTracking(): Promise<void> {
   pending.length = 0;
 }
 
+/** Compat native : drain de la file d’écritures GPS. */
+export async function flushTripUpdates(): Promise<void> {
+  await flushPending();
+}
+
 export async function getCurrentLocation(opts?: {
   fresh?: boolean;
 }): Promise<Location.LocationObject | null> {

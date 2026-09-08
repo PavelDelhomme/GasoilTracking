@@ -96,8 +96,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         void (async () => {
           try {
             const live = await getActiveTrip();
-            // Ne pas sync pendant un trajet GPS (payload + Maps = 413 / OOM)
-            if (live?.isActive && !live.isPaused) return;
+            // Ne pas sync pendant un trajet (y compris en pause / plein en cours)
+            if (live?.isActive) return;
             await syncPreferNewer();
           } catch {
             /* ignore */
