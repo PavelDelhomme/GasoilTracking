@@ -97,7 +97,7 @@ export function isSaneConsumptionSample(lPer100: number, fuelType?: Vehicle['fue
 export async function getConsumptionStats(vehicleId: number): Promise<ConsumptionStats> {
   const [fillUps, trips, vehicle] = await Promise.all([
     getFillUps(vehicleId),
-    getTrips(vehicleId),
+    getTrips(vehicleId, { omitRoutePoints: true }),
     getVehicleById(vehicleId),
   ]);
   const ordered = [...fillUps].sort((a, b) => a.date.localeCompare(b.date));
@@ -215,7 +215,7 @@ export async function getSinceLastFillStats(vehicleId: number): Promise<SinceLas
   const [vehicle, fillUps, trips] = await Promise.all([
     getVehicleById(vehicleId),
     getFillUps(vehicleId),
-    getTrips(vehicleId),
+    getTrips(vehicleId, { omitRoutePoints: true }),
   ]);
   const empty: SinceLastFillStats = {
     lastFill: null,

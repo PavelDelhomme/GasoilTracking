@@ -143,6 +143,14 @@ export async function flushTripUpdates(): Promise<void> {
   await flushPending();
 }
 
+export function peekLiveRouteTail(_max = 80): null {
+  return null;
+}
+
+export function peekLiveTripId(): null {
+  return null;
+}
+
 export async function getCurrentLocation(opts?: {
   fresh?: boolean;
 }): Promise<Location.LocationObject | null> {

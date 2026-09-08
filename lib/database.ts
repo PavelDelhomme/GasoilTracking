@@ -609,7 +609,7 @@ export async function addTrackedKm(vehicleId: number, km: number): Promise<void>
 
 /** Aligne tracked_km sur la somme des trajets confirmés (corrige les vieux 0 km). */
 export async function reconcileTrackedKmFromTrips(vehicleId: number): Promise<number> {
-  const trips = await getTrips(vehicleId);
+  const trips = await getTrips(vehicleId, { omitRoutePoints: true });
   const sum = trips
     .filter((t) => !t.isActive && t.status !== 'rejected')
     .reduce((acc, t) => acc + (Number(t.distanceKm) || 0), 0);
@@ -877,24 +877,35 @@ export async function deleteBudget(id: number): Promise<void> {
 
 // --- Trips ---
 
-export async function getTrips(vehicleId?: number, opts?: { includeRejected?: boolean }): Promise<Trip[]> {
+export async function getTrips(
+  vehicleId?: number,
+  opts?: { includeRejected?: boolean; omitRoutePoints?: boolean }
+): Promise<Trip[]> {
   const database = await getDatabase();
   const includeRejected = opts?.includeRejected === true;
+  const omitPts = opts?.omitRoutePoints === true;
+  const cols = omitPts
+    ? `id, vehicle_id, start_time, end_time, distance_km, estimated_fuel_used, estimated_cost,
+       origin_name, destination_name, is_active, status, source, fill_up_id, note, is_paused,
+       '[]' AS route_points`
+    : '*';
   if (vehicleId) {
     const rows = includeRejected
       ? await database.getAllAsync(
-          'SELECT * FROM trips WHERE vehicle_id = ? ORDER BY start_time DESC',
+          `SELECT ${cols} FROM trips WHERE vehicle_id = ? ORDER BY start_time DESC`,
           [vehicleId]
         )
       : await database.getAllAsync(
-          "SELECT * FROM trips WHERE vehicle_id = ? AND status != 'rejected' ORDER BY start_time DESC",
+          `SELECT ${cols} FROM trips WHERE vehicle_id = ? AND status != 'rejected' ORDER BY start_time DESC`,
           [vehicleId]
         );
     return rows.map(mapTrip);
   }
   const rows = includeRejected
-    ? await database.getAllAsync('SELECT * FROM trips ORDER BY start_time DESC')
-    : await database.getAllAsync("SELECT * FROM trips WHERE status != 'rejected' ORDER BY start_time DESC");
+    ? await database.getAllAsync(`SELECT ${cols} FROM trips ORDER BY start_time DESC`)
+    : await database.getAllAsync(
+        `SELECT ${cols} FROM trips WHERE status != 'rejected' ORDER BY start_time DESC`
+      );
   return rows.map(mapTrip);
 }
 

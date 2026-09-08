@@ -60,7 +60,7 @@ export default function HomeScreen() {
     const [s, since, trips] = await Promise.all([
       getConsumptionStats(vehicleId),
       getSinceLastFillStats(vehicleId),
-      getTrips(vehicleId),
+      getTrips(vehicleId, { omitRoutePoints: true }),
     ]);
     setStats(s);
     setSinceFill(since);
@@ -136,6 +136,7 @@ export default function HomeScreen() {
       await refresh();
       if (result === 'pulled') showToast('Cloud téléchargé');
       else if (result === 'pushed') showToast('Sauvegarde envoyée au cloud');
+      else if (result === 'skipped') showToast('Sync reportée — terminez le trajet d’abord');
       else showToast('Synchronisation à jour');
     } catch (e) {
       const fail = syncFailureMessage(e);

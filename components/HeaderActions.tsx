@@ -60,6 +60,8 @@ export function HeaderActions() {
       const hhmm = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
       if (result === 'pulled') showToast(`Cloud téléchargé · ${hhmm}`);
       else if (result === 'pushed') showToast(`Sauvegarde envoyée · ${hhmm}`);
+      else if (result === 'skipped')
+        showToast(`Sync reportée — terminez le trajet d’abord · ${hhmm}`);
       else showToast(`Synchronisation à jour · ${hhmm}`);
     } catch (e) {
       const fail = syncFailureMessage(e);

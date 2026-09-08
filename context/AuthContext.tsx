@@ -16,7 +16,7 @@ import {
 } from '@/lib/api';
 import { applySnapshot, hasLocalUserData, normalizeSnapshot } from '@/lib/dataSnapshot';
 import { saveLocalBackup, refreshFromCloud, syncPreferNewer } from '@/lib/backup';
-import { getActiveTrip } from '@/lib/database';
+import { getActiveTripLite } from '@/lib/database';
 
 type AuthContextType = {
   user: AuthUser | null;
@@ -95,7 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         void refreshMe();
         void (async () => {
           try {
-            const live = await getActiveTrip();
+            const live = await getActiveTripLite();
             // Ne pas sync pendant un trajet (y compris en pause / plein en cours)
             if (live?.isActive) return;
             await syncPreferNewer();

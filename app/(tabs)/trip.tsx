@@ -50,6 +50,8 @@ import {
   flushTripUpdates,
   getCurrentLocation,
   openGoogleMapsSearch,
+  peekLiveRouteTail,
+  peekLiveTripId,
 } from '@/lib/locationService';
 import { launchGoogleMapsNavigation } from '@/lib/mapsNavigation';
 import {
@@ -232,7 +234,7 @@ export default function TripScreen() {
     setHistoryLoading(true);
     try {
     const [trips, pend, since, pl] = await Promise.all([
-      getTrips(activeVehicle.id),
+      getTrips(activeVehicle.id, { omitRoutePoints: true }),
       getPendingTrips(activeVehicle.id),
       getSinceLastFillStats(activeVehicle.id),
       getPlaces(),
@@ -458,6 +460,18 @@ export default function TripScreen() {
     let cancelled = false;
     const pull = async () => {
       try {
+        // Préférer le cache FGS (pas de parse DB O(n) toutes les 10 s).
+        if (peekLiveTripId() === activeTrip.id) {
+          const tail = peekLiveRouteTail(80);
+          if (tail && tail.length) {
+            setLiveMapTail(tail);
+            const last = tail[tail.length - 1];
+            if (last) {
+              setUserLocation({ latitude: last.latitude, longitude: last.longitude });
+            }
+            return;
+          }
+        }
         const full = await getTripById(activeTrip.id);
         if (cancelled || !full) return;
         const pts = parseRoutePoints(full.routePoints || '[]');

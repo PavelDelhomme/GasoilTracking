@@ -4,6 +4,8 @@ import { Platform } from 'react-native';
 import { BACKGROUND_LOCATION_TASK } from '@/constants/Colors';
 import {
   getActiveTrip,
+  getActiveTripLite,
+  getTripById,
   getVehicleById,
   updateTrip,
 } from '@/lib/database';
@@ -43,6 +45,17 @@ function clearLivePointsCache() {
   livePointsCache = null;
 }
 
+/** Tail RAM du trajet live (pour la carte UI — sans re-lire/parser toute la DB). */
+export function peekLiveRouteTail(max = 80): RoutePoint[] | null {
+  if (!livePointsCache?.points?.length) return null;
+  const pts = livePointsCache.points;
+  return pts.length > max ? pts.slice(-max) : pts.slice();
+}
+
+export function peekLiveTripId(): number | null {
+  return livePointsCache?.tripId ?? null;
+}
+
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   if (error) {
     console.warn('[gps-bg] task error', error);
@@ -57,19 +70,23 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
 
   await enqueueTripUpdate(async () => {
     try {
-      const trip = await getActiveTrip();
-      if (!trip || trip.isPaused || !trip.isActive) {
+      const lite = await getActiveTripLite();
+      if (!lite || lite.isPaused || !lite.isActive) {
         clearLivePointsCache();
         return;
       }
 
-      const vehicle = await getVehicleById(trip.vehicleId);
+      const vehicle = await getVehicleById(lite.vehicleId);
       if (!vehicle) return;
 
-      let points: RoutePoint[] =
-        livePointsCache?.tripId === trip.id
-          ? livePointsCache.points
-          : parseRoutePoints(trip.routePoints || '[]');
+      let points: RoutePoint[];
+      if (livePointsCache?.tripId === lite.id) {
+        points = livePointsCache.points;
+      } else {
+        // Hydrate une seule fois depuis la DB (miss cache), puis reste en RAM.
+        const full = (await getTripById(lite.id).catch(() => null)) || (await getActiveTrip());
+        points = parseRoutePoints(full?.routePoints || '[]');
+      }
 
       let changed = false;
       for (const loc of batch) {
@@ -96,12 +113,12 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         changed = true;
       }
       if (!changed) {
-        livePointsCache = { tripId: trip.id, points };
+        livePointsCache = { tripId: lite.id, points };
         return;
       }
 
       points = compactRoutePoints(points);
-      livePointsCache = { tripId: trip.id, points };
+      livePointsCache = { tripId: lite.id, points };
       // Un seul stringify par batch (plus de parse/stringify par point).
       const routePoints = JSON.stringify(points);
       const distanceKm = calculateRouteDistance(routePoints);
@@ -110,7 +127,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
       });
       const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
 
-      await updateTrip(trip.id, {
+      await updateTrip(lite.id, {
         routePoints,
         distanceKm,
         estimatedFuelUsed: fuelUsed,

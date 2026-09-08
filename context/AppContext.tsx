@@ -113,12 +113,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const selectVehicle = useCallback(
     async (id: number) => {
-      // Si un trajet GPS est en cours, changer de véhicule coupe ce trajet.
-      if (activeTrip && !activeTrip.isPaused && activeTrip.isActive) {
+      // Si un trajet GPS est en cours (pause incluse), changer de véhicule coupe ce trajet.
+      if (activeTrip?.isActive) {
         await new Promise<void>((resolve) => {
           confirm(
             'Changer de véhicule',
-            'Un trajet GPS est en cours. Le changement va interrompre le trajet actuel. Continuer ?',
+            activeTrip.isPaused
+              ? 'Un trajet est en pause. Le changement va le clôturer. Continuer ?'
+              : 'Un trajet GPS est en cours. Le changement va interrompre le trajet actuel. Continuer ?',
             () => {
               void (async () => {
                 await stopBackgroundTracking();
@@ -202,7 +204,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await dbSetActiveVehicle(id);
       await refresh();
     },
-    [refresh, activeTrip]
+    [refresh, activeTrip, activeVehicle]
   );
 
   useEffect(() => {

@@ -9,6 +9,7 @@ import {
 } from '@/lib/dataSnapshot';
 import { repairFillUpVehiclesAndBudgets } from '@/lib/repairFillUpVehicles';
 import { prepareSnapshotForPush, slimSnapshotAggressive } from '@/lib/syncPayload';
+import { getActiveTripLite } from '@/lib/database';
 
 const BACKUP_KEY = 'gasoil_local_backup_v1';
 const PENDING_UPDATE_KEY = 'gasoil_pending_update_v1';
@@ -192,6 +193,13 @@ function snapshotWeight(snap: {
 export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'> {
   const token = await getToken();
   if (!token) return 'skipped';
+  // Ne jamais replace/push pendant un trajet GPS (y compris pause) — risque perte/OOM.
+  try {
+    const live = await getActiveTripLite();
+    if (live?.isActive) return 'skipped';
+  } catch {
+    /* continue */
+  }
   // Corrige prix/litres/budgets locaux avant tout push (évite d’écraser le cloud corrigé).
   try {
     await repairFillUpVehiclesAndBudgets();

@@ -343,12 +343,16 @@ export async function deleteBudget(id: number): Promise<void> {
 
 export async function getTrips(
   vehicleId?: number,
-  opts?: { includeRejected?: boolean }
+  opts?: { includeRejected?: boolean; omitRoutePoints?: boolean }
 ): Promise<Trip[]> {
   const s = await load();
   let list = vehicleId ? s.trips.filter((t) => t.vehicleId === vehicleId) : s.trips;
   if (!opts?.includeRejected) list = list.filter((t) => t.status !== 'rejected');
-  return [...list].sort((a, b) => b.startTime.localeCompare(a.startTime));
+  const sorted = [...list].sort((a, b) => b.startTime.localeCompare(a.startTime));
+  if (opts?.omitRoutePoints) {
+    return sorted.map((t) => ({ ...t, routePoints: '[]' }));
+  }
+  return sorted;
 }
 
 export async function getPendingTrips(vehicleId?: number): Promise<Trip[]> {
