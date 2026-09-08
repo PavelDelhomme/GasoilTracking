@@ -8,13 +8,14 @@ import {
   updateTrip,
 } from '@/lib/database';
 import {
-  appendRoutePoint,
   calculateRouteDistance,
-  compactRoutePointsJson,
+  compactRoutePoints,
   estimateCost,
   parseRoutePoints,
+  type RoutePoint,
 } from '@/lib/calculations';
 import { estimateTripFuelLiters } from '@/lib/consumptionModel';
+import { evaluateGpsSample } from '@/lib/gpsTracking';
 import { buildGoogleMapsDirUrl } from '@/lib/mapsNavigation';
 
 interface LocationTaskData {
@@ -25,6 +26,8 @@ interface LocationTaskData {
 let tripWriteChain: Promise<void> = Promise.resolve();
 /** Empêche plusieurs startLocationUpdatesAsync en parallèle (crash LocationTaskService). */
 let startInFlight: Promise<boolean> | null = null;
+/** Cache RAM des points live — évite parse/stringify O(n) à chaque fix GPS. */
+let livePointsCache: { tripId: number; points: RoutePoint[] } | null = null;
 
 function enqueueTripUpdate(fn: () => Promise<void>): Promise<void> {
   tripWriteChain = tripWriteChain.then(fn, fn);
@@ -34,6 +37,10 @@ function enqueueTripUpdate(fn: () => Promise<void>): Promise<void> {
 /** Attend la fin de toutes les écritures GPS en file (avant clôture trajet). */
 export async function flushTripUpdates(): Promise<void> {
   await tripWriteChain;
+}
+
+function clearLivePointsCache() {
+  livePointsCache = null;
 }
 
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
@@ -51,29 +58,52 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   await enqueueTripUpdate(async () => {
     try {
       const trip = await getActiveTrip();
-      if (!trip || trip.isPaused || !trip.isActive) return;
+      if (!trip || trip.isPaused || !trip.isActive) {
+        clearLivePointsCache();
+        return;
+      }
 
       const vehicle = await getVehicleById(trip.vehicleId);
       if (!vehicle) return;
 
-      let routePoints = trip.routePoints;
+      let points: RoutePoint[] =
+        livePointsCache?.tripId === trip.id
+          ? livePointsCache.points
+          : parseRoutePoints(trip.routePoints || '[]');
+
       let changed = false;
       for (const loc of batch) {
-        const next = appendRoutePoint(routePoints, {
+        const sample = {
           latitude: loc.coords.latitude,
           longitude: loc.coords.longitude,
           timestamp: loc.timestamp || Date.now(),
           accuracy: loc.coords.accuracy ?? undefined,
           speed: loc.coords.speed ?? undefined,
-        });
-        if (next !== routePoints) {
-          routePoints = next;
-          changed = true;
+        };
+        const prev = points.length > 0 ? points[points.length - 1] : null;
+        const verdict = evaluateGpsSample(prev, sample, { isFirst: points.length === 0 });
+        if (!verdict.accept) continue;
+        const use = verdict.sample || sample;
+        const entry: RoutePoint = {
+          latitude: Math.round(use.latitude * 1e6) / 1e6,
+          longitude: Math.round(use.longitude * 1e6) / 1e6,
+          timestamp: use.timestamp,
+        };
+        if (use.speed != null && Number.isFinite(use.speed) && use.speed >= 0) {
+          entry.speed = Math.round(use.speed * 10) / 10;
         }
+        points.push(entry);
+        changed = true;
       }
-      if (!changed) return;
+      if (!changed) {
+        livePointsCache = { tripId: trip.id, points };
+        return;
+      }
 
-      routePoints = compactRoutePointsJson(routePoints);
+      points = compactRoutePoints(points);
+      livePointsCache = { tripId: trip.id, points };
+      // Un seul stringify par batch (plus de parse/stringify par point).
+      const routePoints = JSON.stringify(points);
       const distanceKm = calculateRouteDistance(routePoints);
       const fuelUsed = estimateTripFuelLiters(vehicle, distanceKm, {
         learnedFactor: vehicle.consumptionLearnFactor,
@@ -173,6 +203,8 @@ export async function stopBackgroundTracking(): Promise<void> {
     }
   } catch (e) {
     console.warn('[gps-bg] stop failed', e);
+  } finally {
+    clearLivePointsCache();
   }
 }
 

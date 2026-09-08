@@ -165,6 +165,8 @@ export default function TripScreen() {
   const arrivalPromptedRef = useRef(false);
   const startingRef = useRef(false);
   const fittedTripIdRef = useRef<number | null>(null);
+  /** Queue carte live (max ~80 pts) — ne jamais garder le JSON GPS complet en state React. */
+  const [liveMapTail, setLiveMapTail] = useState<RoutePoint[]>([]);
   const [isStopping, setIsStopping] = useState(false);
   const [stopConfirm, setStopConfirm] = useState(false);
   const [tripStartFuelLiters, setTripStartFuelLiters] = useState<number | null>(null);
@@ -327,9 +329,9 @@ export default function TripScreen() {
     const trackingLive = !!activeTrip && !activeTrip.isPaused;
 
     // Pendant un trajet : pas de 2e flux GPS (le FGS suffit). Sinon OOM/ANR.
+    // Position UI = dernier point du tail local (chargé hors Context).
     if (trackingLive) {
-      const pts = parseRoutePoints(activeTrip.routePoints);
-      const last = pts.length > 0 ? pts[pts.length - 1] : null;
+      const last = liveMapTail.length > 0 ? liveMapTail[liveMapTail.length - 1] : null;
       if (last) {
         const coords = { latitude: last.latitude, longitude: last.longitude };
         setUserLocation(coords);
@@ -445,7 +447,37 @@ export default function TripScreen() {
         navigator.geolocation.clearWatch(webWatch);
       }
     };
-  }, [isWeb, activeTrip?.id, activeTrip?.isPaused]);
+  }, [isWeb, activeTrip?.id, activeTrip?.isPaused, liveMapTail]);
+
+  // Charge un tail court depuis la DB (pas via Context) pour la carte pendant le live.
+  useEffect(() => {
+    if (!activeTrip?.isActive || activeTrip.isPaused) {
+      if (!activeTrip?.isActive) setLiveMapTail([]);
+      return;
+    }
+    let cancelled = false;
+    const pull = async () => {
+      try {
+        const full = await getTripById(activeTrip.id);
+        if (cancelled || !full) return;
+        const pts = parseRoutePoints(full.routePoints || '[]');
+        const tail = pts.length > 80 ? pts.slice(-80) : pts;
+        setLiveMapTail(tail);
+        const last = tail[tail.length - 1];
+        if (last) {
+          setUserLocation({ latitude: last.latitude, longitude: last.longitude });
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    void pull();
+    const t = setInterval(() => void pull(), 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [activeTrip?.id, activeTrip?.isActive, activeTrip?.isPaused]);
 
   useEffect(() => {
     if (!activeTrip) {
@@ -454,14 +486,14 @@ export default function TripScreen() {
     }
     // Fit une seule fois par trajet (évite caméra qui saute à chaque poll GPS).
     if (fittedTripIdRef.current === activeTrip.id) return;
-    const points = parseRoutePoints(activeTrip.routePoints);
-    if (points.length < 2) return;
+    if (liveMapTail.length < 2) return;
     fittedTripIdRef.current = activeTrip.id;
+    const fitPts = liveMapTail.length > 60 ? liveMapTail.slice(-60) : liveMapTail;
     mapRef.current?.fitToCoordinates(
-      points.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
+      fitPts.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
       { edgePadding: { top: 50, right: 50, bottom: 50, left: 50 }, animated: true }
     );
-  }, [activeTrip?.id, activeTrip?.routePoints]);
+  }, [activeTrip?.id, liveMapTail]);
 
   useEffect(() => {
     if (!activeTrip) {
@@ -469,16 +501,21 @@ export default function TripScreen() {
       setLiveDestLabel('');
       return;
     }
-    const pts = parseRoutePoints(activeTrip.routePoints);
-    setLiveOriginLabel(tripPlaceLabel(activeTrip.originName, pts[0] || null, 'origin'));
+    const first = liveMapTail[0] || null;
+    const last = liveMapTail.length > 1 ? liveMapTail[liveMapTail.length - 1] : userLocation;
+    setLiveOriginLabel(tripPlaceLabel(activeTrip.originName, first, 'origin'));
     setLiveDestLabel(
-      tripPlaceLabel(
-        activeTrip.destinationName || destination,
-        pts.length > 1 ? pts[pts.length - 1] : userLocation,
-        'destination'
-      )
+      tripPlaceLabel(activeTrip.destinationName || destination, last, 'destination')
     );
-  }, [activeTrip, destination, userLocation]);
+  }, [
+    activeTrip?.id,
+    activeTrip?.originName,
+    activeTrip?.destinationName,
+    destination,
+    liveMapTail,
+    userLocation?.latitude,
+    userLocation?.longitude,
+  ]);
 
   const selectedRoute = useMemo(
     () => routeOptions.find((r) => r.id === selectedRouteId) || routeOptions[0] || null,
@@ -1081,7 +1118,7 @@ export default function TripScreen() {
 
     let loc = userLocation;
     // Préférer le dernier point du trajet (FGS) plutôt qu’un GPS High frais toutes les 20 s.
-    const lastPt = parseRoutePoints(activeTrip.routePoints).slice(-1)[0];
+    const lastPt = liveMapTail.length > 0 ? liveMapTail[liveMapTail.length - 1] : null;
     if (lastPt) {
       loc = { latitude: lastPt.latitude, longitude: lastPt.longitude };
     } else if (!loc) {
@@ -1124,10 +1161,15 @@ export default function TripScreen() {
       })();
     }
   }, [
-    activeTrip,
+    activeTrip?.id,
+    activeTrip?.isPaused,
+    activeTrip?.distanceKm,
+    activeTrip?.destinationName,
     destCoords,
     plannedRoute,
-    userLocation,
+    userLocation?.latitude,
+    userLocation?.longitude,
+    liveMapTail,
     isStopping,
     finishTripCore,
   ]);
@@ -1410,16 +1452,29 @@ export default function TripScreen() {
 
   const openDetail = (trip: Trip) => router.push(`/trip/${trip.id}` as never);
 
-  const tripStats =
-    activeTrip && activeVehicle
-      ? calculateTripStats(
-          activeVehicle,
-          activeTrip.distanceKm,
-          activeTrip.startTime,
-          undefined,
-          activeTrip.routePoints
-        )
-      : null;
+  // Stats live : colonnes numériques déjà à jour par le FGS — pas de parse JSON O(n).
+  const tripStats = useMemo(() => {
+    if (!activeTrip || !activeVehicle) return null;
+    const startMs = Date.parse(activeTrip.startTime);
+    const durationMinutes = Number.isFinite(startMs)
+      ? Math.max(0, (Date.now() - startMs) / 60000)
+      : 0;
+    const movingSpeedKmh =
+      durationMinutes > 0.5 ? (activeTrip.distanceKm / durationMinutes) * 60 : 0;
+    return {
+      fuelUsed: activeTrip.estimatedFuelUsed,
+      cost: activeTrip.estimatedCost,
+      durationMinutes,
+      movingSpeedKmh,
+    };
+  }, [
+    activeTrip?.id,
+    activeTrip?.distanceKm,
+    activeTrip?.estimatedFuelUsed,
+    activeTrip?.estimatedCost,
+    activeTrip?.startTime,
+    activeVehicle?.id,
+  ]);
   const avgSpeed =
     activeTrip && tripStats
       ? tripStats.movingSpeedKmh > 0
@@ -1442,19 +1497,20 @@ export default function TripScreen() {
         : estimateCost(liveActiveFuel, activeVehicle.defaultFuelPrice)
       : 0;
 
-  const routePoints = activeTrip ? parseRoutePoints(activeTrip.routePoints) : [];
+  const routePoints = liveMapTail;
   const paused = Boolean(activeTrip?.isPaused);
   /** Pendant trajet : derniers points GPS ; sinon itinéraire prévu */
   const mapRoute =
     routePoints.length > 1
-      ? routePoints.slice(-120)
+      ? routePoints
       : plannedRoute.length > 0
         ? plannedRoute
         : routePoints;
 
   const liveHeading = useMemo(
     () => headingFromTrail(routePoints.length ? routePoints : userLocation ? [userLocation] : []),
-    [routePoints, userLocation]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [liveMapTail, userLocation?.latitude, userLocation?.longitude]
   );
 
   const navGuidance = useMemo(() => {
@@ -1610,9 +1666,7 @@ export default function TripScreen() {
               accentColor={colors.accent}
               userLocation={userLocation}
               paused={paused}
-              plannedRoute={
-                activeTrip && routePoints.length > 1 ? plannedRoute : plannedRoute
-              }
+              plannedRoute={activeTrip && routePoints.length > 1 ? [] : plannedRoute}
               alternateRoutes={
                 activeTrip && routePoints.length > 1 ? [] : alternateMapRoutes
               }

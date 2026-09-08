@@ -223,6 +223,8 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
 ) {
   const webRef = useRef<WebView>(null);
   const didBootFit = useRef(false);
+  const lastInjectAt = useRef(0);
+  const lastInjectSig = useRef('');
   const zoom = Math.max(
     10,
     Math.min(16, Math.round(Math.log2(360 / Math.max(region.latitudeDelta || 0.05, 0.005))))
@@ -260,10 +262,18 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
   }));
 
   useEffect(() => {
+    const now = Date.now();
+    // Throttle inject WebView (Chromium + OSM = OOM si trop fréquent).
+    if (now - lastInjectAt.current < 3500 && didBootFit.current) return;
+    const route = ptsForMap(routePoints).map((p) => [p.latitude, p.longitude]);
+    const sig = `${route.length}:${route[route.length - 1]?.join(',') || ''}:${paused ? 1 : 0}:${followUser ? 1 : 0}`;
+    if (sig === lastInjectSig.current && didBootFit.current) return;
+    lastInjectSig.current = sig;
+    lastInjectAt.current = now;
     inject(webRef, {
       type: 'update',
-      route: ptsForMap(routePoints).map((p) => [p.latitude, p.longitude]),
-      speeds: routeSpeedsKmh || [],
+      route,
+      speeds: [],
       planned: ptsForMap(plannedRoute).map((p) => [p.latitude, p.longitude]),
       alts: (alternateRoutes || []).map((alt) =>
         ptsForMap(alt, 80).map((p) => [p.latitude, p.longitude])
@@ -283,7 +293,6 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
     alternateRoutes,
     destination,
     followUser,
-    routeSpeedsKmh,
   ]);
 
   // Remount une fois hors Paris par défaut — mais avec region déjà = bbox trajet
@@ -327,7 +336,7 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
         allowFileAccess
         mixedContentMode="always"
         setSupportMultipleWindows={false}
-        {...(Platform.OS === 'android' ? { androidLayerType: 'hardware' as const } : {})}
+        {...(Platform.OS === 'android' ? { androidLayerType: 'none' as const } : {})}
       />
     </View>
   );

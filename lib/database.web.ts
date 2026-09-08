@@ -363,6 +363,12 @@ export async function getActiveTrip(): Promise<Trip | null> {
   return s.trips.find((t) => t.isActive) ?? null;
 }
 
+export async function getActiveTripLite(): Promise<Trip | null> {
+  const t = await getActiveTrip();
+  if (!t) return null;
+  return { ...t, routePoints: '[]' };
+}
+
 export async function getTripById(id: number): Promise<Trip | null> {
   const s = await load();
   return s.trips.find((t) => t.id === id) ?? null;

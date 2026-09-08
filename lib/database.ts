@@ -919,6 +919,21 @@ export async function getActiveTrip(): Promise<Trip | null> {
   return row ? mapTrip(row) : null;
 }
 
+/**
+ * Trajet actif sans colonne route_points (évite OOM UI pendant le live).
+ * Les points restent en SQLite ; utiliser getTripById / getActiveTrip pour clôturer.
+ */
+export async function getActiveTripLite(): Promise<Trip | null> {
+  const database = await getDatabase();
+  const row = await database.getFirstAsync(
+    `SELECT id, vehicle_id, start_time, end_time, distance_km, estimated_fuel_used, estimated_cost,
+            origin_name, destination_name, is_active, status, source, fill_up_id, note, is_paused,
+            '[]' AS route_points
+     FROM trips WHERE is_active = 1 LIMIT 1`
+  );
+  return row ? mapTrip(row) : null;
+}
+
 export async function getTripById(id: number): Promise<Trip | null> {
   const database = await getDatabase();
   const row = await database.getFirstAsync('SELECT * FROM trips WHERE id = ?', [id]);

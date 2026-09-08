@@ -3,6 +3,7 @@ import type { BudgetStatus, Trip, Vehicle } from '@/types';
 import {
   getActiveVehicle,
   getActiveTrip,
+  getActiveTripLite,
   getTripById,
   getVehicles,
   setActiveVehicle as dbSetActiveVehicle,
@@ -69,7 +70,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const [vehicleList, active, trip] = await Promise.all([
         getVehicles(),
         getActiveVehicle(),
-        getActiveTrip(),
+        // Lite : jamais pousser le JSON GPS complet dans le Context React (OOM trajet).
+        getActiveTripLite(),
       ]);
       setVehicles(vehicleList);
       setActiveVehicleState(active);
@@ -226,14 +228,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     })();
   }, [refresh]);
 
-  // Pendant un trajet : poll léger du trajet actif. Idle : pas de refresh budgets toutes les 90 s.
+  // Pendant un trajet : poll LITE (sans route_points) — le JSON GPS plein plantait l’UI (OOM).
   useEffect(() => {
     const live = !!activeTrip?.isActive && !activeTrip?.isPaused;
     if (!live) {
       const lightIdle = setInterval(() => {
         void (async () => {
           try {
-            const trip = await getActiveTrip();
+            const trip = await getActiveTripLite();
             setActiveTrip(trip);
           } catch {
             /* ignore */
@@ -246,15 +248,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const light = setInterval(() => {
       void (async () => {
         try {
-          const trip = await getActiveTrip();
+          const trip = await getActiveTripLite();
           setActiveTrip(trip);
         } catch {
           /* ignore */
         }
       })();
-    }, 8000);
+    }, 10000);
 
-    // Budgets / véhicules : moins souvent pendant un trajet (évite thrash SQLite).
     const full = setInterval(() => {
       void refresh();
     }, 180000);
