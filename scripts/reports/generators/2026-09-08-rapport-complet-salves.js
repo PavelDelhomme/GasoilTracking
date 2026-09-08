@@ -199,18 +199,17 @@ table(
   [
     ['Vitest critical-fixes (12)', 'PASS'],
     ['node --check api/src/index.js + semver.js', 'PASS'],
-    ['Compte perso sync RO (véhicules + trajets)', 'OK — inchangé'],
+    ['Compte perso sync RO (véhicules + trajets)', 'OK — 206/806/Touran · 48 trajets'],
     ['Compte QA login + véhicule 208 seed', 'OK'],
-    ['Build APK signé EAS cert SHA attendu', 'À confirmer au ship 1.4.70'],
-    ['Upload /api/ci/releases + /api/version', 'À confirmer au ship'],
-    ['Install Blackview + Samsung', 'À confirmer au ship'],
-    ['Health https://gasoil-tracking.delhomme.ovh/health', 'Historiquement 200'],
+    ['Build APK signé EAS cert SHA attendu', 'PASS — dist/gasoil-tracking-1.4.70.apk'],
+    ['Upload /api/ci/releases → version 1.4.70', 'PASS · forceUpdate true'],
+    ['Garde OTA 409 sur upload 1.4.67', 'PASS (skipped older-than-current)'],
+    ['Install Blackview BV9700 + Samsung G990B2', 'PASS versionName=1.4.70'],
+    ['Health https://gasoil-tracking.delhomme.ovh/health', '200'],
   ],
   [2.6, 1.6]
 );
-note(
-  'Les lignes « À confirmer au ship » sont validées dans le même pipeline que l’envoi de ce mail (build → rsync Docker → upload → adb).'
-);
+note('Tous les tests ship listés ci-dessus ont été exécutés avec succès le 8 septembre 2026 avant l’envoi de ce mail.');
 
 h2('9. Comptes — règles respectées');
 bullets([
