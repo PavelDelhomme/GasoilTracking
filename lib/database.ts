@@ -780,7 +780,14 @@ export async function updateBudgetSpent(id: number, spent: number): Promise<void
 
 export async function updateBudget(
   id: number,
-  patch: { amount?: number; name?: string; spent?: number; isActive?: boolean }
+  patch: {
+    amount?: number;
+    name?: string;
+    spent?: number;
+    isActive?: boolean;
+    startDate?: string;
+    endDate?: string;
+  }
 ): Promise<void> {
   const database = await getDatabase();
   const fields: string[] = [];
@@ -800,6 +807,14 @@ export async function updateBudget(
   if (patch.isActive !== undefined) {
     fields.push('is_active = ?');
     values.push(patch.isActive ? 1 : 0);
+  }
+  if (patch.startDate !== undefined) {
+    fields.push('start_date = ?');
+    values.push(patch.startDate);
+  }
+  if (patch.endDate !== undefined) {
+    fields.push('end_date = ?');
+    values.push(patch.endDate);
   }
   if (!fields.length) return;
   values.push(id);

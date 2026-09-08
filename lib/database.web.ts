@@ -292,7 +292,14 @@ export async function updateBudgetSpent(id: number, spent: number): Promise<void
 
 export async function updateBudget(
   id: number,
-  patch: { amount?: number; name?: string; spent?: number; isActive?: boolean }
+  patch: {
+    amount?: number;
+    name?: string;
+    spent?: number;
+    isActive?: boolean;
+    startDate?: string;
+    endDate?: string;
+  }
 ): Promise<void> {
   const s = await load();
   s.budgets = s.budgets.map((b) => (b.id === id ? { ...b, ...patch, id } : b));
