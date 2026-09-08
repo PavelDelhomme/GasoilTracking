@@ -54,15 +54,27 @@ export async function shareMonthlyFuelCsv(
   fillUps: FillUp[],
   vehicles: Vehicle[],
   monthKey: string
-): Promise<void> {
+): Promise<'shared' | 'copied'> {
   const csv = buildMonthlyFuelCsv(fillUps, vehicles, monthKey);
   const title = `Gasoil Tracking — pleins ${monthKey}`;
-  if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
-    await navigator.clipboard.writeText(csv);
-    return;
+  if (Platform.OS === 'web' && typeof navigator !== 'undefined') {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(csv);
+      return 'copied';
+    }
+    // Fallback téléchargement navigateur
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pleins-${monthKey}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    return 'shared';
   }
   await Share.share({
     title,
     message: csv,
   });
+  return 'shared';
 }

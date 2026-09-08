@@ -17,6 +17,9 @@ import { applyTripFuelBurn } from '@/lib/fuelLevel';
 import { refreshVehicleReminders } from '@/lib/reminders';
 import { repairTripHistory } from '@/lib/repairTripHistory';
 import { repairFillUpVehiclesAndBudgets } from '@/lib/repairFillUpVehicles';
+import { finalizeStaleActiveTrip } from '@/lib/finalizeStaleTrip';
+
+const REMINDERS_THROTTLE_MS = 2 * 60 * 60 * 1000;
 
 interface AppContextType {
   activeVehicle: Vehicle | null;
@@ -39,9 +42,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   /** Évite repairTripHistory à chaque poll 90s — seulement au boot / changement véhicule. */
   const repairedForVehicle = useRef<number | 'none' | null>(null);
   const fillBudgetRepaired = useRef(false);
+  const lastRemindersAt = useRef(0);
+  const staleTripChecked = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
+      if (!staleTripChecked.current) {
+        try {
+          await finalizeStaleActiveTrip();
+          staleTripChecked.current = true;
+        } catch (e) {
+          console.warn('finalizeStaleActiveTrip', e);
+        }
+      }
+
       const [vehicleList, active, trip] = await Promise.all([
         getVehicles(),
         getActiveVehicle(),
@@ -73,7 +87,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await ensureDefaultBudgets(vehicleList);
       const statuses = await refreshAllBudgets();
       setBudgetStatuses(statuses);
-      void refreshVehicleReminders();
+      const now = Date.now();
+      if (now - lastRemindersAt.current >= REMINDERS_THROTTLE_MS) {
+        lastRemindersAt.current = now;
+        void refreshVehicleReminders();
+      }
     } catch (error) {
       console.error('Erreur chargement données:', error);
     } finally {

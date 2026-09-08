@@ -17,6 +17,7 @@ import { Button } from '@/components/Button';
 import { Card, ProgressBar } from '@/components/Card';
 import {
   adaptVehicleConsumption,
+  displayOdometerKm,
   formatDistance,
   formatEuro,
   refreshBudgets,
@@ -283,7 +284,7 @@ export default function StationTripScreen() {
           liters: L,
           pricePerLiter: ppl,
           totalCost: L * ppl,
-          odometer: activeVehicle.hasOdometer ? activeVehicle.currentOdometer : null,
+          odometer: activeVehicle.hasOdometer ? displayOdometerKm(activeVehicle) : null,
           distanceSinceLastKm: km || null,
           isFull,
           note: `${stationName} · ${fuelLabel(params.fuelKey || 'gazole')}`,

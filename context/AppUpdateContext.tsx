@@ -89,6 +89,14 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
       webReloadAlreadyTried(remote.version) &&
       newer
     ) {
+      if (!ignoreSnooze) {
+        const snooze = await readSnooze();
+        if (snooze && snooze.version === remote.version && snooze.until > Date.now()) {
+          setForce(false);
+          setVisible(false);
+          return false;
+        }
+      }
       await writeSnooze({
         version: remote.version,
         until: Date.now() + WEB_DEPLOY_SNOOZE_MS,

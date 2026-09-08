@@ -131,19 +131,21 @@ export default function BudgetScreen() {
     setMonthlyByVehicle(mv);
 
     const current = currentMonthKey();
+    let pick = current;
     setSelectedMonth((prev) => {
-      if (prev && m.some((x) => x.month === prev)) return prev;
-      if (m.some((x) => x.month === current)) return current;
-      return m[m.length - 1]?.month || current;
+      if (prev && m.some((x) => x.month === prev)) {
+        pick = prev;
+        return prev;
+      }
+      if (m.some((x) => x.month === current)) {
+        pick = current;
+        return current;
+      }
+      pick = m[m.length - 1]?.month || current;
+      return pick;
     });
-    const pick =
-      (selectedMonth && m.some((x) => x.month === selectedMonth) && selectedMonth) ||
-      (m.some((x) => x.month === current) ? current : null) ||
-      m[m.length - 1]?.month;
-    if (pick) {
-      const fills = await getFillUps(activeVehicle?.id);
-      setMonthFillUps(fills.filter((f) => monthKeyFromDate(f.date) === pick));
-    }
+    const fills = await getFillUps(activeVehicle?.id);
+    setMonthFillUps(fills.filter((f) => monthKeyFromDate(f.date) === pick));
   }, [activeVehicle?.id]);
 
   const selectMonth = async (month: string) => {

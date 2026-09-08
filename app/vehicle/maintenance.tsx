@@ -15,7 +15,7 @@ import {
   updateMaintenance,
   updateVehicle,
 } from '@/lib/database';
-import { formatEuro } from '@/lib/calculations';
+import { displayOdometerKm, formatEuro } from '@/lib/calculations';
 import { formatDateSlash, toLocalYmd } from '@/lib/dates';
 import { confirm, notify } from '@/lib/notify';
 import { refreshVehicleReminders } from '@/lib/reminders';
@@ -305,7 +305,7 @@ export default function VehicleMaintenanceScreen() {
                 <Text
                   style={{
                     color:
-                      vehicle.currentOdometer >= m.dueOdometer
+                      displayOdometerKm(vehicle) >= m.dueOdometer
                         ? colors.danger
                         : colors.accent,
                     fontWeight: '700',
@@ -313,8 +313,8 @@ export default function VehicleMaintenanceScreen() {
                   }}
                 >
                   Échéance {Math.round(m.dueOdometer).toLocaleString('fr-FR')} km
-                  {vehicle.currentOdometer > 0
-                    ? ` (compteur ${Math.round(vehicle.currentOdometer).toLocaleString('fr-FR')})`
+                  {displayOdometerKm(vehicle) > 0
+                    ? ` (compteur ${displayOdometerKm(vehicle).toLocaleString('fr-FR')})`
                     : ''}
                 </Text>
               ) : null}
@@ -408,8 +408,8 @@ export default function VehicleMaintenanceScreen() {
         onChangeText={setDueOdometer}
         keyboardType="numeric"
         placeholder={
-          vehicle.currentOdometer > 0
-            ? String(Math.round(vehicle.currentOdometer + 10000))
+          displayOdometerKm(vehicle) > 0
+            ? String(displayOdometerKm(vehicle) + 10000)
             : 'ex. 120000'
         }
       />

@@ -11,7 +11,6 @@ import {
   getFillUps,
   getTrips,
   getBudgets,
-  getMaintenances,
   createBudget,
   updateBudget,
   updateBudgetSpent,
@@ -354,7 +353,7 @@ export async function adaptVehicleConsumption(
   };
 }
 
-/** Calcule le statut d'un budget avec dépenses dynamiques */
+/** Calcule le statut d'un budget avec dépenses dynamiques (pleins uniquement). */
 export async function getBudgetStatus(
   budget: Budget,
   vehicleId?: number
@@ -367,31 +366,11 @@ export async function getBudgetStatus(
     spent += fillUps
       .filter((f) => f.date >= budget.startDate && f.date <= budget.endDate)
       .reduce((sum, f) => sum + f.totalCost, 0);
-    const mains = await getMaintenances(targetVehicleId);
-    spent += mains
-      .filter((m) => {
-        const d = (m.doneAt || '').slice(0, 10);
-        if (!d) return false;
-        const start = budget.startDate.slice(0, 10);
-        const end = budget.endDate.slice(0, 10);
-        return d >= start && d <= end;
-      })
-      .reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
   } else {
     const fillUps = await getFillUps();
     spent += fillUps
       .filter((f) => f.date >= budget.startDate && f.date <= budget.endDate)
       .reduce((sum, f) => sum + f.totalCost, 0);
-    const mains = await getMaintenances();
-    spent += mains
-      .filter((m) => {
-        const d = (m.doneAt || '').slice(0, 10);
-        if (!d) return false;
-        const start = budget.startDate.slice(0, 10);
-        const end = budget.endDate.slice(0, 10);
-        return d >= start && d <= end;
-      })
-      .reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
   }
 
   await updateBudgetSpent(budget.id, spent);
@@ -460,11 +439,8 @@ export async function ensureDefaultBudgets(_vehicles: Vehicle[]): Promise<void> 
       isActive: true,
     });
   } else {
-    const patch: Partial<{ amount: number; name: string; startDate: string; endDate: string }> = {};
-    if (global.amount !== DEFAULT_GLOBAL_BUDGET || global.name !== 'Carburant total') {
-      patch.amount = DEFAULT_GLOBAL_BUDGET;
-      patch.name = 'Carburant total';
-    }
+    const patch: Partial<{ startDate: string; endDate: string }> = {};
+    // Ne force plus amount/name à chaque boot (enveloppe perso possible).
     const endMs = Date.parse(global.endDate);
     if (!Number.isFinite(endMs) || endMs < Date.now()) {
       patch.startDate = startDate;

@@ -7,14 +7,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import type { Vehicle, VehicleMaintenance } from '@/types';
 import { getMaintenances, getVehicles } from '@/lib/database';
-import { refreshAllBudgets } from '@/lib/calculations';
+import { displayOdometerKm, refreshAllBudgets } from '@/lib/calculations';
 import { MAINTENANCE_KIND_LABELS, maintenanceIsUrgent } from '@/lib/vehicleMaintenance';
 
 const SCHEDULED_KEY = 'gasoil_reminder_ids_v1';
 const BUDGET_THRESH_KEY = 'gasoil_budget_thresh_v1';
+/** Anti-spam pour notifs « immédiates » (km / bas réservoir) — une fois / 12 h / clé. */
+const STICKY_KEY = 'gasoil_sticky_notif_v1';
+const STICKY_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 
 type ScheduledMap = Record<string, string>;
 type BudgetThreshMap = Record<string, number>;
+type StickyMap = Record<string, number>; // key → firedAt ms
 
 export async function ensureNotificationPermissions(): Promise<boolean> {
   if (Platform.OS === 'web') return false;
@@ -71,6 +75,25 @@ async function writeBudgetThresh(map: BudgetThreshMap) {
   await AsyncStorage.setItem(BUDGET_THRESH_KEY, JSON.stringify(map));
 }
 
+async function readSticky(): Promise<StickyMap> {
+  try {
+    const raw = await AsyncStorage.getItem(STICKY_KEY);
+    return raw ? (JSON.parse(raw) as StickyMap) : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeSticky(map: StickyMap) {
+  await AsyncStorage.setItem(STICKY_KEY, JSON.stringify(map));
+}
+
+function stickyReady(map: StickyMap, key: string): boolean {
+  const at = map[key];
+  if (!at) return true;
+  return Date.now() - at >= STICKY_COOLDOWN_MS;
+}
+
 async function cancelAllTracked() {
   if (Platform.OS === 'web') return;
   const map = await readScheduled();
@@ -123,6 +146,8 @@ export async function refreshVehicleReminders(): Promise<{ scheduled: number }> 
   await cancelAllTracked();
   const vehicles = await getVehicles();
   const maintenances = await getMaintenances();
+  const sticky = await readSticky();
+  let stickyDirty = false;
   const map: ScheduledMap = {};
   let scheduled = 0;
 
@@ -171,19 +196,31 @@ export async function refreshVehicleReminders(): Promise<{ scheduled: number }> 
           }
         }
 
-        if (m.dueOdometer != null && m.dueOdometer > 0 && v.currentOdometer > 0) {
-          const remaining = m.dueOdometer - v.currentOdometer;
+        if (m.dueOdometer != null && m.dueOdometer > 0) {
+          const odo = displayOdometerKm(v);
+          if (odo <= 0) continue;
+          const remaining = m.dueOdometer - odo;
           if (remaining <= 500) {
+            const stickyKey = `maint-km:${m.id}`;
+            if (!stickyReady(sticky, stickyKey)) continue;
             const overdue = remaining <= 0;
-            scheduled += await scheduleSoon(
+            const n = await scheduleSoon(
               map,
-              `maint-km:${m.id}`,
+              stickyKey,
               overdue ? `Entretien dépassé · ${v.name}` : `Entretien bientôt · ${v.name}`,
               overdue
-                ? `${m.title} : échéance ${Math.round(m.dueOdometer).toLocaleString('fr-FR')} km (compteur ${Math.round(v.currentOdometer).toLocaleString('fr-FR')}).`
+                ? `${m.title} : échéance ${Math.round(m.dueOdometer).toLocaleString('fr-FR')} km (compteur ${odo.toLocaleString('fr-FR')}).`
                 : `${m.title} : encore ~${Math.round(remaining).toLocaleString('fr-FR')} km (échéance ${Math.round(m.dueOdometer).toLocaleString('fr-FR')} km).`,
               { type: 'maintenance_km', vehicleId: v.id, maintenanceId: m.id }
             );
+            if (n) {
+              sticky[stickyKey] = Date.now();
+              stickyDirty = true;
+              scheduled += n;
+            }
+          } else if (sticky[`maint-km:${m.id}`]) {
+            delete sticky[`maint-km:${m.id}`];
+            stickyDirty = true;
           }
         }
       }
@@ -194,14 +231,25 @@ export async function refreshVehicleReminders(): Promise<{ scheduled: number }> 
         v.lowFuelThresholdLiters != null && v.lowFuelThresholdLiters > 0
           ? v.lowFuelThresholdLiters
           : Math.max(5, Math.round(v.tankCapacity / 3));
+      const stickyKey = `fuel:${v.id}`;
       if (v.estimatedFuelLiters != null && v.estimatedFuelLiters <= threshold) {
-        scheduled += await scheduleSoon(
-          map,
-          `fuel:${v.id}`,
-          `Plein à prévoir · ${v.name}`,
-          `Il reste ~${v.estimatedFuelLiters.toFixed(0)} L (seuil ${threshold} L). Pensez à faire le plein.`,
-          { type: 'low_fuel', vehicleId: v.id }
-        );
+        if (stickyReady(sticky, stickyKey)) {
+          const n = await scheduleSoon(
+            map,
+            stickyKey,
+            `Plein à prévoir · ${v.name}`,
+            `Il reste ~${v.estimatedFuelLiters.toFixed(0)} L (seuil ${threshold} L). Pensez à faire le plein.`,
+            { type: 'low_fuel', vehicleId: v.id }
+          );
+          if (n) {
+            sticky[stickyKey] = Date.now();
+            stickyDirty = true;
+            scheduled += n;
+          }
+        }
+      } else if (sticky[stickyKey]) {
+        delete sticky[stickyKey];
+        stickyDirty = true;
       }
     }
   }
@@ -233,7 +281,6 @@ export async function refreshVehicleReminders(): Promise<{ scheduled: number }> 
       thresh[periodKey] = hit;
       threshDirty = true;
     }
-    // Nettoie les anciennes périodes
     const alive = new Set(
       statuses.map((s) => `${s.budget.id}:${s.budget.startDate.slice(0, 10)}`)
     );
@@ -248,6 +295,7 @@ export async function refreshVehicleReminders(): Promise<{ scheduled: number }> 
     /* ignore */
   }
 
+  if (stickyDirty) await writeSticky(sticky);
   await writeScheduled(map);
   return { scheduled };
 }

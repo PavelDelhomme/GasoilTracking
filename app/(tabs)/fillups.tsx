@@ -167,8 +167,13 @@ export default function FillUpsScreen() {
   const exportCsv = async () => {
     const month = selectedMonth === 'all' ? currentMonthKey() : selectedMonth;
     try {
-      await shareMonthlyFuelCsv(allFillUps, vehicles, month);
-      notify('Export CSV', `Pleins ${formatMonthLabel(month)} prêts à partager.`);
+      const mode = await shareMonthlyFuelCsv(allFillUps, vehicles, month);
+      notify(
+        'Export CSV',
+        mode === 'copied'
+          ? `Pleins ${formatMonthLabel(month)} copiés dans le presse-papiers.`
+          : `Pleins ${formatMonthLabel(month)} prêts à partager.`
+      );
     } catch (e) {
       notify('Export', e instanceof Error ? e.message : 'Échec de l’export');
     }
