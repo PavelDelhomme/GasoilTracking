@@ -27,7 +27,7 @@ export async function shouldSkipFuelGauge(
     if (!Number.isFinite(ts)) return false;
     return Date.now() - ts < maxAge;
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -51,7 +51,8 @@ export async function askFuelGaugeApprox(
 ): Promise<FuelGaugeResult> {
   if (!opts?.force) {
     const skipOk = await shouldSkipFuelGauge(vehicle);
-    if (skipOk && opts?.softSkip !== false) {
+    // Soft-skip uniquement si demandé explicitement (évite de sauter la 1ʳᵉ saisie).
+    if (skipOk && opts?.softSkip === true) {
       return {
         liters: vehicle.estimatedFuelLiters ?? 0,
         skipped: true,

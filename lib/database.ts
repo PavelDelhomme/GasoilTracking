@@ -486,8 +486,8 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
       await database.runAsync('UPDATE vehicles SET is_active = 0');
     }
     const result = await database.runAsync(
-      `INSERT INTO vehicles (name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, consumption_learn_factor, transmission_gears, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO vehicles (name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, consumption_learn_factor, transmission_gears, is_active, plate_number, registration_photo_uri)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         vehicle.name,
         vehicle.brand,
@@ -508,6 +508,8 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
         vehicle.consumptionLearnFactor ?? 1,
         vehicle.transmissionGears ?? null,
         vehicle.isActive ? 1 : 0,
+        vehicle.plateNumber ?? null,
+        vehicle.registrationPhotoUri ?? null,
       ]
     );
     const id = Number(result.lastInsertRowId);
@@ -1270,8 +1272,8 @@ export async function replaceAllData(data: {
 
       for (const v of data.vehicles || []) {
         await database.runAsync(
-          `INSERT INTO vehicles (id, name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, consumption_learn_factor, transmission_gears, is_active, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO vehicles (id, name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, consumption_learn_factor, transmission_gears, is_active, created_at, plate_number, registration_photo_uri)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             v.id,
             v.name,
@@ -1294,6 +1296,8 @@ export async function replaceAllData(data: {
             v.transmissionGears ?? null,
             v.isActive ? 1 : 0,
             v.createdAt || new Date().toISOString(),
+            v.plateNumber ?? null,
+            v.registrationPhotoUri ?? null,
           ]
         );
       }
@@ -1399,8 +1403,8 @@ export async function replaceAllData(data: {
 
       for (const m of data.maintenances || []) {
         await database.runAsync(
-          `INSERT INTO vehicle_maintenances (id, vehicle_id, kind, title, amount, done_at, due_date, status, note, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO vehicle_maintenances (id, vehicle_id, kind, title, amount, done_at, due_date, status, note, created_at, photo_uri, due_odometer)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             m.id,
             m.vehicleId,
@@ -1412,6 +1416,8 @@ export async function replaceAllData(data: {
             m.status || 'pending',
             m.note ?? null,
             m.createdAt || new Date().toISOString(),
+            m.photoUri ?? null,
+            m.dueOdometer ?? null,
           ]
         );
       }

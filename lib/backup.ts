@@ -42,6 +42,14 @@ export async function prepareDataForUpdate(): Promise<{
   snapshot: AppDataSnapshot;
   cloudSynced: boolean;
 }> {
+  try {
+    const live = await getActiveTripLite();
+    if (live?.isActive) {
+      throw new Error('Terminez le trajet en cours avant la mise à jour.');
+    }
+  } catch (e) {
+    if (e instanceof Error && /Terminez le trajet/.test(e.message)) throw e;
+  }
   const snapshot = await saveLocalBackup();
   let cloudSynced = false;
   const token = await getToken();
@@ -154,11 +162,17 @@ export async function syncFullBackup(): Promise<boolean> {
  */
 export async function refreshFromCloud(): Promise<{
   ok: boolean;
-  reason: 'no-auth' | 'empty' | 'applied';
+  reason: 'no-auth' | 'empty' | 'applied' | 'active-trip';
   updatedAt?: string | null;
 }> {
   const token = await getToken();
   if (!token) return { ok: false, reason: 'no-auth' };
+  try {
+    const live = await getActiveTripLite();
+    if (live?.isActive) return { ok: false, reason: 'active-trip' };
+  } catch {
+    /* continue */
+  }
   const remote = await fetchSync();
   const snap = normalizeSnapshot(remote?.data);
   if (!snap) return { ok: false, reason: 'empty', updatedAt: remote?.updatedAt ?? null };
@@ -187,8 +201,9 @@ function snapshotWeight(snap: {
 }
 
 /**
- * Si le cloud est plus récent ou nettement plus riche, tire ; sinon pousse.
- * Évite d’écraser un snapshot cloud complet avec un local quasi vide après login.
+ * Si le cloud est plus récent, tire ; sinon pousse.
+ * Le poids seul ne suffit plus : un cloud plus « riche » mais plus vieux
+ * n’écrase jamais un local plus récent (évite perte de trajets du jour).
  */
 export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'> {
   const token = await getToken();
@@ -214,7 +229,11 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
   const remoteW = snapshotWeight(remoteSnap);
   const localW = snapshotWeight(local);
 
-  if (remoteSnap && (remoteAt > localAt + 2000 || remoteW > localW + 5)) {
+  const remoteClearlyNewer = remoteAt > localAt + 2000;
+  const remoteRicherAndNotOlder =
+    remoteW > localW + 5 && remoteAt >= localAt - 2000;
+
+  if (remoteSnap && (remoteClearlyNewer || remoteRicherAndNotOlder)) {
     await applySnapshot(remoteSnap, 'replace');
     try {
       await repairFillUpVehiclesAndBudgets();

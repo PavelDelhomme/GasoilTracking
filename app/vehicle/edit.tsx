@@ -18,7 +18,7 @@ import { getVehicleById, updateVehicle, deleteVehicle } from '@/lib/database';
 import { getConsumptionStats } from '@/lib/calculations';
 import { confirm, notify } from '@/lib/notify';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
-import { searchVehicles, type VehiclePreset } from '@/constants/vehicles';
+import { searchVehicles, presetDisplayName, type VehiclePreset } from '@/constants/vehicles';
 import { setFuelLiters } from '@/lib/fuelLevel';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
 import { refreshVehicleReminders } from '@/lib/reminders';
@@ -107,12 +107,11 @@ export default function EditVehicleScreen() {
     setConsumption(String(preset.consumption));
     setTankCapacity(String(preset.tank));
     setHasOdometer(!preset.odometerUnreliable);
-    if (!name.trim() || name === `${brand} ${model}`) {
-      setName(`${preset.brand} ${preset.model}`);
+    const labeled = presetDisplayName(preset);
+    if (!name.trim() || name === `${brand} ${model}` || /·/.test(name) === false) {
+      setName(labeled);
     }
-    setStatus(
-      `Base catalogue : ${preset.brand} ${preset.model} — ajustez puis enregistrez (personnalisé).`
-    );
+    setStatus(`Base catalogue : ${labeled} — ajustez puis enregistrez.`);
   };
 
   const handleSave = async () => {

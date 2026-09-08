@@ -226,7 +226,12 @@ export async function launchGoogleMapsNavigation(opts: {
   /** Forcer Google (ignore le choix Apple). */
   preferGoogle?: boolean;
 }): Promise<boolean> {
-  const app = opts.preferGoogle ? 'google' : await resolveMapsApp();
+  const wps = opts.waypoints || [];
+  // Apple Plans ne gère pas les vias OSRM → forcer Google si itinéraire alternatif.
+  const app =
+    opts.preferGoogle || wps.length > 0
+      ? 'google'
+      : await resolveMapsApp();
   if (app === 'apple' && Platform.OS === 'ios') {
     return openAppleMaps({
       destination: opts.destination,

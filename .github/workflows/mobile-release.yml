@@ -28,7 +28,7 @@ on:
 
 concurrency:
   group: mobile-apk-prod
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-upload:
@@ -88,6 +88,13 @@ jobs:
           TOKEN: ${{ secrets.RELEASE_UPLOAD_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
+          set -euo pipefail
+          LIVE=$(curl -fsS "https://gasoil-tracking.delhomme.ovh/api/version" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).version||''")
+          node -e "
+            const live=process.argv[1], v=process.argv[2];
+            const cmp=(a,b)=>{const pa=String(a||'0').split('.').map(x=>parseInt(x,10)||0);const pb=String(b||'0').split('.').map(x=>parseInt(x,10)||0);for(let i=0;i<Math.max(pa.length,pb.length);i++){const d=(pa[i]||0)-(pb[i]||0);if(d) return d;}return 0;};
+            if (live && cmp(v, live) < 0) { console.log('Skip upload: '+v+' < live '+live); process.exit(42); }
+          " "$LIVE" "$VERSION" || { echo "Skip older build"; exit 0; }
           curl -fsS -X POST "https://gasoil-tracking.delhomme.ovh/api/ci/releases" \
             -H "X-Release-Token: $TOKEN" \
             -F "version=$VERSION" \

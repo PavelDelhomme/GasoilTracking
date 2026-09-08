@@ -1072,7 +1072,9 @@ export default function TripScreen() {
                 ? 'Gasoil'
                 : vehicleSnapshot?.fuelType === 'gpl'
                   ? 'GPL'
-                  : 'Essence'
+                  : vehicleSnapshot?.fuelType === 'electrique'
+                    ? 'Élec.'
+                    : 'Essence'
             } ~${priceAtTrip.toFixed(3)} €/L · ${formatEuro(cost)}`
           : null,
       ].filter(Boolean);

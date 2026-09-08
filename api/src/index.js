@@ -12,6 +12,7 @@ import nodemailer from 'nodemailer';
 import Database from 'better-sqlite3';
 import multer from 'multer';
 import QRCode from 'qrcode';
+import { compareSemver, pickLatestRelease } from './semver.js';
 
 const PORT = Number(process.env.PORT || 4000);
 const DATA_DIR = process.env.DATA_DIR || './data';
@@ -680,9 +681,10 @@ app.get('/api/fx/latest', async (_req, res) => {
 });
 
 app.get('/api/version', (_req, res) => {
-  const latest = db
-    .prepare('SELECT * FROM app_releases WHERE apk_filename IS NOT NULL ORDER BY id DESC LIMIT 1')
-    .get();
+  const rows = db
+    .prepare('SELECT * FROM app_releases WHERE apk_filename IS NOT NULL')
+    .all();
+  const latest = pickLatestRelease(rows);
   const version = latest?.version || APP_VERSION;
   const apkAvailable = Boolean(latest?.apk_filename);
   const apkUrl = apkAvailable
@@ -730,17 +732,6 @@ app.get('/api/version', (_req, res) => {
     },
   });
 });
-
-/** Compare a.b.c — positif si a > b */
-function compareSemver(a, b) {
-  const pa = String(a || '0').split('.').map((x) => parseInt(x, 10) || 0);
-  const pb = String(b || '0').split('.').map((x) => parseInt(x, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] || 0) - (pb[i] || 0);
-    if (d !== 0) return d;
-  }
-  return 0;
-}
 
 /** Inscription : envoie un email de vérification (pas de compte actif tant que non cliqué) */
 app.post('/api/auth/register', authLimiter, registerLimiter, async (req, res) => {
@@ -1285,6 +1276,27 @@ const upload = multer({
 });
 
 function saveRelease({ version, notes, force, file }) {
+  const rows = db
+    .prepare('SELECT * FROM app_releases WHERE apk_filename IS NOT NULL')
+    .all();
+  const best = pickLatestRelease(rows);
+  if (best && compareSemver(version, best.version) < 0) {
+    if (file?.path && fs.existsSync(file.path)) {
+      try {
+        fs.unlinkSync(file.path);
+      } catch {
+        /* ignore */
+      }
+    }
+    return {
+      ok: false,
+      skipped: true,
+      reason: 'older-than-current',
+      version,
+      current: best.version,
+    };
+  }
+
   let filename = null;
   if (file) {
     filename = `gasoil-tracking-${String(version).replace(/[^\w.\-]/g, '')}.apk`;
@@ -1293,10 +1305,16 @@ function saveRelease({ version, notes, force, file }) {
   db.prepare(
     'INSERT INTO app_releases (version, platform, apk_filename, release_notes, force_update, created_at) VALUES (?, ?, ?, ?, ?, ?)'
   ).run(version, 'android', filename, notes, force ? 1 : 0, new Date().toISOString());
-  // Clear pending build once APK is published
+  // Clear pending only if this version covers the announced build
   try {
     const pendingPath = path.join(DATA_DIR, 'build-pending.json');
-    if (fs.existsSync(pendingPath)) fs.unlinkSync(pendingPath);
+    if (fs.existsSync(pendingPath)) {
+      const pending = JSON.parse(fs.readFileSync(pendingPath, 'utf8'));
+      const pv = String(pending?.version || '');
+      if (!pv || compareSemver(version, pv) >= 0) {
+        fs.unlinkSync(pendingPath);
+      }
+    }
   } catch {
     /* ignore */
   }
@@ -1336,7 +1354,9 @@ app.post('/api/ci/releases', upload.single('apk'), (req, res) => {
   const version = req.body?.version || APP_VERSION;
   const notes = req.body?.releaseNotes || 'Mise à jour automatique';
   const force = req.body?.forceUpdate === '1' || req.body?.forceUpdate === true;
-  res.status(201).json(saveRelease({ version, notes, force, file: req.file }));
+  const result = saveRelease({ version, notes, force, file: req.file });
+  if (result.skipped) return res.status(409).json(result);
+  res.status(201).json(result);
 });
 
 function requireManager(req, res, next) {
@@ -1354,7 +1374,8 @@ function requireAdmin(req, res, next) {
 }
 
 function latestApkFile() {
-  const latest = db.prepare('SELECT * FROM app_releases ORDER BY id DESC LIMIT 1').get();
+  const rows = db.prepare('SELECT * FROM app_releases WHERE apk_filename IS NOT NULL').all();
+  const latest = pickLatestRelease(rows);
   if (!latest?.apk_filename) return null;
   const full = path.join(DATA_DIR, 'apks', latest.apk_filename);
   if (!fs.existsSync(full)) return null;

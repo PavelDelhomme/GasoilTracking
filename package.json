@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "build:apk": "bash scripts/build-release-apk.sh",
-    "fetch:keystore": "node scripts/fetch-eas-keystore.mjs"
+    "fetch:keystore": "node scripts/fetch-eas-keystore.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@expo/metro-runtime": "~4.0.1",
@@ -52,7 +54,11 @@
   "devDependencies": {
     "@babel/core": "^7.25.0",
     "@types/react": "~18.3.12",
-    "typescript": "~5.3.3"
+    "typescript": "~5.3.3",
+    "vitest": "^3.2.4"
   },
-  "private": true
+  "private": true,
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
 }
