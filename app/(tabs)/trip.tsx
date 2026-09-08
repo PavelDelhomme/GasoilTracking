@@ -130,9 +130,13 @@ function smartWindowKey(): string {
 
 type GeoCoords = { latitude: number; longitude: number };
 
-/** Pas de waypoint Maps : un via géométrie créait un arrêt fantôme (et plantait éco). */
-function mapsWaypointsForRoute(_route: DrivingRoute | null | undefined): GeoCoords[] {
-  return [];
+/** Via OSRM de l’itinéraire choisi — biaise Google Maps sans arrêt fantôme. */
+function mapsWaypointsForRoute(route: DrivingRoute | null | undefined): GeoCoords[] {
+  if (!route?.via?.length) return [];
+  return route.via
+    .filter((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))
+    .slice(0, 2)
+    .map((p) => ({ latitude: p.latitude, longitude: p.longitude }));
 }
 
 export default function TripScreen() {
@@ -142,6 +146,7 @@ export default function TripScreen() {
     destLat?: string;
     destLon?: string;
     autoStart?: string;
+    prepare?: string;
     runSim?: string;
     runSimNonce?: string;
     purgeSim?: string;
@@ -631,6 +636,11 @@ export default function TripScreen() {
       return;
     }
 
+    if (mode === 'nav' && routesLoading) {
+      notify('Itinéraire', 'Attendez le calcul des trajets, choisissez-en un, puis démarrez.');
+      return;
+    }
+
     if (mode === 'nav') persistStartMode('nav');
 
     startingRef.current = true;
@@ -703,20 +713,31 @@ export default function TripScreen() {
                 resolvedDest
               );
               setRouteOptions(alts);
-              routeForNav =
-                alts.find((a) => a.id === selectedRouteId) ||
-                alts.find((a) => a.kind === 'fastest') ||
-                alts.find((a) => a.kind === 'eco') ||
-                alts[0] ||
-                null;
-              if (routeForNav) {
-                setSelectedRouteId(routeForNav.id);
-                setPlannedRoute(downsampleRoute(routeForNav.coordinates, 120));
-              } else {
+              if (alts.length === 0) {
                 setPlannedRoute([
                   { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
                   resolvedDest,
                 ]);
+              } else if (alts.length === 1) {
+                routeForNav = alts[0];
+                setSelectedRouteId(routeForNav.id);
+                setPlannedRoute(downsampleRoute(routeForNav.coordinates, 120));
+              } else {
+                const preferred =
+                  alts.find((a) => a.id === selectedRouteId) ||
+                  alts.find((a) => a.kind === 'fastest') ||
+                  alts[0];
+                if (preferred) {
+                  setSelectedRouteId(preferred.id);
+                  setPlannedRoute(downsampleRoute(preferred.coordinates, 120));
+                }
+                notify(
+                  'Itinéraire',
+                  'Plusieurs trajets possibles — choisissez éco / rapide / alternatif, puis Démarrer.'
+                );
+                startingRef.current = false;
+                setIsStarting(false);
+                return;
               }
             }
           } catch {
@@ -805,22 +826,23 @@ export default function TripScreen() {
         }).then(() => getRecentDestinations(6).then(setRecentDests));
 
         await new Promise((r) => setTimeout(r, 400));
+        const via = mapsWaypointsForRoute(routeForNav);
         const opened = await launchGoogleMapsNavigation({
           destination: mapsDest,
           origin: mapsOrigin,
-          waypoints: [],
+          waypoints: via,
           label: mapsLabel,
         });
         if (!opened) {
           notify(
-            'Google Maps',
-            'Impossible d’ouvrir la navigation. Le suivi GPS continue dans l’app.'
+            'Navigation',
+            'Impossible d’ouvrir Maps. Le suivi GPS continue dans l’app.'
           );
         }
       }
     } catch {
       notify(
-        'Google Maps',
+        'Navigation',
         'Maps n’a pas pu s’ouvrir. Le suivi GPS continue dans l’app.'
       );
     } finally {
@@ -829,25 +851,50 @@ export default function TripScreen() {
     }
   };
 
+  // Prépare destination + itinéraires (depuis Accueil / suggestions) — ne démarre PAS.
   useEffect(() => {
-    if (params.autoStart !== '1' || autoStartDone.current) return;
+    const wantPrepare =
+      params.prepare === '1' || params.autoStart === '1' || params.autoStart === 'prepare';
+    if (!wantPrepare || autoStartDone.current) return;
     if (!activeVehicle || activeTrip) return;
     if (!destination.trim()) return;
     const lat = params.destLat ? Number(params.destLat) : NaN;
     const lon = params.destLon ? Number(params.destLon) : NaN;
     const hasParamCoords = Number.isFinite(lat) && Number.isFinite(lon);
-    // Attendre les coords lieu (évite un géocode Google vers un POI fantôme).
     if (hasParamCoords && !destCoords) return;
-    if (!hasParamCoords && !destCoords) {
-      // Pas de GPS stocké : démarrer quand même en nav (géocode contrôlé), une seule fois.
-    }
+
     autoStartDone.current = true;
-    void handleStartTrip({
-      destinationLabel: destination.trim(),
-      dest: destCoords,
-      mode: 'nav',
-    });
-  }, [params.autoStart, params.destLat, params.destLon, destination, destCoords, activeVehicle?.id, activeTrip?.id]);
+    persistStartMode('nav');
+    setTab('live');
+    showToast('Choisissez un itinéraire (éco / rapide), puis Démarrer');
+
+    void (async () => {
+      const to = destCoords;
+      if (!to) return;
+      let from = userLocation;
+      if (!from) {
+        const loc = await getCurrentLocation({ fresh: true });
+        if (loc?.coords) {
+          from = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+          setUserLocation(from);
+        }
+      }
+      if (from) await loadRouteAlternatives(from, to);
+    })();
+  }, [
+    params.prepare,
+    params.autoStart,
+    params.destLat,
+    params.destLon,
+    destination,
+    destCoords,
+    activeVehicle?.id,
+    activeTrip?.id,
+    userLocation,
+    loadRouteAlternatives,
+    persistStartMode,
+    showToast,
+  ]);
 
   const simAutoKey = useRef<string | null>(null);
   useEffect(() => {
@@ -1996,7 +2043,7 @@ export default function TripScreen() {
                         lineHeight: 17,
                       }}
                     >
-                      Selon l’heure et vos trajets réguliers — un tap pour démarrer + Maps.
+                      Selon l’heure et vos trajets — choisissez un lieu, l’itinéraire, puis Démarrer.
                     </Text>
                     {smartSuggestions.map((s) => (
                       <View
@@ -2036,21 +2083,7 @@ export default function TripScreen() {
                           onPress={() => {
                             dismissSmartSuggestions();
                             applyDestination(s.label, s.latitude, s.longitude);
-                          }}
-                          style={{ paddingHorizontal: 6, paddingVertical: 4 }}
-                        >
-                          <Text style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 11 }}>
-                            Voir
-                          </Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() => {
-                            dismissSmartSuggestions();
-                            void handleStartTrip({
-                              mode: 'nav',
-                              destinationLabel: s.label,
-                              dest: { latitude: s.latitude, longitude: s.longitude },
-                            });
+                            showToast('Choisissez un itinéraire, puis Démarrer');
                           }}
                           style={{
                             backgroundColor: colors.accent,
@@ -2060,7 +2093,7 @@ export default function TripScreen() {
                           }}
                         >
                           <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>
-                            Démarrer
+                            Choisir
                           </Text>
                         </Pressable>
                       </View>

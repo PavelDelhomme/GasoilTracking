@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import type { AppVersionInfo } from '@/lib/api';
 import { getLocalAppVersion } from '@/lib/api';
+import { userFacingReleaseNotes } from '@/lib/releaseNotes';
 import { useTheme } from '@/context/ThemeContext';
 import type { UpdateProgress } from '@/lib/appUpdate';
 
@@ -56,9 +57,9 @@ export function AppUpdateModal({
           <Text style={[styles.versions, { color: colors.textSecondary }]}>
             {local} → {info.version}
           </Text>
-          {!!info.releaseNotes && (
-            <Text style={[styles.notes, { color: colors.text }]}>{info.releaseNotes}</Text>
-          )}
+          <Text style={[styles.notes, { color: colors.text }]}>
+            {userFacingReleaseNotes(info.releaseNotes, info.version)}
+          </Text>
           <Text style={[styles.safe, { color: colors.textSecondary }]}>
             {Platform.OS === 'android'
               ? 'Téléchargement automatique depuis gasoil-tracking.delhomme.ovh. Votre session reste connectée (même application, pas de désinstallation).'

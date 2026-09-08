@@ -368,7 +368,8 @@ export default function TripDetailScreen() {
                   dest,
                   destLat: end ? String(end.latitude) : undefined,
                   destLon: end ? String(end.longitude) : undefined,
-                  autoStart: '1',
+                  autoStart: '0',
+                  prepare: '1',
                 },
               });
             }}
@@ -390,7 +391,8 @@ export default function TripDetailScreen() {
                   dest,
                   destLat: start ? String(start.latitude) : undefined,
                   destLon: start ? String(start.longitude) : undefined,
-                  autoStart: '1',
+                  autoStart: '0',
+                  prepare: '1',
                 },
               });
             }}

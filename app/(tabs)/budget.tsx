@@ -751,7 +751,8 @@ export default function BudgetScreen() {
                         dest,
                         destLat: p.latitude != null ? String(p.latitude) : '',
                         destLon: p.longitude != null ? String(p.longitude) : '',
-                        autoStart: '1',
+                        autoStart: '0',
+                        prepare: '1',
                       },
                     } as never);
                   }}

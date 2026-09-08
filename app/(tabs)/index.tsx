@@ -203,8 +203,9 @@ export default function HomeScreen() {
         dest,
         destLat: hasCoords ? String(p.latitude) : '',
         destLon: hasCoords ? String(p.longitude) : '',
-        // Auto-start seulement si coords GPS connues (évite POI Google fantôme).
-        autoStart: hasCoords ? '1' : '0',
+        // Auto-start désactivé : on prépare la destination ; l’utilisateur choisit l’itinéraire.
+        autoStart: '0',
+        prepare: hasCoords ? '1' : '0',
       },
     } as never);
   };
