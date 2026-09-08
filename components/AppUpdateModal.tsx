@@ -63,7 +63,7 @@ export function AppUpdateModal({
             {Platform.OS === 'android'
               ? 'Téléchargement automatique depuis gasoil-tracking.delhomme.ovh. Votre session reste connectée (même application, pas de désinstallation).'
               : Platform.OS === 'web'
-                ? 'Version web / iPhone : rechargement live. Données locales et cloud conservées.'
+                ? 'Version web : rechargement live. Si le message revient, le site n’a pas encore été rebuildé côté serveur — « Plus tard » laisse utiliser l’app.'
                 : 'Données conservées. Vous pourrez aussi installer plus tard depuis Mon compte.'}
             {!force ? ' « Plus tard » : rappel dans 2 heures.' : ''}
           </Text>

@@ -199,9 +199,22 @@ export async function performWebHardReload(targetVersion?: string): Promise<void
   }
 
   const url = new URL(window.location.href);
+  // Strip ancien bust pour éviter d’empiler ; force un nouveau fetch du shell
+  url.searchParams.delete('_gt');
   url.searchParams.set('_gt', targetVersion || String(Date.now()));
-  // remplace l’historique pour éviter le bfcache
+  url.searchParams.set('_cb', String(Date.now()));
   window.location.replace(url.toString());
+}
+
+/** True si on a déjà tenté un hard-reload vers cette version (anti-boucle). */
+export function webReloadAlreadyTried(targetVersion: string): boolean {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
+  try {
+    const gt = new URL(window.location.href).searchParams.get('_gt');
+    return gt === targetVersion;
+  } catch {
+    return false;
+  }
 }
 
 /** Ouvre les réglages d’autorisation d’installation (Android). */

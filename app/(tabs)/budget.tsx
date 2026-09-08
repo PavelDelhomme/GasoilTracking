@@ -17,9 +17,9 @@ import { useTheme } from '@/hooks/useTheme';
 import { Card, ProgressBar } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
-import { formatEuro, getActiveMonthlyAllocation, formatDistance } from '@/lib/calculations';
+import { formatEuro, getActiveMonthlyAllocation, formatDistance, compareMonthFillStats } from '@/lib/calculations';
 import { computeBudgetOutlook, plannedMonthSpendFromRoutes } from '@/lib/budgetOutlook';
-import { currentMonthKey, formatMonthChip, formatMonthLabel, monthKeyFromDate, formatDateSlash, formatRelativeDay } from '@/lib/dates';
+import { currentMonthKey, formatMonthChip, formatMonthLabel, monthKeyFromDate, formatDateSlash, formatRelativeDay, previousMonthKey } from '@/lib/dates';
 import {
   deleteBudget,
   deleteFillUp,
@@ -84,6 +84,7 @@ export default function BudgetScreen() {
   >([]);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const [monthFillUps, setMonthFillUps] = useState<FillUp[]>([]);
+  const [allFillsForCompare, setAllFillsForCompare] = useState<FillUp[]>([]);
   const [stations, setStations] = useState<FuelStationPrice[]>([]);
   const [fuelLoading, setFuelLoading] = useState(false);
   const [fuelError, setFuelError] = useState('');
@@ -107,6 +108,7 @@ export default function BudgetScreen() {
     ]);
     setPlaces(p);
     setRoutes(r);
+    setAllFillsForCompare(allFills);
 
     const monthMap = new Map<string, number>();
     const byVehicle: { month: string; vehicleId: number; spent: number }[] = [];
@@ -409,6 +411,16 @@ export default function BudgetScreen() {
 
   const vehicleName = (id: number) => vehicles.find((v) => v.id === id)?.name || `Véhicule #${id}`;
 
+  const compareMonth = selectedMonth || calendarMonth;
+  const monthCompare = (() => {
+    if (!allFillsForCompare.length) return null;
+    return compareMonthFillStats(
+      allFillsForCompare,
+      compareMonth,
+      previousMonthKey(compareMonth)
+    );
+  })();
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView
@@ -448,6 +460,22 @@ export default function BudgetScreen() {
               color={statusColor}
               height={12}
             />
+            {monthCompare && monthCompare.previous.count + monthCompare.current.count > 0 && (
+              <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 10, lineHeight: 18 }}>
+                vs {formatMonthLabel(monthCompare.previous.monthKey)} :{' '}
+                {monthCompare.deltaCost >= 0 ? '+' : ''}
+                {formatEuro(monthCompare.deltaCost)}
+                {monthCompare.deltaCostPct != null
+                  ? ` (${monthCompare.deltaCostPct >= 0 ? '+' : ''}${monthCompare.deltaCostPct} %)`
+                  : ''}
+                {' · '}
+                {monthCompare.deltaLiters >= 0 ? '+' : ''}
+                {monthCompare.deltaLiters.toFixed(1)} L
+                {monthCompare.deltaConsumption != null
+                  ? ` · L/100 ${monthCompare.deltaConsumption >= 0 ? '+' : ''}${monthCompare.deltaConsumption}`
+                  : ''}
+              </Text>
+            )}
             {outlook.rangeKm > 0 && (
               <View style={{ marginTop: 10, gap: 4 }}>
                 <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>

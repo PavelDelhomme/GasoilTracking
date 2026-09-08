@@ -22,6 +22,7 @@ import {
   refreshBudgets,
 } from '@/lib/calculations';
 import { notify } from '@/lib/notify';
+import { refreshVehicleReminders } from '@/lib/reminders';
 import {
   getCurrentLocation,
   startBackgroundTracking,
@@ -294,6 +295,7 @@ export default function StationTripScreen() {
         const adapted = await adaptVehicleConsumption(activeVehicle.id);
         await refreshBudgets(activeVehicle.id);
         await refresh();
+        void refreshVehicleReminders();
         let msg = `Trajet ${formatDistance(km)} + plein ${L.toFixed(1)} L.`;
         if (adapted && adapted.next !== adapted.previous) {
           msg += ` Conso ${adapted.previous.toFixed(1)} → ${adapted.next.toFixed(1)} L/100.`;

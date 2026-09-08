@@ -53,6 +53,7 @@ export default function VehicleMaintenanceScreen() {
   const [amount, setAmount] = useState('');
   const [doneAt, setDoneAt] = useState(toLocalYmd(new Date()));
   const [dueDate, setDueDate] = useState('');
+  const [dueOdometer, setDueOdometer] = useState('');
   const [note, setNote] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -119,6 +120,9 @@ export default function VehicleMaintenanceScreen() {
       const amt = amount.trim() ? parseFloat(amount.replace(',', '.')) : null;
       let due = dueDate.trim() || null;
       const done = doneAt.trim() || null;
+      const dueOdoRaw = dueOdometer.trim() ? parseFloat(dueOdometer.replace(',', '.')) : null;
+      const dueOdo =
+        dueOdoRaw != null && Number.isFinite(dueOdoRaw) && dueOdoRaw > 0 ? dueOdoRaw : null;
       if (kind === 'controle_technique' && done && !due) {
         // Ne force pas la contre-visite ici ; l’utilisateur peut l’ajouter à part
       }
@@ -132,6 +136,7 @@ export default function VehicleMaintenanceScreen() {
         amount: Number.isFinite(amt as number) ? amt : null,
         doneAt: done,
         dueDate: due,
+        dueOdometer: dueOdo,
         status: done ? 'done' : 'pending',
         note: note.trim() || undefined,
         photoUri,
@@ -156,6 +161,7 @@ export default function VehicleMaintenanceScreen() {
       void refreshVehicleReminders();
       setAmount('');
       setNote('');
+      setDueOdometer('');
       setPhotoUri(null);
       notify('Enregistré', title.trim());
     } catch (e) {
@@ -295,6 +301,23 @@ export default function VehicleMaintenanceScreen() {
                   Échéance {formatDateSlash(m.dueDate)}
                 </Text>
               ) : null}
+              {m.dueOdometer != null && m.dueOdometer > 0 ? (
+                <Text
+                  style={{
+                    color:
+                      vehicle.currentOdometer >= m.dueOdometer
+                        ? colors.danger
+                        : colors.accent,
+                    fontWeight: '700',
+                    marginTop: 2,
+                  }}
+                >
+                  Échéance {Math.round(m.dueOdometer).toLocaleString('fr-FR')} km
+                  {vehicle.currentOdometer > 0
+                    ? ` (compteur ${Math.round(vehicle.currentOdometer).toLocaleString('fr-FR')})`
+                    : ''}
+                </Text>
+              ) : null}
               {m.note ? (
                 <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>{m.note}</Text>
               ) : null}
@@ -379,6 +402,17 @@ export default function VehicleMaintenanceScreen() {
           <Text style={{ color: colors.accent, fontWeight: '700' }}>+ Ajouter une échéance</Text>
         </Pressable>
       )}
+      <Input
+        label="Échéance km (optionnel)"
+        value={dueOdometer}
+        onChangeText={setDueOdometer}
+        keyboardType="numeric"
+        placeholder={
+          vehicle.currentOdometer > 0
+            ? String(Math.round(vehicle.currentOdometer + 10000))
+            : 'ex. 120000'
+        }
+      />
       <Input label="Note" value={note} onChangeText={setNote} />
       <Button title="Enregistrer" onPress={save} loading={loading} />
       <Button

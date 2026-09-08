@@ -17,14 +17,25 @@ import { useTheme } from '@/hooks/useTheme';
 import { SimpleFab } from '@/components/SpeedDialFab';
 import { getFillUps } from '@/lib/database';
 import {
+  compareMonthFillStats,
   formatConsumption,
   formatDistance,
   formatEuro,
   getMonthFillStats,
 } from '@/lib/calculations';
-import { formatDateSlash, monthKeyFromDate, currentMonthKey, formatMonthChip, formatMonthLabel, formatRelativeDay } from '@/lib/dates';
+import {
+  formatDateSlash,
+  monthKeyFromDate,
+  currentMonthKey,
+  formatMonthChip,
+  formatMonthLabel,
+  formatRelativeDay,
+  previousMonthKey,
+} from '@/lib/dates';
+import { shareMonthlyFuelCsv } from '@/lib/exportMonthlyFuel';
 import { ProgressBar } from '@/components/Card';
 import { Button } from '@/components/Button';
+import { notify } from '@/lib/notify';
 import type { FillUp, MonthFillStats } from '@/types';
 
 const PAGE = 25;
@@ -146,6 +157,22 @@ export default function FillUpsScreen() {
     const pct = amount > 0 ? (monthSpent / amount) * 100 : 0;
     return { month, amount, spent: monthSpent, pct, name: monthly.budget.name };
   }, [budgetStatuses, selectedMonth, allFillUps, activeVehicle?.id]);
+
+  const compareMonth = selectedMonth === 'all' ? currentMonthKey() : selectedMonth;
+  const monthCompare = useMemo(() => {
+    if (!allFillUps.length || selectedMonth === 'all') return null;
+    return compareMonthFillStats(allFillUps, compareMonth, previousMonthKey(compareMonth));
+  }, [allFillUps, compareMonth, selectedMonth]);
+
+  const exportCsv = async () => {
+    const month = selectedMonth === 'all' ? currentMonthKey() : selectedMonth;
+    try {
+      await shareMonthlyFuelCsv(allFillUps, vehicles, month);
+      notify('Export CSV', `Pleins ${formatMonthLabel(month)} prêts à partager.`);
+    } catch (e) {
+      notify('Export', e instanceof Error ? e.message : 'Échec de l’export');
+    }
+  };
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -357,6 +384,45 @@ export default function FillUpsScreen() {
               {periodStats.totalDistanceKm > 0 ? formatDistance(periodStats.totalDistanceKm) : ''}
             </Text>
           )}
+          {monthCompare && monthCompare.previous.count + monthCompare.current.count > 0 && (
+            <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 8, lineHeight: 18 }}>
+              vs {formatMonthLabel(monthCompare.previous.monthKey)} :{' '}
+              {monthCompare.deltaCost >= 0 ? '+' : ''}
+              {formatEuro(monthCompare.deltaCost)}
+              {monthCompare.deltaCostPct != null
+                ? ` (${monthCompare.deltaCostPct >= 0 ? '+' : ''}${monthCompare.deltaCostPct} %)`
+                : ''}
+              {' · '}
+              {monthCompare.deltaLiters >= 0 ? '+' : ''}
+              {monthCompare.deltaLiters.toFixed(1)} L
+            </Text>
+          )}
+          <Pressable
+            onPress={() => void exportCsv()}
+            accessibilityRole="button"
+            accessibilityLabel="Exporter CSV du mois"
+            style={{
+              marginTop: 12,
+              alignSelf: 'flex-start',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              paddingVertical: 8,
+              paddingHorizontal: 12,
+              borderRadius: 10,
+              borderWidth: 1,
+              borderColor: colors.border,
+              backgroundColor: colors.background,
+            }}
+          >
+            <Ionicons name="download-outline" size={16} color={colors.accent} />
+            <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }}>
+              Export CSV
+              {selectedMonth === 'all'
+                ? ` (${formatMonthChip(currentMonthKey())})`
+                : ` (${formatMonthChip(selectedMonth)})`}
+            </Text>
+          </Pressable>
         </View>
       )}
 

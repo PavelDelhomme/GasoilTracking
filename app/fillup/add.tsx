@@ -27,6 +27,7 @@ import {
 } from '@/lib/fuelPrices';
 import { getCurrentLocation } from '@/lib/locationService';
 import { notify } from '@/lib/notify';
+import { refreshVehicleReminders } from '@/lib/reminders';
 import { useToast } from '@/context/ToastContext';
 import { toLocalYmd } from '@/lib/dates';
 import type { FillUp } from '@/types';
@@ -319,6 +320,7 @@ export default function AddFillUpScreen() {
       const adapted = await adaptVehicleConsumption(activeVehicle.id);
       await refreshBudgets(activeVehicle.id);
       await refresh();
+      void refreshVehicleReminders();
       let msg =
         `${derived.liters.toFixed(2)} L · ${formatEuro(derived.total)}` +
         (station ? ` · ${station.name}` : '') +

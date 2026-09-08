@@ -208,6 +208,8 @@ export interface VehicleMaintenance {
   doneAt: string | null;
   /** Échéance légale / rappel */
   dueDate: string | null;
+  /** Échéance kilométrique (odometer affiché), optionnel */
+  dueOdometer?: number | null;
   status: MaintenanceStatus;
   note?: string;
   /** Photo jointe (PV CT, facture, etc.) — URI locale. */

@@ -178,6 +178,36 @@ export function getMonthFillStats(fillUps: FillUp[], monthKey: string): MonthFil
   };
 }
 
+export type MonthFillCompare = {
+  current: MonthFillStats;
+  previous: MonthFillStats;
+  deltaCost: number;
+  deltaLiters: number;
+  deltaCostPct: number | null;
+  deltaConsumption: number | null;
+};
+
+/** Comparatif mois N vs N-1 (coût, litres, L/100). */
+export function compareMonthFillStats(
+  fillUps: FillUp[],
+  currentMonthKey: string,
+  previousMonthKey: string
+): MonthFillCompare {
+  const current = getMonthFillStats(fillUps, currentMonthKey);
+  const previous = getMonthFillStats(fillUps, previousMonthKey);
+  const deltaCost = Math.round((current.totalCost - previous.totalCost) * 100) / 100;
+  const deltaLiters = Math.round((current.totalLiters - previous.totalLiters) * 100) / 100;
+  const deltaCostPct =
+    previous.totalCost > 0
+      ? Math.round(((current.totalCost - previous.totalCost) / previous.totalCost) * 1000) / 10
+      : null;
+  const deltaConsumption =
+    current.avgConsumption != null && previous.avgConsumption != null
+      ? Math.round((current.avgConsumption - previous.avgConsumption) * 10) / 10
+      : null;
+  return { current, previous, deltaCost, deltaLiters, deltaCostPct, deltaConsumption };
+}
+
 /**
  * Autonomie restante estimée à partir des trajets depuis le dernier plein
  * (pas un demi-réservoir théorique).
@@ -429,13 +459,29 @@ export async function ensureDefaultBudgets(_vehicles: Vehicle[]): Promise<void> 
       endDate,
       isActive: true,
     });
-    return;
+  } else {
+    const patch: Partial<{ amount: number; name: string; startDate: string; endDate: string }> = {};
+    if (global.amount !== DEFAULT_GLOBAL_BUDGET || global.name !== 'Carburant total') {
+      patch.amount = DEFAULT_GLOBAL_BUDGET;
+      patch.name = 'Carburant total';
+    }
+    const endMs = Date.parse(global.endDate);
+    if (!Number.isFinite(endMs) || endMs < Date.now()) {
+      patch.startDate = startDate;
+      patch.endDate = endDate;
+    }
+    if (Object.keys(patch).length > 0) {
+      await updateBudget(global.id, patch);
+    }
   }
-  if (global.amount !== DEFAULT_GLOBAL_BUDGET || global.name !== 'Carburant total') {
-    await updateBudget(global.id, {
-      amount: DEFAULT_GLOBAL_BUDGET,
-      name: 'Carburant total',
-    });
+
+  // Rollover de tous les budgets mensuels actifs dont la période est expirée
+  const refreshed = await getBudgets();
+  for (const b of refreshed) {
+    if (!b.isActive || b.period !== 'monthly') continue;
+    const endMs = Date.parse(b.endDate);
+    if (Number.isFinite(endMs) && endMs >= Date.now()) continue;
+    await updateBudget(b.id, { startDate, endDate });
   }
 }
 

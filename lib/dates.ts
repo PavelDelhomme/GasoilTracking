@@ -68,6 +68,13 @@ export function currentMonthKey(d = new Date()): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 }
 
+/** Mois précédent `AAAA-MM` (ex. 2026-09 → 2026-08). */
+export function previousMonthKey(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(y, (m || 1) - 2, 1);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+}
+
 const MONTH_SHORT_FR = [
   'Janv.',
   'Févr.',

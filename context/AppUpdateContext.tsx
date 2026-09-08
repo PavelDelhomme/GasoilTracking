@@ -15,10 +15,12 @@ import {
   type AppVersionInfo,
 } from '@/lib/api';
 import { followsProductionOta } from '@/lib/appFlavor';
-import { openExternalDownload, performSafeApkUpdate, performWebHardReload, type UpdateProgress } from '@/lib/appUpdate';
+import { openExternalDownload, performSafeApkUpdate, performWebHardReload, webReloadAlreadyTried, type UpdateProgress } from '@/lib/appUpdate';
 
 const SNOOZE_KEY = 'gasoil_update_snooze_v1';
 const SNOOZE_MS = 2 * 60 * 60 * 1000; // 2 h
+/** Web : si le bundle n’a pas bougé après hard-reload, ne pas rebloquer tout de suite. */
+const WEB_DEPLOY_SNOOZE_MS = 30 * 60 * 1000;
 
 type Snooze = { version: string; until: number };
 
@@ -72,8 +74,33 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
       await writeSnooze(null);
       return false;
     }
+
+    // Web : forceUpdate API = canal Android. Bloquant web seulement si sous minVersion.
+    // Sinon soft prompt (snooze OK) — évite la boucle quand le bundle Docker n’est pas rebuild.
+    const belowMin = compareVersions(local, remote.minVersion) < 0;
     const must =
-      remote.forceUpdate || compareVersions(local, remote.minVersion) < 0;
+      Platform.OS === 'web'
+        ? belowMin
+        : remote.forceUpdate || belowMin;
+
+    // Anti-boucle : déjà rechargé vers cette version mais shell toujours ancien
+    if (
+      Platform.OS === 'web' &&
+      webReloadAlreadyTried(remote.version) &&
+      newer
+    ) {
+      await writeSnooze({
+        version: remote.version,
+        until: Date.now() + WEB_DEPLOY_SNOOZE_MS,
+      });
+      setForce(false);
+      setVisible(true);
+      setError(
+        `Site web pas encore déployé en v${remote.version} (bundle local v${local}). Réessayez dans quelques minutes après le rebuild Docker web.`
+      );
+      return true;
+    }
+
     setForce(must);
     if (must) {
       setVisible(true);
@@ -152,6 +179,18 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
       if (Platform.OS === 'android') {
         await performSafeApkUpdate(remote, setProgress);
       } else if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        if (webReloadAlreadyTried(remote.version)) {
+          setError(
+            `Le bundle web est encore en v${local}. Rebuild Docker « web » requis côté serveur — snooze 30 min.`
+          );
+          await writeSnooze({
+            version: remote.version,
+            until: Date.now() + WEB_DEPLOY_SNOOZE_MS,
+          });
+          setForce(false);
+          setVisible(true);
+          return;
+        }
         setProgress({
           phase: 'download',
           progress: 0.6,

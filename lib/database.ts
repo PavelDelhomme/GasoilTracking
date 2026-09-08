@@ -167,6 +167,7 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
   await alterSafe('ALTER TABLE vehicles ADD COLUMN plate_number TEXT');
   await alterSafe('ALTER TABLE vehicles ADD COLUMN registration_photo_uri TEXT');
   await alterSafe('ALTER TABLE vehicle_maintenances ADD COLUMN photo_uri TEXT');
+  await alterSafe('ALTER TABLE vehicle_maintenances ADD COLUMN due_odometer REAL');
 }
 
 function mapVehicle(row: unknown): Vehicle {
@@ -249,6 +250,10 @@ function mapMaintenance(row: unknown): VehicleMaintenance {
     note: (r.note as string) || undefined,
     photoUri:
       r.photo_uri === null || r.photo_uri === undefined ? null : String(r.photo_uri),
+    dueOdometer:
+      r.due_odometer === null || r.due_odometer === undefined
+        ? null
+        : Number(r.due_odometer),
     createdAt: (r.created_at as string) || new Date().toISOString(),
   };
   return { ...base, status: refreshMaintenanceStatus(base) };
@@ -297,8 +302,8 @@ export async function createMaintenance(
     createdAt: new Date().toISOString(),
   });
   const result = await database.runAsync(
-    `INSERT INTO vehicle_maintenances (vehicle_id, kind, title, amount, done_at, due_date, status, note, photo_uri)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO vehicle_maintenances (vehicle_id, kind, title, amount, done_at, due_date, status, note, photo_uri, due_odometer)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       m.vehicleId,
       m.kind,
@@ -309,6 +314,7 @@ export async function createMaintenance(
       status,
       m.note ?? null,
       m.photoUri ?? null,
+      m.dueOdometer ?? null,
     ]
   );
   return Number(result.lastInsertRowId);
@@ -352,6 +358,10 @@ export async function updateMaintenance(
   if (patch.photoUri !== undefined) {
     fields.push('photo_uri = ?');
     values.push(patch.photoUri ?? null);
+  }
+  if (patch.dueOdometer !== undefined) {
+    fields.push('due_odometer = ?');
+    values.push(patch.dueOdometer ?? null);
   }
   if (!fields.length) return;
   values.push(id);
