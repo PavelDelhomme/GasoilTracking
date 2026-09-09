@@ -8,6 +8,12 @@ import {
   REAL_WORLD_MARGIN,
   vehicleAgeFactor,
 } from '../consumptionModel';
+import { resolveFillUpDistanceKm, sumTripKmBetween } from '../fillUpDistance';
+import {
+  gaugeArcAngle,
+  gaugeFractionFromArcTouch,
+  gaugePolar,
+} from '../fuelGaugeMath';
 
 describe('compareSemver', () => {
   it('ordonne correctement', () => {
@@ -126,5 +132,112 @@ describe('consumptionModel (anti-surconso)', () => {
     expect(burned).toBeGreaterThan(3.5);
     expect(burned).toBeLessThan(9);
     expect((burned / 90) * 100).toBeLessThan(9);
+  });
+});
+
+describe('fill-up distance (pleins du véhicule)', () => {
+  it('somme les trajets entre deux dates', () => {
+    const trips = [
+      {
+        startTime: '2026-09-01T10:00:00.000Z',
+        endTime: '2026-09-01T11:00:00.000Z',
+        distanceKm: 40,
+        isActive: false,
+        status: 'confirmed' as const,
+      },
+      {
+        startTime: '2026-09-03T10:00:00.000Z',
+        endTime: '2026-09-03T12:00:00.000Z',
+        distanceKm: 80,
+        isActive: false,
+        status: 'confirmed' as const,
+      },
+      {
+        startTime: '2026-09-05T10:00:00.000Z',
+        endTime: '2026-09-05T11:00:00.000Z',
+        distanceKm: 15,
+        isActive: false,
+        status: 'rejected' as const,
+      },
+    ];
+    expect(sumTripKmBetween(trips, '2026-09-01T08:00:00.000Z', '2026-09-04T00:00:00.000Z')).toBe(
+      120
+    );
+    expect(sumTripKmBetween(trips, '2026-09-01T12:00:00.000Z', '2026-09-04T00:00:00.000Z')).toBe(
+      80
+    );
+    expect(sumTripKmBetween(trips, null, '2026-09-04T00:00:00.000Z')).toBe(120);
+  });
+
+  it('utilise les trajets GPS si pas de km saisis entre deux pleins', () => {
+    const prev = {
+      id: 1,
+      vehicleId: 2,
+      date: '2026-09-01T12:00:00.000Z',
+      liters: 30,
+      pricePerLiter: 1.8,
+      totalCost: 54,
+      odometer: null as number | null,
+      distanceSinceLastKm: null as number | null,
+      isFull: true,
+    };
+    const curr = {
+      id: 2,
+      vehicleId: 2,
+      date: '2026-09-08T12:00:00.000Z',
+      liters: 28,
+      pricePerLiter: 1.8,
+      totalCost: 50.4,
+      odometer: null as number | null,
+      distanceSinceLastKm: null as number | null,
+      isFull: true,
+    };
+    const trips = [
+      {
+        startTime: '2026-09-03T10:00:00.000Z',
+        endTime: '2026-09-03T12:00:00.000Z',
+        distanceKm: 320,
+        isActive: false,
+        status: 'confirmed' as const,
+      },
+      {
+        startTime: '2026-09-06T10:00:00.000Z',
+        endTime: '2026-09-06T11:00:00.000Z',
+        distanceKm: 280,
+        isActive: false,
+        status: 'confirmed' as const,
+      },
+    ];
+    const d = resolveFillUpDistanceKm(prev, curr, trips);
+    expect(d).toBe(600);
+    expect((curr.liters / d!) * 100).toBeCloseTo(4.67, 1);
+  });
+});
+
+describe('jauge demi-cercle (volant)', () => {
+  it('E=π, milieu=π/2, F=0', () => {
+    expect(gaugeArcAngle(0)).toBeCloseTo(Math.PI, 5);
+    expect(gaugeArcAngle(0.5)).toBeCloseTo(Math.PI / 2, 5);
+    expect(gaugeArcAngle(1)).toBeCloseTo(0, 5);
+  });
+
+  it('polar : E à gauche, F à droite, ½ en haut', () => {
+    const e = gaugePolar(100, 100, 50, 0);
+    const mid = gaugePolar(100, 100, 50, 0.5);
+    const f = gaugePolar(100, 100, 50, 1);
+    expect(e.x).toBeCloseTo(50, 5);
+    expect(e.y).toBeCloseTo(100, 5);
+    expect(mid.x).toBeCloseTo(100, 5);
+    expect(mid.y).toBeCloseTo(50, 5);
+    expect(f.x).toBeCloseTo(150, 5);
+    expect(f.y).toBeCloseTo(100, 5);
+  });
+
+  it('touch arc : gauche→0, haut→0.5, droite→1', () => {
+    const cx = 200;
+    const cy = 200;
+    expect(gaugeFractionFromArcTouch(100, 200, cx, cy)).toBeCloseTo(0, 2); // gauche
+    expect(gaugeFractionFromArcTouch(200, 100, cx, cy)).toBeCloseTo(0.5, 2); // haut
+    expect(gaugeFractionFromArcTouch(300, 200, cx, cy)).toBeCloseTo(1, 2); // droite
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Jauge type tableau de bord — barre E → F + molette.
+ * Jauge carburant demi-cercle — comme derrière le volant (E ← haut → F).
  * Verrouillée par défaut : « Modifier la jauge » puis glisser / repères, puis Confirmer.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -11,8 +11,15 @@ import {
   LayoutChangeEvent,
   Pressable,
 } from 'react-native';
+import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
-import { gaugeFractionFromTouch, gaugeMarkLabel } from '@/lib/fuelGaugeMath';
+import {
+  gaugeArcPath,
+  gaugeFractionFromArcTouch,
+  gaugeMarkLabel,
+  gaugePolar,
+} from '@/lib/fuelGaugeMath';
 
 const MARKS = [
   { f: 0, label: 'E', a11y: 'Vide' },
@@ -56,14 +63,17 @@ export function FuelGaugeSlider({
   const displayL = requireConfirm && editing ? draft : savedL;
   const fraction = displayL / capacity;
 
-  const trackH = compact ? 22 : 32;
-  const thumb = compact ? 20 : 26;
+  const size = compact ? 220 : 300;
+  const stroke = compact ? 16 : 22;
+  const pad = stroke / 2 + 8;
+  const cx = size / 2;
+  const cy = size / 2 - 4;
+  const r = size / 2 - pad;
+  const svgH = cy + stroke / 2 + 28;
 
-  const [trackW, setTrackW] = useState(0);
   const [dragging, setDragging] = useState(false);
-  const trackWRef = useRef(0);
-  const trackPageXRef = useRef(0);
-  const trackRef = useRef<View>(null);
+  const centerPageRef = useRef({ x: 0, y: 0 });
+  const dialRef = useRef<View>(null);
   const liveRef = useRef(displayL);
   liveRef.current = displayL;
 
@@ -84,10 +94,15 @@ export function FuelGaugeSlider({
     [onChange, requireConfirm]
   );
 
-  const applyPageX = useCallback(
-    (pageX: number, commit: boolean) => {
-      if (!interactive || trackWRef.current <= 0) return;
-      const f = gaugeFractionFromTouch(pageX, trackPageXRef.current, trackWRef.current);
+  const applyPage = useCallback(
+    (pageX: number, pageY: number, commit: boolean) => {
+      if (!interactive) return;
+      const f = gaugeFractionFromArcTouch(
+        pageX,
+        pageY,
+        centerPageRef.current.x,
+        centerPageRef.current.y
+      );
       const next = Math.round(capacity * f * 10) / 10;
       setLive(next);
       if (commit && !requireConfirm) onChangeEnd?.(next);
@@ -95,14 +110,16 @@ export function FuelGaugeSlider({
     [capacity, interactive, onChangeEnd, requireConfirm, setLive]
   );
 
-  const measureTrack = useCallback(() => {
-    trackRef.current?.measureInWindow((x, _y, width) => {
-      if (width > 0) {
-        trackPageXRef.current = x;
-        trackWRef.current = width;
-      }
+  const measureCenter = useCallback(() => {
+    dialRef.current?.measureInWindow((x, y, width, height) => {
+      // Pivot = centre du demi-cercle (bas de l’arc), pas le milieu du View
+      const scale = width > 0 ? width / size : 1;
+      centerPageRef.current = {
+        x: x + (cx * scale),
+        y: y + (cy * scale),
+      };
     });
-  }, []);
+  }, [cx, cy, size]);
 
   const pan = useMemo(
     () =>
@@ -112,12 +129,13 @@ export function FuelGaugeSlider({
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: (evt) => {
           setDragging(true);
-          measureTrack();
-          applyPageX(evt.nativeEvent.pageX, false);
+          measureCenter();
+          applyPage(evt.nativeEvent.pageX, evt.nativeEvent.pageY, false);
         },
-        onPanResponderMove: (evt) => applyPageX(evt.nativeEvent.pageX, false),
+        onPanResponderMove: (evt) =>
+          applyPage(evt.nativeEvent.pageX, evt.nativeEvent.pageY, false),
         onPanResponderRelease: (evt) => {
-          applyPageX(evt.nativeEvent.pageX, true);
+          applyPage(evt.nativeEvent.pageX, evt.nativeEvent.pageY, true);
           setDragging(false);
         },
         onPanResponderTerminate: () => {
@@ -125,19 +143,20 @@ export function FuelGaugeSlider({
           setDragging(false);
         },
       }),
-    [applyPageX, interactive, measureTrack, onChangeEnd, requireConfirm]
+    [applyPage, interactive, measureCenter, onChangeEnd, requireConfirm]
   );
 
-  const onLayout = (e: LayoutChangeEvent) => {
-    const w = e.nativeEvent.layout.width;
-    trackWRef.current = w;
-    setTrackW(w);
-    measureTrack();
+  const onLayout = (_e: LayoutChangeEvent) => {
+    measureCenter();
   };
 
   const mark = gaugeMarkLabel(fraction);
-  const thumbLeft = Math.max(0, Math.min(trackW - thumb, fraction * trackW - thumb / 2));
   const pct = Math.round(fraction * 100);
+  const low = fraction <= 0.15;
+  const needleTip = gaugePolar(cx, cy, r - stroke * 0.15, fraction);
+  const trackPath = gaugeArcPath(cx, cy, r, 0, 1);
+  const dangerPath = gaugeArcPath(cx, cy, r, 0, 0.12);
+  const fillPath = fraction > 0.002 ? gaugeArcPath(cx, cy, r, 0, fraction) : '';
 
   return (
     <View
@@ -145,7 +164,7 @@ export function FuelGaugeSlider({
       pointerEvents={disabled ? 'none' : 'auto'}
       accessibilityRole="adjustable"
       accessibilityLabel="Niveau de carburant"
-      accessibilityHint="Comme sur le tableau de bord — Modifier puis glisser E vers F"
+      accessibilityHint="Jauge demi-cercle comme au tableau de bord — Modifier puis tourner E vers F"
       accessibilityValue={{
         min: 0,
         max: Math.round(capacity),
@@ -153,100 +172,205 @@ export function FuelGaugeSlider({
         text: known ? `${pct} % · ${displayL.toFixed(1)} L` : 'Niveau inconnu',
       }}
     >
-      <View style={[styles.valueRow, compact && { marginBottom: 4 }]}>
-        <Text style={[styles.valueMain, { color: colors.text, fontSize: compact ? 15 : 22 }]}>
-          {known || editing ? `${pct} %` : 'Régler…'}
-        </Text>
-        <Text style={{ color: colors.textSecondary, fontSize: compact ? 11 : 13 }}>
-          {known || editing ? `${displayL.toFixed(1)} L / ${capacity.toFixed(0)} L` : mark}
-        </Text>
-      </View>
-
       <View
-        ref={trackRef}
-        collapsable={false}
         style={[
-          styles.track,
+          styles.panel,
           {
-            backgroundColor: colors.border,
-            height: trackH,
-            borderRadius: trackH / 2,
-            opacity: locked ? 0.88 : disabled ? 0.5 : 1,
+            backgroundColor: colors.background,
+            borderColor: colors.border,
+            opacity: disabled ? 0.55 : 1,
+            paddingVertical: compact ? 10 : 14,
           },
         ]}
-        onLayout={onLayout}
-        {...(interactive ? pan.panHandlers : {})}
       >
-        <View
-          pointerEvents="none"
-          style={[
-            styles.fill,
-            {
-              width: `${Math.min(100, Math.round(fraction * 1000) / 10)}%`,
-              backgroundColor: fillColor,
-              borderRadius: trackH / 2,
-            },
-          ]}
-        />
-        {MARKS.filter((m) => m.f > 0 && m.f < 1).map((m) => (
-          <View
-            key={m.label}
-            pointerEvents="none"
-            style={[
-              styles.tick,
-              {
-                left: `${m.f * 100}%`,
-                backgroundColor: colors.background,
-                opacity: 0.5,
-              },
-            ]}
-          />
-        ))}
-        {trackW > 0 && (
-          <View
-            pointerEvents="none"
-            style={[
-              styles.thumb,
-              {
-                left: thumbLeft,
-                width: thumb,
-                height: thumb,
-                borderRadius: thumb / 2,
-                marginTop: -(thumb / 2),
-                borderColor: '#fff',
-                backgroundColor: fillColor,
-              },
-            ]}
-          />
-        )}
-      </View>
+        {/* Pourcentage + litres (toujours visibles, en plus de la jauge) */}
+        <View style={styles.headerRow}>
+          <View style={styles.headerLeft}>
+            <Ionicons
+              name={low ? 'warning' : 'speedometer-outline'}
+              size={compact ? 18 : 22}
+              color={low ? colors.danger : fillColor}
+            />
+            <View style={{ flex: 1 }}>
+              <View style={styles.pctRow}>
+                <Text
+                  style={{
+                    color: colors.text,
+                    fontSize: compact ? 26 : 36,
+                    fontWeight: '900',
+                    lineHeight: compact ? 30 : 40,
+                  }}
+                >
+                  {known || editing ? `${pct} %` : '— %'}
+                </Text>
+                <Text
+                  style={{
+                    color: fillColor,
+                    fontWeight: '800',
+                    fontSize: compact ? 14 : 16,
+                    marginLeft: 10,
+                  }}
+                >
+                  {mark}
+                </Text>
+              </View>
+              <Text
+                style={{
+                  color: colors.textSecondary,
+                  fontSize: compact ? 12 : 13,
+                  fontWeight: '600',
+                  marginTop: 2,
+                }}
+              >
+                {known || editing
+                  ? `${displayL.toFixed(1)} L / ${capacity.toFixed(0)} L`
+                  : 'Réglez comme derrière le volant'}
+              </Text>
+            </View>
+          </View>
+        </View>
 
-      <View style={[styles.marks, compact && { marginTop: 4 }]}>
-        {MARKS.map((m) => (
-          <Pressable
-            key={m.label}
-            disabled={!interactive}
-            onPress={() => {
-              const next = Math.round(capacity * m.f * 10) / 10;
-              setLive(next);
-              if (!requireConfirm) onChangeEnd?.(next);
-            }}
-            hitSlop={8}
-            style={styles.markBtn}
-            accessibilityRole="button"
-            accessibilityLabel={`Régler à ${m.a11y}`}
-          >
-            <Text
-              style={{
-                color: Math.abs(fraction - m.f) < 0.06 ? fillColor : colors.textSecondary,
-                fontWeight: Math.abs(fraction - m.f) < 0.06 ? '800' : '700',
-                fontSize: compact ? 12 : 14,
-              }}
+        <View
+          ref={dialRef}
+          collapsable={false}
+          style={[styles.dial, { width: size, height: svgH, opacity: locked ? 0.9 : 1 }]}
+          onLayout={onLayout}
+          {...(interactive ? pan.panHandlers : {})}
+        >
+          <Svg width={size} height={svgH}>
+            {/* Piste */}
+            <Path
+              d={trackPath}
+              stroke={colors.border}
+              strokeWidth={stroke}
+              fill="none"
+              strokeLinecap="round"
+            />
+            {/* Zone vide (rouge) */}
+            {dangerPath ? (
+              <Path
+                d={dangerPath}
+                stroke={colors.danger}
+                strokeWidth={stroke}
+                fill="none"
+                strokeLinecap="butt"
+                opacity={0.55}
+              />
+            ) : null}
+            {/* Niveau */}
+            {fillPath ? (
+              <Path
+                d={fillPath}
+                stroke={fillColor}
+                strokeWidth={stroke}
+                fill="none"
+                strokeLinecap="round"
+              />
+            ) : null}
+
+            {/* Graduations */}
+            {MARKS.map((m) => {
+              const outer = gaugePolar(cx, cy, r + stroke * 0.15, m.f);
+              const inner = gaugePolar(cx, cy, r - stroke * 0.55, m.f);
+              const labelPos = gaugePolar(cx, cy, r - stroke - (compact ? 14 : 18), m.f);
+              const active = Math.abs(fraction - m.f) < 0.06;
+              return (
+                <G key={m.label}>
+                  <Line
+                    x1={inner.x}
+                    y1={inner.y}
+                    x2={outer.x}
+                    y2={outer.y}
+                    stroke={active ? fillColor : colors.textSecondary}
+                    strokeWidth={active ? 3 : 2}
+                    strokeLinecap="round"
+                    opacity={active ? 1 : 0.55}
+                  />
+                  <SvgText
+                    x={labelPos.x}
+                    y={labelPos.y + 4}
+                    fill={active ? fillColor : colors.text}
+                    fontSize={compact ? 13 : 16}
+                    fontWeight="800"
+                    textAnchor="middle"
+                  >
+                    {m.label}
+                  </SvgText>
+                </G>
+              );
+            })}
+
+            {/* Aiguille */}
+            <Line
+              x1={cx}
+              y1={cy}
+              x2={needleTip.x}
+              y2={needleTip.y}
+              stroke={fillColor}
+              strokeWidth={compact ? 3.5 : 4.5}
+              strokeLinecap="round"
+            />
+            <Circle cx={cx} cy={cy} r={compact ? 8 : 10} fill={fillColor} />
+            <Circle cx={cx} cy={cy} r={compact ? 3.5 : 4.5} fill="#fff" />
+
+            {/* % au centre */}
+            <SvgText
+              x={cx}
+              y={cy - (compact ? 28 : 36)}
+              fill={colors.text}
+              fontSize={compact ? 28 : 40}
+              fontWeight="900"
+              textAnchor="middle"
             >
-              {m.label}
-            </Text>
-          </Pressable>
-        ))}
+              {known || editing ? `${pct}` : '—'}
+            </SvgText>
+            <SvgText
+              x={cx}
+              y={cy - (compact ? 10 : 12)}
+              fill={colors.textSecondary}
+              fontSize={compact ? 11 : 13}
+              fontWeight="700"
+              textAnchor="middle"
+            >
+              %
+            </SvgText>
+          </Svg>
+        </View>
+
+        <View style={styles.marks}>
+          {MARKS.map((m) => {
+            const active = Math.abs(fraction - m.f) < 0.06;
+            return (
+              <Pressable
+                key={m.label}
+                disabled={!interactive}
+                onPress={() => {
+                  const next = Math.round(capacity * m.f * 10) / 10;
+                  setLive(next);
+                  if (!requireConfirm) onChangeEnd?.(next);
+                }}
+                hitSlop={10}
+                style={[
+                  styles.markBtn,
+                  active && { backgroundColor: fillColor + '22', borderColor: fillColor },
+                  !active && { borderColor: colors.border },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={`Régler à ${m.a11y}`}
+              >
+                <Text
+                  style={{
+                    color: active ? fillColor : colors.textSecondary,
+                    fontWeight: active ? '900' : '700',
+                    fontSize: compact ? 13 : 14,
+                  }}
+                >
+                  {m.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
 
       {requireConfirm ? (
@@ -259,12 +383,14 @@ export function FuelGaugeSlider({
               }}
               style={[
                 styles.confirmBtn,
+                styles.confirmBtnWide,
                 { borderColor: colors.accent, backgroundColor: colors.accent + '18' },
               ]}
               accessibilityRole="button"
               accessibilityLabel="Modifier le niveau de carburant"
             >
-              <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 13 }}>
+              <Ionicons name="create-outline" size={16} color={colors.accent} />
+              <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 14 }}>
                 Modifier la jauge
               </Text>
             </Pressable>
@@ -276,9 +402,9 @@ export function FuelGaugeSlider({
                   onChange(savedL);
                   setEditing(false);
                 }}
-                style={[styles.confirmBtn, { borderColor: colors.border }]}
+                style={[styles.confirmBtn, { borderColor: colors.border, flex: 1 }]}
               >
-                <Text style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 13 }}>
+                <Text style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 14 }}>
                   Annuler
                 </Text>
               </Pressable>
@@ -289,10 +415,12 @@ export function FuelGaugeSlider({
                 }}
                 style={[
                   styles.confirmBtn,
-                  { borderColor: colors.accent, backgroundColor: colors.accent },
+                  { borderColor: colors.accent, backgroundColor: colors.accent, flex: 1.4 },
                 ]}
               >
-                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>Confirmer</Text>
+                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>
+                  Confirmer · {pct} %
+                </Text>
               </Pressable>
             </>
           )}
@@ -301,16 +429,28 @@ export function FuelGaugeSlider({
         <Text
           style={{
             color: dragging ? fillColor : colors.textSecondary,
-            fontSize: 11,
-            marginTop: 6,
+            fontSize: 12,
+            marginTop: 8,
+            fontWeight: '600',
+            textAlign: 'center',
           }}
         >
-          {dragging ? `${pct} % · ${displayL.toFixed(1)} L` : 'Glisser E → F comme sur la voiture'}
+          {dragging
+            ? `${pct} % · ${displayL.toFixed(1)} L`
+            : 'Tournez l’aiguille — E (vide) → F (plein)'}
         </Text>
       )}
       {locked ? (
-        <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 6, lineHeight: 16 }}>
-          Verrouillée pour éviter un réglage accidentel.
+        <Text
+          style={{
+            color: colors.textSecondary,
+            fontSize: 11,
+            marginTop: 6,
+            lineHeight: 16,
+            textAlign: 'center',
+          }}
+        >
+          Verrouillée — un geste volontaire pour régler, comme sur le tableau de bord.
         </Text>
       ) : null}
     </View>
@@ -319,60 +459,67 @@ export function FuelGaugeSlider({
 
 const styles = StyleSheet.create({
   wrap: { width: '100%' },
-  valueRow: {
+  panel: {
+    width: '100%',
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+  },
+  headerRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+    paddingHorizontal: 4,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  pctRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    justifyContent: 'space-between',
-    marginBottom: 8,
   },
-  valueMain: { fontWeight: '800' },
-  track: {
-    width: '100%',
-    overflow: 'hidden',
-    position: 'relative',
-    justifyContent: 'center',
-  },
-  fill: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-  },
-  tick: {
-    position: 'absolute',
-    width: 2,
-    marginLeft: -1,
-    top: 4,
-    bottom: 4,
-    borderRadius: 1,
-  },
-  thumb: {
-    position: 'absolute',
-    borderWidth: 2,
-    top: '50%',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOpacity: 0.22,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
+  dial: {
+    alignSelf: 'center',
   },
   marks: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 8,
+    width: '100%',
+    marginTop: 4,
+    marginBottom: 4,
+    gap: 4,
     paddingHorizontal: 2,
   },
-  markBtn: { minWidth: 28, alignItems: 'center', paddingVertical: 2 },
-  confirmRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 10,
-    flexWrap: 'wrap',
-  },
-  confirmBtn: {
-    paddingHorizontal: 12,
+  markBtn: {
+    flex: 1,
+    alignItems: 'center',
     paddingVertical: 8,
     borderRadius: 10,
     borderWidth: 1,
+  },
+  confirmRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+    flexWrap: 'wrap',
+  },
+  confirmBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  confirmBtnWide: {
+    width: '100%',
   },
 });

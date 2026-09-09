@@ -326,7 +326,6 @@ export default function HomeScreen() {
                 onMoveShouldSetResponder={() => true}
               >
                 <FuelGaugeSlider
-                  compact
                   requireConfirm
                   tankCapacity={activeVehicle.tankCapacity}
                   liters={homeFuelDraft}

@@ -15,8 +15,15 @@ import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { DatePickerField } from '@/components/DatePickerField';
-import { createFillUp, getFillUps, updateVehicle, updateTrip } from '@/lib/database';
-import { adaptVehicleConsumption, displayOdometerKm, formatEuro, refreshBudgets } from '@/lib/calculations';
+import { createFillUp, getFillUps, getTrips, updateVehicle, updateTrip } from '@/lib/database';
+import {
+  adaptVehicleConsumption,
+  displayOdometerKm,
+  formatEuro,
+  getSinceLastFillStats,
+  refreshBudgets,
+  sumTripKmBetween,
+} from '@/lib/calculations';
 import { applyFillUpToFuelEstimate, fuelLevelLabel, previewFillUpFuel } from '@/lib/fuelLevel';
 import {
   fetchCheapestStations,
@@ -74,6 +81,7 @@ export default function AddFillUpScreen() {
       const last = fills[0] || null;
       setLastFill(last);
       const currentOdo = displayOdometerKm(activeVehicle);
+      const since = await getSinceLastFillStats(activeVehicle.id);
 
       if (hasOdo) {
         if (currentOdo > 0) {
@@ -84,11 +92,32 @@ export default function AddFillUpScreen() {
         if (last?.odometer != null && currentOdo > last.odometer) {
           const km = Math.round(currentOdo - last.odometer);
           setDistanceKm(String(km));
-          setKmHint(`Auto : ${km} km depuis le plein du ${new Date(last.date).toLocaleDateString('fr-FR')}`);
+          setKmHint(
+            `Auto compteur : ${km} km depuis le plein du ${new Date(last.date).toLocaleDateString('fr-FR')}`
+          );
+        } else if (since.tripKm >= 20) {
+          setDistanceKm(String(Math.round(since.tripKm)));
+          setKmHint(
+            `Trajets GPS de ce véhicule depuis le dernier plein : ${since.tripKm} km`
+          );
         } else if (last?.distanceSinceLastKm != null && last.distanceSinceLastKm > 0) {
           setKmHint(`Dernier plein : +${Math.round(last.distanceSinceLastKm)} km`);
         }
-      } else if (last?.distanceSinceLastKm != null && last.distanceSinceLastKm > 0) {
+      } else if (since.tripKm >= 20) {
+        setDistanceKm(String(Math.round(since.tripKm)));
+        setKmHint(
+          last
+            ? `Trajets GPS depuis le plein du ${new Date(last.date).toLocaleDateString('fr-FR')} : ${since.tripKm} km`
+            : `Trajets GPS de ce véhicule : ${since.tripKm} km`
+        );
+      } else if (!last) {
+        const trips = await getTrips(activeVehicle.id, { omitRoutePoints: true });
+        const allKm = sumTripKmBetween(trips, null, new Date().toISOString());
+        if (allKm >= 20) {
+          setDistanceKm(String(Math.round(allKm)));
+          setKmHint(`Tous les trajets GPS de ce véhicule : ${allKm} km (1er plein)`);
+        }
+      } else if (last.distanceSinceLastKm != null && last.distanceSinceLastKm > 0) {
         setDistanceKm(String(Math.round(last.distanceSinceLastKm)));
         setKmHint('Suggestion basée sur le dernier plein');
       }

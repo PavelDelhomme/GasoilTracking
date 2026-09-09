@@ -101,8 +101,11 @@ const styles = StyleSheet.create({
   sheet: {
     borderRadius: 18,
     borderWidth: 1,
-    padding: 18,
-    paddingBottom: Platform.OS === 'ios' ? 18 : 28,
+    padding: 20,
+    paddingBottom: Platform.OS === 'ios' ? 20 : 28,
+    width: '100%',
+    maxWidth: 480,
+    alignSelf: 'center',
   },
   title: { fontSize: 18, fontWeight: '800', marginBottom: 6 },
   actions: { flexDirection: 'row', gap: 10, marginTop: 18 },

@@ -119,7 +119,6 @@ export function VehicleCard({
         onMoveShouldSetResponder={() => true}
       >
         <FuelGaugeSlider
-          compact
           requireConfirm
           tankCapacity={vehicle.tankCapacity}
           liters={draftLiters}

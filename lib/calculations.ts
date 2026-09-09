@@ -27,6 +27,9 @@ import {
   estimateTripFuelLiters,
   movingDurationMinutes,
 } from '@/lib/consumptionModel';
+import { resolveFillUpDistanceKm } from '@/lib/fillUpDistance';
+
+export { resolveFillUpDistanceKm, sumTripKmBetween } from '@/lib/fillUpDistance';
 
 /** Calcule la distance entre deux points GPS (formule Haversine) en km */
 export function haversineDistance(
@@ -76,16 +79,6 @@ export function calculateRealConsumption(
   return (currentFillUp.liters / distance) * 100;
 }
 
-function fillUpDistance(prev: FillUp, curr: FillUp): number | null {
-  if (curr.odometer != null && prev.odometer != null && curr.odometer > prev.odometer) {
-    return curr.odometer - prev.odometer;
-  }
-  if (curr.distanceSinceLastKm != null && curr.distanceSinceLastKm > 0) {
-    return curr.distanceSinceLastKm;
-  }
-  return null;
-}
-
 /** Écarte les L/100 absurdes (saisie km / litres incohérente). */
 export function isSaneConsumptionSample(lPer100: number, fuelType?: Vehicle['fuelType']): boolean {
   if (!Number.isFinite(lPer100) || lPer100 <= 0) return false;
@@ -110,7 +103,7 @@ export async function getConsumptionStats(vehicleId: number): Promise<Consumptio
   for (let i = 1; i < fullFillUps.length; i++) {
     const prev = fullFillUps[i - 1];
     const curr = fullFillUps[i];
-    const distance = fillUpDistance(prev, curr);
+    const distance = resolveFillUpDistanceKm(prev, curr, trips);
     if (distance && distance > 0 && curr.liters > 0) {
       totalDistance += distance;
       totalFuel += curr.liters;
@@ -231,13 +224,22 @@ export async function getSinceLastFillStats(vehicleId: number): Promise<SinceLas
   const rangeFromLiters = (liters: number, lPer100: number) =>
     lPer100 > 0 ? Math.round((Math.max(0, liters) / lPer100) * 1000) / 10 : 0;
 
-  // Pas encore de plein : autonomie basée uniquement sur le niveau jauge + conso véhicule
+  // Pas encore de plein : autonomie jauge + km déjà parcourus (pour 1er plein)
   if (!fillUps.length) {
-    if (vehicle.estimatedFuelLiters == null) return empty;
-    const fuelRemainingEst = Math.max(0, Math.round(vehicle.estimatedFuelLiters * 100) / 100);
+    const allTrips = trips.filter(
+      (t) => !t.isActive && t.status !== 'rejected' && t.distanceKm > 0
+    );
+    const tripKm = Math.round(allTrips.reduce((s, t) => s + t.distanceKm, 0) * 10) / 10;
+    if (vehicle.estimatedFuelLiters == null && tripKm <= 0) return empty;
+    const fuelRemainingEst =
+      vehicle.estimatedFuelLiters == null
+        ? 0
+        : Math.max(0, Math.round(vehicle.estimatedFuelLiters * 100) / 100);
     const l100 = estimateTripFuelLiters(vehicle, 100);
     return {
       ...empty,
+      tripKm,
+      tripCount: allTrips.length,
       fuelRemainingEst,
       rangeKm: rangeFromLiters(fuelRemainingEst, l100),
     };
@@ -298,21 +300,41 @@ export async function adaptVehicleConsumption(
   if (vehicle.consumptionAutoAdapt === false) return null;
   if (vehicle.fuelType === 'electrique') return null;
 
-  const fillUps = await getFillUps(vehicleId);
+  const [fillUps, trips] = await Promise.all([
+    getFillUps(vehicleId),
+    getTrips(vehicleId, { omitRoutePoints: true }),
+  ]);
   const ordered = [...fillUps].sort((a, b) => a.date.localeCompare(b.date));
   const samples: number[] = [];
+  const seen = new Set<string>();
 
+  const pushSample = (liters: number, distance: number) => {
+    if (!(liters > 0) || !(distance >= 20)) return;
+    const c = (liters / distance) * 100;
+    const key = `${distance.toFixed(1)}:${liters.toFixed(2)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    samples.push(c);
+  };
+
+  // Plein → plein : compteur, km saisis, ou trajets GPS du même véhicule
   const fulls = ordered.filter((f) => f.isFull);
   for (let i = 1; i < fulls.length; i++) {
-    const distance = fillUpDistance(fulls[i - 1], fulls[i]);
-    if (distance && distance >= 30 && fulls[i].liters > 0) {
-      samples.push((fulls[i].liters / distance) * 100);
-    }
+    const distance = resolveFillUpDistanceKm(fulls[i - 1], fulls[i], trips);
+    if (distance) pushSample(fulls[i].liters, distance);
   }
-  for (const f of ordered) {
-    if (f.distanceSinceLastKm && f.distanceSinceLastKm >= 30 && f.liters > 0) {
-      samples.push((f.liters / f.distanceSinceLastKm) * 100);
+
+  // Tout plein avec km depuis le précédent (complet ou partiel)
+  for (let i = 0; i < ordered.length; i++) {
+    const f = ordered[i];
+    if (f.distanceSinceLastKm && f.distanceSinceLastKm >= 20 && f.liters > 0) {
+      pushSample(f.liters, f.distanceSinceLastKm);
+      continue;
     }
+    // Repli trajets : même véhicule, entre ce plein et le précédent
+    const prev = i > 0 ? ordered[i - 1] : null;
+    const tripKm = resolveFillUpDistanceKm(prev, f, trips);
+    if (tripKm) pushSample(f.liters, tripKm);
   }
 
   const sane = samples.filter((c) => isSaneConsumptionSample(c, vehicle.fuelType));
@@ -329,8 +351,9 @@ export async function adaptVehicleConsumption(
   });
   const measured = cSum / wSum;
   const prev = vehicle.consumptionPer100 > 0 ? vehicle.consumptionPer100 : measured;
-  // 75 % mesure / 25 % précédente — réagit vite après un plein
-  let next = measured * 0.75 + prev * 0.25;
+  // 1er échantillon : coller fort à la mesure (pleins réels du véhicule)
+  const measureWeight = sane.length === 1 ? 0.9 : 0.75;
+  let next = measured * measureWeight + prev * (1 - measureWeight);
   const maxDelta = Math.max(1.2, prev * 0.35);
   next = Math.min(prev + maxDelta, Math.max(prev - maxDelta, next));
   next = Math.round(next * 10) / 10;

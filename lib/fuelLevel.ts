@@ -1,8 +1,8 @@
 /** Helpers niveau carburant estimé par véhicule (multi-voitures). */
 
 import type { FillUp, Vehicle } from '@/types';
-import { getFillUps, updateVehicle } from '@/lib/database';
-import { estimateTripFuelLiters, learnFactorFromFullFillUps } from '@/lib/consumptionModel';
+import { updateVehicle } from '@/lib/database';
+import { estimateTripFuelLiters } from '@/lib/consumptionModel';
 
 export type FillFuelPreview = {
   beforeLiters: number | null;
@@ -58,25 +58,9 @@ export async function applyFillUpToFuelEstimate(
 ): Promise<number> {
   const preview = previewFillUpFuel(vehicle, fill);
   const next = preview.afterLiters;
-  const patch: Partial<Vehicle> = { estimatedFuelLiters: next };
-  // Calibration conso si auto-adapt + assez de pleins complets
-  if (vehicle.consumptionAutoAdapt !== false) {
-    try {
-      const fills = await getFillUps(vehicle.id);
-      const learned = learnFactorFromFullFillUps(fills, vehicle.consumptionPer100);
-      if (learned != null) {
-        const prev =
-          vehicle.consumptionLearnFactor && vehicle.consumptionLearnFactor > 0.5
-            ? vehicle.consumptionLearnFactor
-            : 1;
-        patch.consumptionLearnFactor =
-          Math.round((prev * 0.55 + learned * 0.45) * 1000) / 1000;
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  await updateVehicle(vehicle.id, patch);
+  // La conso L/100 est calibrée par adaptVehicleConsumption (pleins du véhicule),
+  // pas via consumptionLearnFactor ici (évite double peine).
+  await updateVehicle(vehicle.id, { estimatedFuelLiters: next });
   return next;
 }
 

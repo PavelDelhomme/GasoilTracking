@@ -20,6 +20,7 @@ import {
   displayOdometerKm,
   formatDistance,
   formatEuro,
+  getSinceLastFillStats,
   refreshBudgets,
 } from '@/lib/calculations';
 import { notify } from '@/lib/notify';
@@ -35,6 +36,7 @@ import { applyFillUpToFuelEstimate } from '@/lib/fuelLevel';
 import {
   createFillUp,
   createTrip,
+  getFillUps,
   stopActiveTrips,
   updateTrip,
   addTrackedKm,
@@ -278,14 +280,32 @@ export default function StationTripScreen() {
           setLoading(false);
           return;
         }
+        // Distance pour calibrer la conso = km depuis le DERNIER plein de CE véhicule
+        // (pas seulement le trajet vers la station).
+        let distanceSinceLastKm: number | null = null;
+        const odoNow = activeVehicle.hasOdometer ? displayOdometerKm(activeVehicle) : 0;
+        const fills = await getFillUps(activeVehicle.id);
+        const lastFill = fills[0] || null;
+        if (
+          activeVehicle.hasOdometer &&
+          lastFill?.odometer != null &&
+          odoNow > lastFill.odometer
+        ) {
+          distanceSinceLastKm = Math.round((odoNow - lastFill.odometer) * 10) / 10;
+        } else {
+          const since = await getSinceLastFillStats(activeVehicle.id);
+          // Le trajet courant vient d’être confirmé → inclus dans since.tripKm
+          const sinceKm = since.tripKm > 0 ? since.tripKm : km;
+          distanceSinceLastKm = sinceKm > 0 ? Math.round(sinceKm * 10) / 10 : km || null;
+        }
         const fillId = await createFillUp({
           vehicleId: activeVehicle.id,
           date: new Date().toISOString(),
           liters: L,
           pricePerLiter: ppl,
           totalCost: L * ppl,
-          odometer: activeVehicle.hasOdometer ? displayOdometerKm(activeVehicle) : null,
-          distanceSinceLastKm: km || null,
+          odometer: activeVehicle.hasOdometer ? odoNow || null : null,
+          distanceSinceLastKm,
           isFull,
           note: `${stationName} · ${fuelLabel(params.fuelKey || 'gazole')}`,
           tripId: id,
@@ -297,7 +317,11 @@ export default function StationTripScreen() {
         await refreshBudgets(activeVehicle.id);
         await refresh();
         void refreshVehicleReminders();
-        let msg = `Trajet ${formatDistance(km)} + plein ${L.toFixed(1)} L.`;
+        let msg = `Trajet ${formatDistance(km)} + plein ${L.toFixed(1)} L`;
+        if (distanceSinceLastKm && distanceSinceLastKm > km + 1) {
+          msg += ` · ${formatDistance(distanceSinceLastKm)} depuis dernier plein`;
+        }
+        msg += '.';
         if (adapted && adapted.next !== adapted.previous) {
           msg += ` Conso ${adapted.previous.toFixed(1)} → ${adapted.next.toFixed(1)} L/100.`;
         }
