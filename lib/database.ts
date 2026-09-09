@@ -609,11 +609,17 @@ export async function addTrackedKm(vehicleId: number, km: number): Promise<void>
   );
 }
 
-/** Aligne tracked_km sur la somme des trajets confirmés (corrige les vieux 0 km). */
+/** Aligne tracked_km sur les trajets depuis le dernier plein (pas toute l’historique). */
 export async function reconcileTrackedKmFromTrips(vehicleId: number): Promise<number> {
-  const trips = await getTrips(vehicleId, { omitRoutePoints: true });
+  const [trips, fills] = await Promise.all([
+    getTrips(vehicleId, { omitRoutePoints: true }),
+    getFillUps(vehicleId),
+  ]);
+  const lastFill = fills[0] || null;
+  const since = lastFill?.date || null;
   const sum = trips
     .filter((t) => !t.isActive && t.status !== 'rejected')
+    .filter((t) => !since || t.startTime >= since)
     .reduce((acc, t) => acc + (Number(t.distanceKm) || 0), 0);
   const rounded = Math.round(sum * 10) / 10;
   const database = await getDatabase();

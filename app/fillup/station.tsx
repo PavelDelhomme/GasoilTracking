@@ -37,6 +37,7 @@ import {
   createFillUp,
   createTrip,
   getFillUps,
+  getVehicleById,
   stopActiveTrips,
   updateTrip,
   addTrackedKm,
@@ -280,21 +281,16 @@ export default function StationTripScreen() {
           setLoading(false);
           return;
         }
-        // Distance pour calibrer la conso = km depuis le DERNIER plein de CE véhicule
-        // (pas seulement le trajet vers la station).
+        // Relire le véhicule après addTrackedKm (sinon odo React périmé → km perdus au createFillUp).
+        const fresh = (await getVehicleById(activeVehicle.id)) || activeVehicle;
+        const odoNow = fresh.hasOdometer !== false ? displayOdometerKm(fresh) : 0;
         let distanceSinceLastKm: number | null = null;
-        const odoNow = activeVehicle.hasOdometer ? displayOdometerKm(activeVehicle) : 0;
         const fills = await getFillUps(activeVehicle.id);
         const lastFill = fills[0] || null;
-        if (
-          activeVehicle.hasOdometer &&
-          lastFill?.odometer != null &&
-          odoNow > lastFill.odometer
-        ) {
+        if (fresh.hasOdometer !== false && lastFill?.odometer != null && odoNow > lastFill.odometer) {
           distanceSinceLastKm = Math.round((odoNow - lastFill.odometer) * 10) / 10;
         } else {
           const since = await getSinceLastFillStats(activeVehicle.id);
-          // Le trajet courant vient d’être confirmé → inclus dans since.tripKm
           const sinceKm = since.tripKm > 0 ? since.tripKm : km;
           distanceSinceLastKm = sinceKm > 0 ? Math.round(sinceKm * 10) / 10 : km || null;
         }
@@ -304,14 +300,14 @@ export default function StationTripScreen() {
           liters: L,
           pricePerLiter: ppl,
           totalCost: L * ppl,
-          odometer: activeVehicle.hasOdometer ? odoNow || null : null,
+          odometer: fresh.hasOdometer !== false ? odoNow || null : null,
           distanceSinceLastKm,
           isFull,
           note: `${stationName} · ${fuelLabel(params.fuelKey || 'gazole')}`,
           tripId: id,
         });
         if (id) await updateTrip(id, { fillUpId: fillId });
-        await applyFillUpToFuelEstimate(activeVehicle, { liters: L, isFull });
+        await applyFillUpToFuelEstimate(fresh, { liters: L, isFull });
         if (ppl > 0) await updateVehicle(activeVehicle.id, { defaultFuelPrice: ppl });
         const adapted = await adaptVehicleConsumption(activeVehicle.id);
         await refreshBudgets(activeVehicle.id);
@@ -467,9 +463,29 @@ export default function StationTripScreen() {
             style={{ marginTop: 8 }}
           />
           <Button
-            title="Retour (continuer le suivi)"
+            title="Retour au suivi GPS"
             variant="secondary"
-            onPress={() => setPhase('go')}
+            onPress={async () => {
+              setLoading(true);
+              try {
+                const id = tripId ?? linkedTrip?.id;
+                if (id) {
+                  await updateTrip(id, { isPaused: false, isActive: true });
+                }
+                const loc = await getCurrentLocation();
+                if (loc) {
+                  await startBackgroundTracking();
+                }
+                await refresh();
+                setPhase('go');
+                notify('Suivi', 'GPS repris — continuez vers la station.');
+              } catch (e) {
+                notify('Erreur', e instanceof Error ? e.message : 'Impossible de reprendre le suivi.');
+              } finally {
+                setLoading(false);
+              }
+            }}
+            loading={loading}
             style={{ marginTop: 8 }}
           />
         </>

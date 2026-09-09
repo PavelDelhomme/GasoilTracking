@@ -60,6 +60,9 @@ export function FuelGaugeSlider({
   const [draft, setDraft] = useState(savedL);
   /** Valeur au moment où on a ouvert « Modifier » — pour Annuler. */
   const baselineRef = useRef(savedL);
+  /** Niveau était inconnu au début de l’édition → OK exige un geste. */
+  const [needsGesture, setNeedsGesture] = useState(false);
+  const [gestured, setGestured] = useState(false);
 
   const locked = requireConfirm && !editing;
   const interactive = !disabled && !locked;
@@ -98,6 +101,7 @@ export function FuelGaugeSlider({
     (next: number) => {
       const clamped = Math.max(0, Math.min(capacity, next));
       liveRef.current = clamped;
+      setGestured(true);
       if (requireConfirm) {
         // Brouillon local uniquement — ne touche pas le parent tant que OK
         setDraft(clamped);
@@ -166,20 +170,29 @@ export function FuelGaugeSlider({
   const startEdit = () => {
     baselineRef.current = savedL;
     setDraft(savedL);
+    setNeedsGesture(!known);
+    setGestured(false);
     setEditing(true);
   };
 
   const cancelEdit = () => {
     setDraft(baselineRef.current);
     liveRef.current = baselineRef.current;
+    setNeedsGesture(false);
+    setGestured(false);
     setEditing(false);
     // Pas d’onChange : le parent n’a jamais reçu le brouillon
   };
 
   const confirmEdit = () => {
+    if (needsGesture && !gestured) {
+      return;
+    }
     const next = Math.round(draft * 10) / 10;
     onChange(next);
     onChangeEnd?.(next);
+    setNeedsGesture(false);
+    setGestured(false);
     setEditing(false);
   };
 
@@ -317,9 +330,11 @@ export function FuelGaugeSlider({
         </View>
 
         <Text style={[styles.litersLine, { color: colors.textSecondary }]}>
-          {known || editing
-            ? `${displayL.toFixed(1)} L / ${capacity.toFixed(0)} L · ${mark}`
-            : 'Régler le niveau'}
+          {editing && needsGesture && !gestured
+            ? 'Tournez l’aiguille ou choisissez E / ¼ / ½ / ¾ / F'
+            : known || editing
+              ? `${displayL.toFixed(1)} L / ${capacity.toFixed(0)} L · ${mark}`
+              : 'Régler le niveau'}
         </Text>
 
         {interactive ? (
@@ -391,13 +406,19 @@ export function FuelGaugeSlider({
               </Pressable>
               <Pressable
                 onPress={confirmEdit}
+                disabled={needsGesture && !gestured}
                 style={[
                   styles.confirmBtn,
-                  { borderColor: fillColor, backgroundColor: fillColor, flex: 1.3 },
+                  {
+                    borderColor: fillColor,
+                    backgroundColor: needsGesture && !gestured ? colors.border : fillColor,
+                    flex: 1.3,
+                    opacity: needsGesture && !gestured ? 0.5 : 1,
+                  },
                 ]}
               >
                 <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>
-                  OK · {pct} %
+                  {needsGesture && !gestured ? 'Réglez d’abord' : `OK · ${pct} %`}
                 </Text>
               </Pressable>
             </>

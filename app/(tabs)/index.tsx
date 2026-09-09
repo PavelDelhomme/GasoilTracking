@@ -226,7 +226,9 @@ export default function HomeScreen() {
     : null;
 
   const todayKm = todayTrips.reduce((s, t) => s + t.distanceKm, 0);
-  const todayFuel = todayTrips.reduce((s, t) => s + t.estimatedFuelUsed, 0);
+  const todayFuel = todayTrips
+    .filter((t) => t.estimatedFuelUsed > 0.05)
+    .reduce((s, t) => s + t.estimatedFuelUsed, 0);
   const todayCost = todayTrips.reduce((s, t) => s + t.estimatedCost, 0);
 
   /** Pendant un trajet actif, recalcule conso si pas encore persistée (évite 0,02 L fantômes). */

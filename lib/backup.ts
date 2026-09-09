@@ -243,18 +243,22 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
   const remoteClearlyNewer = remoteAt > localAt + 2000;
   const remoteRicherAndNotOlder =
     remoteW > localW + 5 && remoteAt >= localAt - 2000;
-  // Garde anti-wipe : cloud nettement plus pauvre → toujours pousser le local.
-  const remoteClearlyPoorer =
-    !!remoteSnap &&
-    localW > remoteW + 8 &&
-    (local.vehicles?.length || 0) > (remoteSnap.vehicles?.length || 0);
+  // Cloud nettement plus pauvre (même si même nb de véhicules) → pousser le local.
+  const remoteClearlyPoorer = !!remoteSnap && localW > remoteW + 8;
 
   // Ne jamais pousser un local vide/pauvre par-dessus un cloud non vide.
   if (localEmptyish && remoteSnap) {
     return 'skipped';
   }
 
-  if (remoteSnap && !remoteClearlyPoorer && (remoteClearlyNewer || remoteRicherAndNotOlder)) {
+  // Ne jamais tirer un cloud plus léger juste parce qu’il est « plus récent ».
+  if (remoteSnap && remoteClearlyPoorer) {
+    await pushSyncSafe(local);
+    await saveLocalBackup(local);
+    return 'pushed';
+  }
+
+  if (remoteSnap && (remoteClearlyNewer || remoteRicherAndNotOlder)) {
     await applySnapshot(remoteSnap, 'replace');
     try {
       await repairFillUpVehiclesAndBudgets();

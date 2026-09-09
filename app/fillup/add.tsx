@@ -319,14 +319,21 @@ export default function AddFillUpScreen() {
     setLoading(true);
     try {
       const dateIso = new Date(`${dateLocal}T12:00:00`).toISOString();
+      const odoVal = hasOdo ? parseNum(odometer) : null;
+      let distVal = distanceKm ? parseNum(distanceKm) : null;
+      // Compteur : dériver les km depuis le dernier plein si non saisis
+      if (hasOdo && (distVal == null || distVal <= 0) && odoVal != null && lastFill?.odometer != null) {
+        const delta = odoVal - lastFill.odometer;
+        if (delta > 0) distVal = Math.round(delta * 10) / 10;
+      }
       const fillId = await createFillUp({
         vehicleId: activeVehicle.id,
         date: dateIso,
         liters: Math.round(derived.liters * 100) / 100,
         pricePerLiter: Math.round(derived.ppl * 1000) / 1000,
         totalCost: Math.round(derived.total * 100) / 100,
-        odometer: hasOdo ? parseNum(odometer) : null,
-        distanceSinceLastKm: distanceKm ? parseNum(distanceKm) : null,
+        odometer: odoVal,
+        distanceSinceLastKm: distVal,
         isFull,
         note: note.trim() || undefined,
         tripId: linkedTripId && Number.isFinite(linkedTripId) ? linkedTripId : null,
