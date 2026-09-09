@@ -8,7 +8,7 @@ import { useToast } from '@/context/ToastContext';
 import { ThemeToggleButton } from '@/components/ThemeToggleButton';
 import { pingApiHealth, syncFailureMessage } from '@/lib/api';
 
-/** Sync manuelle (icône animée) + toggle thème — header droite. */
+/** Sync manuelle (icône animée) + toggle thème — bien séparés dans le header. */
 export function HeaderActions() {
   const { colors } = useTheme();
   const { user, syncNow } = useAuth();
@@ -81,26 +81,39 @@ export function HeaderActions() {
   return (
     <View style={styles.row}>
       {!!user && (
-        <Pressable
-          onPress={onSync}
-          disabled={busy}
-          accessibilityRole="button"
-          accessibilityState={{ busy }}
-          accessibilityLabel={busy ? 'Synchronisation en cours…' : 'Synchroniser manuellement'}
-          accessibilityHint={
-            offline ? 'Hors ligne — dernière synchronisation échouée' : 'Synchroniser avec le cloud'
-          }
-          hitSlop={10}
-          style={styles.syncBtn}
-        >
-          <Animated.View style={{ transform: [{ rotate }] }}>
-            <Ionicons
-              name={offline ? 'cloud-offline-outline' : 'sync-outline'}
-              size={22}
-              color={busy ? colors.accent : offline ? colors.warning : colors.text}
-            />
-          </Animated.View>
-        </Pressable>
+        <>
+          <Pressable
+            onPress={onSync}
+            disabled={busy}
+            accessibilityRole="button"
+            accessibilityState={{ busy }}
+            accessibilityLabel={busy ? 'Synchronisation en cours…' : 'Synchroniser manuellement'}
+            accessibilityHint={
+              offline ? 'Hors ligne — dernière synchronisation échouée' : 'Synchroniser avec le cloud'
+            }
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 4 }}
+            style={[
+              styles.actionBtn,
+              {
+                borderColor: colors.border,
+                backgroundColor: busy ? colors.accent + '18' : colors.card,
+              },
+            ]}
+          >
+            <Animated.View style={{ transform: [{ rotate }] }}>
+              <Ionicons
+                name={offline ? 'cloud-offline-outline' : 'sync-outline'}
+                size={20}
+                color={busy ? colors.accent : offline ? colors.warning : colors.text}
+              />
+            </Animated.View>
+          </Pressable>
+          <View
+            style={[styles.divider, { backgroundColor: colors.border }]}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+          />
+        </>
       )}
       <ThemeToggleButton />
     </View>
@@ -111,10 +124,21 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
     marginRight: Platform.OS === 'web' ? 4 : 0,
   },
-  syncBtn: {
-    padding: 6,
-    marginRight: 2,
+  actionBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  divider: {
+    width: StyleSheet.hairlineWidth,
+    height: 22,
+    marginHorizontal: 2,
+    opacity: 0.9,
   },
 });

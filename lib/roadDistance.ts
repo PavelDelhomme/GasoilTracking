@@ -75,11 +75,14 @@ async function osrmRoute(points: Geo[], maxAlternatives: number): Promise<RawRou
   if (data.code !== 'Ok' || !data.routes?.length) return [];
   return data.routes
     .filter((r) => r.distance != null && r.distance > 0)
-    .map((r) => ({
-      distanceKm: Math.round((r.distance! / 1000) * 10) / 10,
-      durationMinutes: r.duration != null ? Math.round(r.duration / 60) : null,
-      coordinates: toCoords(r.geometry),
-    }));
+    .map((r) => {
+      const coordinates = toCoords(r.geometry);
+      return {
+        distanceKm: Math.round((r.distance! / 1000) * 10) / 10,
+        durationMinutes: r.duration != null ? Math.round(r.duration / 60) : null,
+        coordinates,
+      };
+    });
 }
 
 /**
@@ -93,9 +96,10 @@ function routeFingerprint(r: { distanceKm: number; durationMinutes: number | nul
 
 function isSameish(a: RawRoute, b: RawRoute): boolean {
   if (routeFingerprint(a) === routeFingerprint(b)) return true;
+  // Un peu plus strict : garder des alternatives Maps distinctes (ex. 2–3 km / 4 min)
   return (
-    Math.abs(a.distanceKm - b.distanceKm) < 1.2 &&
-    Math.abs((a.durationMinutes ?? 0) - (b.durationMinutes ?? 0)) < 3
+    Math.abs(a.distanceKm - b.distanceKm) < 0.8 &&
+    Math.abs((a.durationMinutes ?? 0) - (b.durationMinutes ?? 0)) < 2
   );
 }
 

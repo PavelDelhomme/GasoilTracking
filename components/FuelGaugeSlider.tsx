@@ -398,9 +398,14 @@ export function FuelGaugeSlider({
             <>
               <Pressable
                 onPress={cancelEdit}
-                style={[styles.confirmBtn, { borderColor: colors.border, flex: 1 }]}
+                style={[styles.confirmBtn, { borderColor: colors.border }]}
+                accessibilityRole="button"
+                accessibilityLabel="Annuler la modification du niveau"
               >
-                <Text style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 13 }}>
+                <Text
+                  style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 13 }}
+                  numberOfLines={1}
+                >
                   Annuler
                 </Text>
               </Pressable>
@@ -412,13 +417,21 @@ export function FuelGaugeSlider({
                   {
                     borderColor: fillColor,
                     backgroundColor: needsGesture && !gestured ? colors.border : fillColor,
-                    flex: 1.3,
                     opacity: needsGesture && !gestured ? 0.5 : 1,
                   },
                 ]}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  needsGesture && !gestured
+                    ? 'Réglez d’abord le niveau'
+                    : `Valider le niveau à ${pct} pour cent`
+                }
               >
-                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>
-                  {needsGesture && !gestured ? 'Réglez d’abord' : `OK · ${pct} %`}
+                <Text
+                  style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}
+                  numberOfLines={1}
+                >
+                  {needsGesture && !gestured ? 'Régler' : 'OK'}
                 </Text>
               </Pressable>
             </>
@@ -476,12 +489,18 @@ const styles = StyleSheet.create({
   },
   confirmRow: {
     flexDirection: 'row',
-    gap: 8,
     marginTop: 8,
+    width: '100%',
+    alignSelf: 'stretch',
   },
   confirmBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    marginHorizontal: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 11,
     borderRadius: 10,
     borderWidth: 1,
     alignItems: 'center',
@@ -490,6 +509,9 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   confirmBtnWide: {
+    flexGrow: 1,
+    flexBasis: 'auto',
     width: '100%',
+    marginHorizontal: 0,
   },
 });

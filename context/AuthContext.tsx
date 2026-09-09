@@ -110,15 +110,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => sub.remove();
   }, [refreshMe]);
 
-  // Web : resync dès que la connexion revient
+  // Web : resync au chargement (IndexedDB souvent en retard vs téléphone) + quand online
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-    const onOnline = () => {
+    const run = () => {
       void refreshMe();
       void syncPreferNewer().catch(() => {});
     };
-    window.addEventListener('online', onOnline);
-    return () => window.removeEventListener('online', onOnline);
+    run();
+    window.addEventListener('online', run);
+    return () => window.removeEventListener('online', run);
   }, [refreshMe]);
 
   const syncNow = useCallback(async () => {
@@ -150,8 +151,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (remoteSnap && !localHas) {
         await applySnapshot(remoteSnap, 'replace');
         await saveLocalBackup(remoteSnap);
+      } else if (localHas && Platform.OS !== 'web') {
+        // Téléphone déjà peuplé (source de vérité) → pousser vers le cloud
+        // plutôt que de tirer un cloud périmé (ex. jauge 40,7 L vs 13,9 L local).
+        await forcePushLocalToCloud();
       } else {
-        // Préfère le cloud s’il est plus récent / plus riche (évite d’écraser le compte)
+        // Web : IndexedDB souvent périmé — syncPreferNewer (tirage si cloud plus récent).
         await syncPreferNewer();
       }
     } catch {

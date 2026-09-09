@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { useLocale } from '@/context/LocaleContext';
@@ -60,7 +60,7 @@ export function VehicleCard({
   };
 
   return (
-    <TouchableOpacity
+    <View
       style={[
         styles.container,
         {
@@ -69,13 +69,15 @@ export function VehicleCard({
           borderWidth: isActive ? 2 : 1,
         },
       ]}
-      onPress={onPress}
-      onLongPress={onLongPress}
-      activeOpacity={0.7}
-      accessibilityRole="button"
       accessibilityLabel={`${vehicle.name}${isActive ? ', véhicule actif' : ''}`}
     >
-      <View style={styles.header}>
+      <Pressable
+        style={styles.header}
+        onPress={onPress}
+        onLongPress={onLongPress}
+        accessibilityRole="button"
+        accessibilityLabel={`${vehicle.name}${isActive ? ', véhicule actif' : ''}`}
+      >
         <View style={styles.info}>
           <Text style={[styles.name, { color: colors.text }]}>{vehicle.name}</Text>
           <Text style={[styles.details, { color: colors.textSecondary }]}>
@@ -87,7 +89,7 @@ export function VehicleCard({
             <Text style={styles.badgeText}>Actif</Text>
           </View>
         )}
-      </View>
+      </Pressable>
 
       <View style={styles.stats}>
         <View style={styles.stat}>
@@ -110,14 +112,7 @@ export function VehicleCard({
         </View>
       </View>
 
-      <Pressable
-        style={styles.fuelBlock}
-        onPress={(e) => {
-          e.stopPropagation?.();
-        }}
-        onStartShouldSetResponder={() => true}
-        onMoveShouldSetResponder={() => true}
-      >
+      <View style={styles.fuelBlock}>
         <FuelGaugeSlider
           requireConfirm
           tankCapacity={vehicle.tankCapacity}
@@ -139,7 +134,7 @@ export function VehicleCard({
             Autonomie est. ~{Math.round((draftLiters / vehicle.consumptionPer100) * 100)} km
           </Text>
         )}
-      </Pressable>
+      </View>
 
       <View style={styles.actions}>
         {!isActive && onSelect && (
@@ -189,7 +184,7 @@ export function VehicleCard({
           </Pressable>
         )}
       </View>
-    </TouchableOpacity>
+    </View>
   );
 }
 

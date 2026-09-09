@@ -4,9 +4,12 @@
  */
 import { ActionSheetIOS, Alert, Linking, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { buildViaWaypoints, samplePassThroughViasFromRoute } from '@/lib/routeVias';
 
 export type MapsLatLng = { latitude: number; longitude: number };
 export type MapsAppChoice = 'google' | 'apple';
+
+export { buildViaWaypoints, samplePassThroughViasFromRoute };
 
 const MAPS_PREF_KEY = 'gasoil_maps_app_pref_v1';
 
@@ -17,17 +20,6 @@ function fmt(p: MapsLatLng): string {
 /** Passage sans arrêt (préfixe Google Maps `via:`). */
 export function formatViaPassThrough(p: MapsLatLng): string {
   return `via:${fmt(p)}`;
-}
-
-/**
- * Waypoints pour biaiser Maps. Uniquement des via explicites (OSRM alternatif).
- */
-export function buildViaWaypoints(
-  _routeCoords: MapsLatLng[] | undefined,
-  explicitVia?: MapsLatLng[]
-): MapsLatLng[] {
-  if (explicitVia?.length) return explicitVia.slice(0, 2);
-  return [];
 }
 
 /** URL HTTPS directions (web / iOS / fallback) — via = passage, pas stop. */
@@ -154,20 +146,18 @@ async function openGoogleMaps(opts: {
   const hasVia = wps.length > 0;
 
   if (Platform.OS === 'android') {
-    // Si un itinéraire alternatif est choisi (via), NE PAS utiliser navigation:q
-    // (ignore les waypoints) — utiliser l’URL directions.
-    if (hasVia) {
+    if (hasVia || opts.origin) {
       const pathUrl = buildGoogleMapsDirUrl({
         destination: opts.destination,
         origin: opts.origin,
-        waypoints: wps,
+        waypoints: hasVia ? wps : undefined,
         navigate: false,
       });
       if (await tryOpen(pathUrl)) return true;
-    } else if (await tryOpen(`google.navigation:q=${dest}&mode=d`)) {
+    }
+    if (!hasVia && (await tryOpen(`google.navigation:q=${dest}&mode=d`))) {
       return true;
     }
-
     const classic = `https://maps.google.com/maps?daddr=${dest}&dirflg=d`;
     if (await tryOpen(classic)) return true;
     return tryOpen(`geo:0,0?q=${dest}`);
@@ -190,7 +180,9 @@ async function openGoogleMaps(opts: {
           waypoints: wps,
           navigate: true,
         })
-      : `comgooglemaps://?daddr=${dest}&directionsmode=driving`;
+      : opts.origin
+        ? `comgooglemaps://?saddr=${fmt(opts.origin)}&daddr=${dest}&directionsmode=driving`
+        : `comgooglemaps://?daddr=${dest}&directionsmode=driving`;
     if (await tryOpen(gmaps)) return true;
   }
 
@@ -214,20 +206,14 @@ async function openAppleMaps(opts: {
   );
 }
 
-/**
- * Ouvre l’app de navigation (Google / Apple) et démarre le guidage si possible.
- * Passe les vias de l’itinéraire choisi dans l’app pour coller à « économique / rapide ».
- */
 export async function launchGoogleMapsNavigation(opts: {
   destination: MapsLatLng;
   origin?: MapsLatLng | null;
   waypoints?: MapsLatLng[];
   label?: string;
-  /** Forcer Google (ignore le choix Apple). */
   preferGoogle?: boolean;
 }): Promise<boolean> {
   const wps = opts.waypoints || [];
-  // Apple Plans ne gère pas les vias OSRM → forcer Google si itinéraire alternatif.
   const app =
     opts.preferGoogle || wps.length > 0
       ? 'google'
@@ -241,5 +227,4 @@ export async function launchGoogleMapsNavigation(opts: {
   return openGoogleMaps(opts);
 }
 
-/** Alias explicite multi-apps. */
 export const launchMapsNavigation = launchGoogleMapsNavigation;

@@ -200,9 +200,38 @@ function snapshotWeight(snap: {
   );
 }
 
+/** Activité la plus récente (trajets / pleins / export) — pour privilégier le téléphone source. */
+function snapshotActivityAt(snap: {
+  exportedAt?: string;
+  trips?: { startTime?: string; endTime?: string | null }[];
+  fillUps?: { date?: string }[];
+  vehicles?: { estimatedFuelLiters?: number | null; currentOdometer?: number | null; trackedKm?: number | null }[];
+} | null): number {
+  if (!snap) return 0;
+  let max = snap.exportedAt ? Date.parse(snap.exportedAt) || 0 : 0;
+  for (const t of snap.trips || []) {
+    const a = Date.parse(t.endTime || t.startTime || '') || 0;
+    if (a > max) max = a;
+  }
+  for (const f of snap.fillUps || []) {
+    const a = Date.parse(f.date || '') || 0;
+    if (a > max) max = a;
+  }
+  return max;
+}
+
+/** Somme des km de trajets confirmés — signal fort que le local a « vécu » plus que le cloud. */
+function snapshotTripKm(snap: { trips?: { distanceKm?: number; isActive?: boolean; status?: string }[] } | null): number {
+  if (!snap?.trips) return 0;
+  return snap.trips
+    .filter((t) => !t.isActive && t.status !== 'rejected')
+    .reduce((acc, t) => acc + (Number(t.distanceKm) || 0), 0);
+}
+
 /**
  * Si le cloud est plus récent, tire ; sinon pousse.
  * Ne tire jamais un cloud « pauvre » (ex. 1 véhicule fantôme) par-dessus un local riche.
+ * Privilégie le téléphone s’il a plus d’activité trajet / km (source de vérité terrain).
  */
 export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'> {
   const token = await getToken();
@@ -221,10 +250,21 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
   const remote = await fetchSync();
   const remoteSnap = normalizeSnapshot(remote?.data);
   const local = await collectSnapshot();
-  const remoteAt = remote?.updatedAt ? Date.parse(remote.updatedAt) : 0;
-  const localAt = local.exportedAt ? Date.parse(local.exportedAt) : 0;
+  // collectSnapshot() tamponne exportedAt=now → ne pas s’en servir pour décider push/pull
+  // (sinon un vieux IndexedDB web écrase toujours le cloud du téléphone).
+  const localAt = snapshotActivityAt(local);
+  const remoteAt = Math.max(
+    remote?.updatedAt ? Date.parse(remote.updatedAt) || 0 : 0,
+    snapshotActivityAt(remoteSnap)
+  );
   const remoteW = snapshotWeight(remoteSnap);
   const localW = snapshotWeight(local);
+  const localActivity = localAt;
+  const remoteActivity = snapshotActivityAt(remoteSnap);
+  const localKm = snapshotTripKm(local);
+  const remoteKm = snapshotTripKm(remoteSnap);
+  const remoteTripCount = remoteSnap?.trips?.length || 0;
+  const localTripCount = local.trips?.length || 0;
 
   // Local quasi vide + cloud riche → toujours tirer (jamais pousser un wipe).
   const localEmptyish = localW < 5 || (local.vehicles?.length || 0) === 0;
@@ -242,9 +282,19 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
 
   const remoteClearlyNewer = remoteAt > localAt + 2000;
   const remoteRicherAndNotOlder =
-    remoteW > localW + 5 && remoteAt >= localAt - 2000;
+    (remoteW > localW + 5 || remoteTripCount > localTripCount + 1) &&
+    remoteAt >= localAt - 2000;
   // Cloud nettement plus pauvre (même si même nb de véhicules) → pousser le local.
-  const remoteClearlyPoorer = !!remoteSnap && localW > remoteW + 8;
+  const remoteClearlyPoorer =
+    !!remoteSnap &&
+    (localW > remoteW + 8 || localTripCount > remoteTripCount + 1);
+
+  // Téléphone plus « vivant » (km / activité plus récente) → pousser même si cloud « plus récent »
+  // (ex. web a sync un vieux 40,7 L qui écrase 13,9 L du Nothing).
+  const localMoreLived =
+    !localEmptyish &&
+    (localKm > remoteKm + 5 ||
+      (localActivity > remoteActivity + 60_000 && localW + 3 >= remoteW && localTripCount >= remoteTripCount));
 
   // Ne jamais pousser un local vide/pauvre par-dessus un cloud non vide.
   if (localEmptyish && remoteSnap) {
@@ -252,13 +302,24 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
   }
 
   // Ne jamais tirer un cloud plus léger juste parce qu’il est « plus récent ».
-  if (remoteSnap && remoteClearlyPoorer) {
+  if (remoteSnap && (remoteClearlyPoorer || localMoreLived)) {
     await pushSyncSafe(local);
     await saveLocalBackup(local);
     return 'pushed';
   }
 
-  if (remoteSnap && (remoteClearlyNewer || remoteRicherAndNotOlder)) {
+  if (remoteSnap && (remoteClearlyNewer || remoteRicherAndNotOlder) && !localMoreLived) {
+    await applySnapshot(remoteSnap, 'replace');
+    try {
+      await repairFillUpVehiclesAndBudgets();
+    } catch {
+      /* ignore */
+    }
+    await saveLocalBackup(await collectSnapshot());
+    return 'pulled';
+  }
+  // Ambigu : ne pas écraser un cloud plus riche en trajets.
+  if (remoteSnap && remoteTripCount > localTripCount) {
     await applySnapshot(remoteSnap, 'replace');
     try {
       await repairFillUpVehiclesAndBudgets();

@@ -53,7 +53,7 @@ import {
   peekLiveRouteTail,
   peekLiveTripId,
 } from '@/lib/locationService';
-import { launchGoogleMapsNavigation } from '@/lib/mapsNavigation';
+import { buildViaWaypoints, launchGoogleMapsNavigation } from '@/lib/mapsNavigation';
 import {
   appendRoutePoint,
   calculateRouteDistance,
@@ -130,13 +130,10 @@ function smartWindowKey(): string {
 
 type GeoCoords = { latitude: number; longitude: number };
 
-/** Via OSRM de l’itinéraire choisi — biaise Google Maps sans arrêt fantôme. */
+/** Via OSRM explicite, sinon échantillon géométrie — biaise Google Maps sur le trajet choisi. */
 function mapsWaypointsForRoute(route: DrivingRoute | null | undefined): GeoCoords[] {
-  if (!route?.via?.length) return [];
-  return route.via
-    .filter((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))
-    .slice(0, 2)
-    .map((p) => ({ latitude: p.latitude, longitude: p.longitude }));
+  if (!route) return [];
+  return buildViaWaypoints(route.coordinates, route.via);
 }
 
 export default function TripScreen() {
@@ -1790,7 +1787,7 @@ export default function TripScreen() {
                   <Text style={styles.routePickerHint}>Calcul des itinéraires…</Text>
                 ) : (
                   <Text style={styles.routePickerHint}>
-                    Choisissez un trajet — Maps s’ouvrira dessus au démarrage
+                    Choisissez un trajet — Maps suivra ce corridor (via) au démarrage
                   </Text>
                 )}
               </View>

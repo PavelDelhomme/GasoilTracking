@@ -67,7 +67,7 @@ function DrawerRow({ icon, label, subtitle, onPress, danger }: RowProps) {
 export function AccountDrawer() {
   const { open, closeDrawer } = useAccountDrawer();
   const { colors } = useTheme();
-  const { user, logout, refreshCloudNow, pendingRegistrationsCount } = useAuth();
+  const { user, logout, refreshCloudNow, pushLocalNow, pendingRegistrationsCount } = useAuth();
   const { refresh, activeVehicle } = useApp();
   const { country } = useLocale();
   const { updateAvailable, info, checkNow, startUpdate } = useAppUpdate();
@@ -133,6 +133,28 @@ export function AccountDrawer() {
                   label="Mon compte"
                   subtitle="Mot de passe, email, RGPD…"
                   onPress={() => go('/account')}
+                />
+                <DrawerRow
+                  icon="cloud-upload-outline"
+                  label="Pousser cet appareil → cloud"
+                  subtitle="Source de vérité téléphone (jauge, trajets) → site web"
+                  onPress={async () => {
+                    setBusy(true);
+                    try {
+                      const res = await pushLocalNow();
+                      await refresh();
+                      if (res.ok) showToast('Données poussées vers le cloud');
+                      else if (res.reason === 'active-trip')
+                        notify('Sync', 'Terminez le trajet avant de pousser.');
+                      else if (res.reason === 'no-auth') notify('Sync', 'Connectez-vous d’abord.');
+                      else notify('Sync', 'Échec du push');
+                      closeDrawer();
+                    } catch (e) {
+                      notify('Sync', e instanceof Error ? e.message : 'Échec');
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
                 />
                 <DrawerRow
                   icon="cloud-download-outline"

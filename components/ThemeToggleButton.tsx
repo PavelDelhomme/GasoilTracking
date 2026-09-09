@@ -3,7 +3,7 @@ import { Pressable, Platform, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 
-/** Toggle clair / sombre — barre du haut à droite */
+/** Toggle clair / sombre — barre du haut à droite (séparé du bouton sync). */
 export function ThemeToggleButton() {
   const { scheme, colors, toggleScheme } = useTheme();
   return (
@@ -11,12 +11,19 @@ export function ThemeToggleButton() {
       onPress={toggleScheme}
       accessibilityRole="button"
       accessibilityLabel={scheme === 'dark' ? 'Passer en mode clair' : 'Passer en mode sombre'}
-      hitSlop={10}
-      style={styles.btn}
+      accessibilityHint="Change l’apparence de l’application"
+      hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+      style={[
+        styles.btn,
+        {
+          borderColor: colors.border,
+          backgroundColor: colors.card,
+        },
+      ]}
     >
       <Ionicons
         name={scheme === 'dark' ? 'sunny-outline' : 'moon-outline'}
-        size={22}
+        size={20}
         color={colors.text}
       />
     </Pressable>
@@ -25,7 +32,12 @@ export function ThemeToggleButton() {
 
 const styles = StyleSheet.create({
   btn: {
-    marginRight: Platform.OS === 'web' ? 16 : 12,
-    padding: 6,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Platform.OS === 'web' ? 12 : 8,
   },
 });

@@ -114,7 +114,7 @@ export default function HomeScreen() {
       setStats(null);
       setSinceFill(null);
     }
-  }, [activeVehicle?.id]);
+  }, [activeVehicle?.id, activeVehicle?.estimatedFuelLiters]);
 
   // Toujours rafraîchir « depuis le dernier plein » pour le véhicule sélectionné
   useFocusEffect(
@@ -125,7 +125,7 @@ export default function HomeScreen() {
         return;
       }
       void reloadStats(activeVehicle.id);
-    }, [activeVehicle?.id])
+    }, [activeVehicle?.id, activeVehicle?.estimatedFuelLiters])
   );
 
   const onRefresh = async () => {
