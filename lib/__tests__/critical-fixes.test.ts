@@ -11,6 +11,7 @@ import {
 import { resolveFillUpDistanceKm, sumTripKmBetween } from '../fillUpDistance';
 import {
   gaugeArcAngle,
+  gaugeArcPath,
   gaugeFractionFromArcTouch,
   gaugePolar,
 } from '../fuelGaugeMath';
@@ -244,5 +245,12 @@ describe('jauge demi-cercle (volant)', () => {
     expect(gaugeFractionFromArcTouch(100, 200, cx, cy)).toBeCloseTo(0, 2); // gauche
     expect(gaugeFractionFromArcTouch(200, 100, cx, cy)).toBeCloseTo(0.5, 2); // haut
     expect(gaugeFractionFromArcTouch(300, 200, cx, cy)).toBeCloseTo(1, 2); // droite
+  });
+
+  it('arc > 50 % ne prend pas le grand chemin SVG (pas de débordement)', () => {
+    const path = gaugeArcPath(100, 100, 50, 0, 0.75);
+    // flags : large-arc=0 sweep=1 → "A 50 50 0 0 1"
+    expect(path).toMatch(/A 50 50 0 0 1/);
+    expect(path).not.toMatch(/A 50 50 0 1 1/);
   });
 });

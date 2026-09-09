@@ -54,7 +54,7 @@ export function gaugePolar(
   return { x: cx + r * Math.cos(a), y: cy - r * Math.sin(a) };
 }
 
-/** Arc SVG E→F (sens horaire écran = via le haut). */
+/** Arc SVG E→F (sens horaire écran = via le haut). Demi-cercle ≤ 180° → large-arc toujours 0. */
 export function gaugeArcPath(
   cx: number,
   cy: number,
@@ -67,8 +67,9 @@ export function gaugeArcPath(
   if (f1 <= f0 + 0.0005) return '';
   const start = gaugePolar(cx, cy, r, f0);
   const end = gaugePolar(cx, cy, r, f1);
-  const large = f1 - f0 > 0.5 ? 1 : 0;
-  return `M ${start.x} ${start.y} A ${r} ${r} 0 ${large} 1 ${end.x} ${end.y}`;
+  // Important : f1-f0 > 0.5 ne doit PAS activer large-arc (sinon SVG prend le long chemin
+  // par le bas → « débordement » au-delà de 50 %).
+  return `M ${start.x} ${start.y} A ${r} ${r} 0 0 1 ${end.x} ${end.y}`;
 }
 
 export function gaugeMarkLabel(fraction: number): string {

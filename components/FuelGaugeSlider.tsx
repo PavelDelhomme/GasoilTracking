@@ -1,6 +1,6 @@
 /**
- * Jauge carburant demi-cercle — E → F, comme derrière le volant.
- * Verrouillée par défaut : Modifier → tourner / repères → Confirmer.
+ * Jauge carburant demi-cercle — E → F.
+ * Avec requireConfirm : brouillon local jusqu’à OK ; Annuler restaure sans sauver.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -20,6 +20,7 @@ import {
   gaugeMarkLabel,
   gaugePolar,
 } from '@/lib/fuelGaugeMath';
+import { fuelRemainingTone, fuelToneColor } from '@/lib/fuelLevel';
 
 const MARKS = [
   { f: 0, label: 'E', a11y: 'Vide' },
@@ -34,6 +35,7 @@ type Props = {
   liters: number | null;
   onChange: (liters: number) => void;
   onChangeEnd?: (liters: number) => void;
+  /** Ignoré pour la couleur d’arc : vert/orange/rouge suivent le niveau affiché. */
   accentColor?: string;
   disabled?: boolean;
   compact?: boolean;
@@ -45,23 +47,30 @@ export function FuelGaugeSlider({
   liters,
   onChange,
   onChangeEnd,
-  accentColor,
   disabled,
   compact,
   requireConfirm = true,
 }: Props) {
   const { colors } = useTheme();
-  const fillColor = accentColor || colors.accent;
   const capacity = Math.max(1, tankCapacity || 50);
   const known = liters != null && Number.isFinite(liters);
   const savedL = known ? Math.max(0, Math.min(capacity, liters!)) : capacity * 0.5;
 
   const [editing, setEditing] = useState(!requireConfirm);
   const [draft, setDraft] = useState(savedL);
+  /** Valeur au moment où on a ouvert « Modifier » — pour Annuler. */
+  const baselineRef = useRef(savedL);
+
   const locked = requireConfirm && !editing;
   const interactive = !disabled && !locked;
   const displayL = requireConfirm && editing ? draft : savedL;
-  const fraction = displayL / capacity;
+  const fraction = Math.max(0, Math.min(1, displayL / capacity));
+
+  const tone = fuelRemainingTone({
+    litersRemaining: displayL,
+    tankCapacity: capacity,
+  });
+  const fillColor = fuelToneColor(tone, colors);
 
   const size = compact ? 200 : 260;
   const stroke = compact ? 14 : 18;
@@ -77,21 +86,26 @@ export function FuelGaugeSlider({
   const liveRef = useRef(displayL);
   liveRef.current = displayL;
 
+  // Sync brouillon depuis props seulement hors édition
   useEffect(() => {
-    if (!editing) setDraft(savedL);
+    if (!editing) {
+      setDraft(savedL);
+      baselineRef.current = savedL;
+    }
   }, [savedL, editing]);
 
   const setLive = useCallback(
     (next: number) => {
-      liveRef.current = next;
+      const clamped = Math.max(0, Math.min(capacity, next));
+      liveRef.current = clamped;
       if (requireConfirm) {
-        setDraft(next);
-        onChange(next);
+        // Brouillon local uniquement — ne touche pas le parent tant que OK
+        setDraft(clamped);
       } else {
-        onChange(next);
+        onChange(clamped);
       }
     },
-    [onChange, requireConfirm]
+    [capacity, onChange, requireConfirm]
   );
 
   const applyPage = useCallback(
@@ -149,9 +163,28 @@ export function FuelGaugeSlider({
     measureCenter();
   };
 
+  const startEdit = () => {
+    baselineRef.current = savedL;
+    setDraft(savedL);
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    setDraft(baselineRef.current);
+    liveRef.current = baselineRef.current;
+    setEditing(false);
+    // Pas d’onChange : le parent n’a jamais reçu le brouillon
+  };
+
+  const confirmEdit = () => {
+    const next = Math.round(draft * 10) / 10;
+    onChange(next);
+    onChangeEnd?.(next);
+    setEditing(false);
+  };
+
   const mark = gaugeMarkLabel(fraction);
   const pct = Math.round(fraction * 100);
-  const low = fraction <= 0.15;
   const needleTip = gaugePolar(cx, cy, r - stroke * 0.15, fraction);
   const trackPath = gaugeArcPath(cx, cy, r, 0, 1);
   const dangerPath = gaugeArcPath(cx, cy, r, 0, 0.12);
@@ -195,7 +228,7 @@ export function FuelGaugeSlider({
               stroke={colors.border}
               strokeWidth={stroke}
               fill="none"
-              strokeLinecap="round"
+              strokeLinecap="butt"
             />
             {dangerPath ? (
               <Path
@@ -204,7 +237,7 @@ export function FuelGaugeSlider({
                 strokeWidth={stroke}
                 fill="none"
                 strokeLinecap="butt"
-                opacity={0.5}
+                opacity={0.55}
               />
             ) : null}
             {fillPath ? (
@@ -213,7 +246,7 @@ export function FuelGaugeSlider({
                 stroke={fillColor}
                 strokeWidth={stroke}
                 fill="none"
-                strokeLinecap="round"
+                strokeLinecap="butt"
               />
             ) : null}
 
@@ -263,7 +296,7 @@ export function FuelGaugeSlider({
             <SvgText
               x={cx}
               y={cy - (compact ? 26 : 32)}
-              fill={low ? colors.danger : colors.text}
+              fill={tone === 'critical' || tone === 'warn' ? fillColor : colors.text}
               fontSize={compact ? 26 : 34}
               fontWeight="900"
               textAnchor="middle"
@@ -289,7 +322,6 @@ export function FuelGaugeSlider({
             : 'Régler le niveau'}
         </Text>
 
-        {/* Repères cliquables seulement en édition */}
         {interactive ? (
           <View style={styles.marks}>
             {MARKS.map((m) => {
@@ -307,7 +339,7 @@ export function FuelGaugeSlider({
                     styles.markBtn,
                     {
                       borderColor: active ? fillColor : colors.border,
-                      backgroundColor: active ? fillColor + '18' : 'transparent',
+                      backgroundColor: active ? fillColor + '22' : 'transparent',
                     },
                   ]}
                   accessibilityRole="button"
@@ -333,10 +365,7 @@ export function FuelGaugeSlider({
         <View style={styles.confirmRow}>
           {locked ? (
             <Pressable
-              onPress={() => {
-                setDraft(savedL);
-                setEditing(true);
-              }}
+              onPress={startEdit}
               style={[
                 styles.confirmBtn,
                 styles.confirmBtnWide,
@@ -353,11 +382,7 @@ export function FuelGaugeSlider({
           ) : (
             <>
               <Pressable
-                onPress={() => {
-                  setDraft(savedL);
-                  onChange(savedL);
-                  setEditing(false);
-                }}
+                onPress={cancelEdit}
                 style={[styles.confirmBtn, { borderColor: colors.border, flex: 1 }]}
               >
                 <Text style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 13 }}>
@@ -365,13 +390,10 @@ export function FuelGaugeSlider({
                 </Text>
               </Pressable>
               <Pressable
-                onPress={() => {
-                  onChangeEnd?.(draft);
-                  setEditing(false);
-                }}
+                onPress={confirmEdit}
                 style={[
                   styles.confirmBtn,
-                  { borderColor: colors.accent, backgroundColor: colors.accent, flex: 1.3 },
+                  { borderColor: fillColor, backgroundColor: fillColor, flex: 1.3 },
                 ]}
               >
                 <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>
