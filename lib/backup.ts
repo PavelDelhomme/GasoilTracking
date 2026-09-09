@@ -202,20 +202,17 @@ function snapshotWeight(snap: {
 
 /**
  * Si le cloud est plus récent, tire ; sinon pousse.
- * Le poids seul ne suffit plus : un cloud plus « riche » mais plus vieux
- * n’écrase jamais un local plus récent (évite perte de trajets du jour).
+ * Ne tire jamais un cloud « pauvre » (ex. 1 véhicule fantôme) par-dessus un local riche.
  */
 export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'> {
   const token = await getToken();
   if (!token) return 'skipped';
-  // Ne jamais replace/push pendant un trajet GPS (y compris pause) — risque perte/OOM.
   try {
     const live = await getActiveTripLite();
     if (live?.isActive) return 'skipped';
   } catch {
     /* continue */
   }
-  // Corrige prix/litres/budgets locaux avant tout push (évite d’écraser le cloud corrigé).
   try {
     await repairFillUpVehiclesAndBudgets();
   } catch {
@@ -232,8 +229,13 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
   const remoteClearlyNewer = remoteAt > localAt + 2000;
   const remoteRicherAndNotOlder =
     remoteW > localW + 5 && remoteAt >= localAt - 2000;
+  // Garde anti-wipe : cloud nettement plus pauvre → toujours pousser le local.
+  const remoteClearlyPoorer =
+    !!remoteSnap &&
+    localW > remoteW + 8 &&
+    (local.vehicles?.length || 0) > (remoteSnap.vehicles?.length || 0);
 
-  if (remoteSnap && (remoteClearlyNewer || remoteRicherAndNotOlder)) {
+  if (remoteSnap && !remoteClearlyPoorer && (remoteClearlyNewer || remoteRicherAndNotOlder)) {
     await applySnapshot(remoteSnap, 'replace');
     try {
       await repairFillUpVehiclesAndBudgets();
@@ -246,4 +248,26 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
   await pushSyncSafe(local);
   await saveLocalBackup(local);
   return 'pushed';
+}
+
+/** Pousse le local vers le cloud sans jamais tirer (Nothing / appareil source de vérité). */
+export async function forcePushLocalToCloud(): Promise<{ ok: boolean; reason: string }> {
+  const token = await getToken();
+  if (!token) return { ok: false, reason: 'no-auth' };
+  try {
+    const live = await getActiveTripLite();
+    if (live?.isActive) return { ok: false, reason: 'active-trip' };
+  } catch {
+    /* continue */
+  }
+  try {
+    await repairFillUpVehiclesAndBudgets();
+  } catch {
+    /* ignore */
+  }
+  const local = await collectSnapshot();
+  local.exportedAt = new Date().toISOString();
+  await pushSyncSafe(local);
+  await saveLocalBackup(local);
+  return { ok: true, reason: 'pushed' };
 }

@@ -15,7 +15,7 @@ import {
   type PendingRegistrationSummary,
 } from '@/lib/api';
 import { applySnapshot, hasLocalUserData, normalizeSnapshot } from '@/lib/dataSnapshot';
-import { saveLocalBackup, refreshFromCloud, syncPreferNewer } from '@/lib/backup';
+import { saveLocalBackup, refreshFromCloud, syncPreferNewer, forcePushLocalToCloud } from '@/lib/backup';
 import { getActiveTripLite } from '@/lib/database';
 
 type AuthContextType = {
@@ -35,6 +35,8 @@ type AuthContextType = {
   syncNow: () => Promise<'pulled' | 'pushed' | 'skipped' | void>;
   /** Remplace le local par les données cloud du compte */
   refreshCloudNow: () => Promise<{ ok: boolean; reason: string; updatedAt?: string | null }>;
+  /** Pousse le local vers le cloud sans tirer (appareil source). */
+  pushLocalNow: () => Promise<{ ok: boolean; reason: string }>;
   applySession: (token: string, user: AuthUser, refreshToken?: string | null) => Promise<void>;
 };
 
@@ -129,6 +131,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return refreshFromCloud();
   }, []);
 
+  const pushLocalNow = useCallback(async () => {
+    return forcePushLocalToCloud();
+  }, []);
+
   const login = useCallback(async (email: string, password: string) => {
     const res = await apiLogin(email, password);
     const next: AuthUser = {
@@ -218,6 +224,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logout,
         syncNow,
         refreshCloudNow,
+        pushLocalNow,
         applySession,
       }}
     >

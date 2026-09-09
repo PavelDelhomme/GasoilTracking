@@ -28,7 +28,7 @@ import {
 
 export default function AccountScreen() {
   const { colors } = useTheme();
-  const { user, logout } = useAuth();
+  const { user, logout, syncNow, pushLocalNow, refreshCloudNow } = useAuth();
   const { info, updateAvailable, checkNow, startUpdate } = useAppUpdate();
   const { showToast } = useToast();
   const [currentPassword, setCurrentPassword] = useState('');
@@ -99,6 +99,75 @@ export default function AccountScreen() {
           />
         </Card>
       )}
+
+      <Card style={{ marginBottom: 12 }}>
+        <Text style={[styles.section, { color: colors.text }]}>Synchronisation cloud</Text>
+        <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 10 }}>
+          Sur le Nothing (données réelles) : poussez d’abord vers le cloud, puis le site web les
+          affichera. Évite d’écraser l’appareil source.
+        </Text>
+        <Button
+          title="Pousser cet appareil → cloud"
+          onPress={async () => {
+            setBusy(true);
+            try {
+              const r = await pushLocalNow();
+              if (r.ok) showToast('Données poussées vers le cloud');
+              else if (r.reason === 'active-trip')
+                notify('Sync', 'Terminez le trajet en cours avant de synchroniser.');
+              else if (r.reason === 'no-auth') notify('Sync', 'Connectez-vous d’abord.');
+              else notify('Sync', 'Échec du push — réessayez.');
+            } catch (e) {
+              notify('Sync', e instanceof Error ? e.message : String(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+          loading={busy}
+          style={{ marginBottom: 8 }}
+        />
+        <Button
+          title="Synchroniser (intelligent)"
+          variant="secondary"
+          onPress={async () => {
+            setBusy(true);
+            try {
+              const r = await syncNow();
+              showToast(
+                r === 'pulled'
+                  ? 'Cloud → appareil'
+                  : r === 'pushed'
+                    ? 'Appareil → cloud'
+                    : 'Rien à sync'
+              );
+            } catch (e) {
+              notify('Sync', e instanceof Error ? e.message : String(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+          style={{ marginBottom: 8 }}
+        />
+        <Button
+          title="Tirer le cloud (écrase local)"
+          variant="outline"
+          onPress={() => {
+            confirm(
+              'Tirer le cloud',
+              'Remplace les données de CET appareil par le cloud. Sur le Nothing, utilisez plutôt « Pousser ».',
+              async () => {
+                setBusy(true);
+                try {
+                  const r = await refreshCloudNow();
+                  showToast(r.ok ? 'Cloud appliqué' : `Impossible (${r.reason})`);
+                } finally {
+                  setBusy(false);
+                }
+              }
+            );
+          }}
+        />
+      </Card>
 
       <Card style={{ marginBottom: 12 }}>
         <Text style={[styles.section, { color: colors.text }]}>Connexion web (QR)</Text>

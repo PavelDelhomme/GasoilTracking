@@ -64,6 +64,7 @@ export function FuelGaugeModalHost() {
             tankCapacity={req.vehicle.tankCapacity}
             liters={liters}
             onChange={setLiters}
+            requireConfirm={false}
           />
           <View style={styles.actions}>
             <Pressable

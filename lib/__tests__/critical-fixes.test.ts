@@ -3,6 +3,11 @@ import { compareSemver } from '../semver';
 import { userFacingReleaseNotes } from '../releaseNotes';
 import { presetDisplayName, searchVehicles } from '../../constants/vehicles';
 import { compareSemver as apiCompare, pickLatestRelease } from '../../api/src/semver.js';
+import {
+  estimateTripFuelLiters,
+  REAL_WORLD_MARGIN,
+  vehicleAgeFactor,
+} from '../consumptionModel';
 
 describe('compareSemver', () => {
   it('ordonne correctement', () => {
@@ -82,5 +87,43 @@ describe('syncPreferNewer policy', () => {
   });
   it('tire si plus riche et horloge comparable', () => {
     expect(shouldPull(10_000, 10_000, 100, 10)).toBe(true);
+  });
+});
+
+describe('consumptionModel (anti-surconso)', () => {
+  it('marge réelle modérée', () => {
+    expect(REAL_WORLD_MARGIN).toBeLessThanOrEqual(1.08);
+  });
+  it('âge 206 (2003) plafonné', () => {
+    expect(vehicleAgeFactor(2003, 2026)).toBeLessThanOrEqual(1.2);
+  });
+  it('AR ~90 km 206 ≈ 6–9 L (pas 20+)', () => {
+    const v = {
+      id: 2,
+      name: 'Peugeot 206',
+      brand: 'Peugeot',
+      model: '206',
+      year: 2003,
+      fuelType: 'essence' as const,
+      consumptionPer100: 6.2,
+      tankCapacity: 50,
+      defaultFuelPrice: 1.79,
+      currentOdometer: 120000,
+      hasOdometer: true,
+      trackedKm: 0,
+      estimatedFuelLiters: 40,
+      isActive: true,
+      createdAt: '',
+      consumptionLearnFactor: 1,
+    };
+    const burned = estimateTripFuelLiters(v, 90, {
+      avgSpeedKmh: 55,
+      idleRatio: 0.15,
+      accelFactor: 1.05,
+      stopGoFactor: 1.05,
+      ascentM: 120,
+    });
+    expect(burned).toBeGreaterThan(4);
+    expect(burned).toBeLessThan(12);
   });
 });

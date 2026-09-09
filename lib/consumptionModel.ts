@@ -22,12 +22,12 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
 }
 
 export function vehicleAgeFactor(year: number, nowYear = new Date().getFullYear()): number {
-  if (!year || year < 1970) return 1.08;
+  if (!year || year < 1970) return 1.05;
   const age = Math.max(0, nowYear - year);
-  if (age <= 3) return 1;
-  if (age <= 8) return 1 + (age - 3) * 0.012;
-  if (age <= 15) return 1.06 + (age - 8) * 0.018;
-  return Math.min(1.35, 1.186 + (age - 15) * 0.015);
+  if (age <= 5) return 1;
+  if (age <= 12) return 1 + (age - 5) * 0.008;
+  if (age <= 20) return 1.056 + (age - 12) * 0.01;
+  return Math.min(1.18, 1.136 + (age - 20) * 0.008);
 }
 
 export function transmissionFactor(gears?: number | null): number {
@@ -43,7 +43,7 @@ export function elevationFactor(ascentM: number, distanceKm: number): number {
   return Math.min(1.45, 1 + (per10km / 100) * 0.08);
 }
 
-export const REAL_WORLD_MARGIN = 1.18;
+export const REAL_WORLD_MARGIN = 1.06;
 
 export type ConsumptionContext = {
   ascentM?: number;
@@ -62,21 +62,20 @@ export type ConsumptionContext = {
 /** Surconso vs vitesse : ville lente / autoroute rapide. */
 export function speedConsumptionFactor(avgKmh: number): number {
   if (!Number.isFinite(avgKmh) || avgKmh <= 0) return 1;
-  if (avgKmh < 15) return 1.28; // bouchon / file d’attente
-  if (avgKmh < 35) return 1.16;
-  if (avgKmh < 55) return 1.08;
+  if (avgKmh < 15) return 1.14;
+  if (avgKmh < 35) return 1.08;
+  if (avgKmh < 55) return 1.04;
   if (avgKmh < 95) return 1;
-  if (avgKmh < 115) return 1.1;
-  if (avgKmh < 130) return 1.2;
-  return 1.28;
+  if (avgKmh < 115) return 1.06;
+  if (avgKmh < 130) return 1.12;
+  return 1.16;
 }
 
 /** Surconso moteur tournant à l’arrêt / très lent (bouchons). */
 export function trafficIdleFactor(idleRatio: number): number {
   if (!Number.isFinite(idleRatio) || idleRatio <= 0) return 1;
   const r = Math.max(0, Math.min(0.85, idleRatio));
-  // Jusqu’à +22 % si beaucoup d’arrêt moteur allumé
-  return 1 + r * 0.22;
+  return 1 + r * 0.12;
 }
 
 /**
@@ -106,7 +105,7 @@ export function accelAggressionFactor(points: PointLike[]): number {
   }
   if (samples < 8) return 1;
   const ratio = Math.min(0.45, harsh / samples);
-  return 1 + ratio * 0.27;
+  return 1 + ratio * 0.14;
 }
 
 /**
@@ -152,8 +151,9 @@ export function estimateTripFuelLiters(
   const traffic = trafficIdleFactor(ctx.idleRatio ?? 0);
   const accel = ctx.accelFactor && ctx.accelFactor > 0.9 ? ctx.accelFactor : 1;
   const stopGo = ctx.stopGoFactor && ctx.stopGoFactor > 0.9 ? ctx.stopGoFactor : 1;
-  const l100 =
-    base * age * gear * REAL_WORLD_MARGIN * learned * elev * speed * traffic * accel * stopGo;
+  // Évite l’empilement agressif (ville × idle × accel × stop) qui surconsommait ~2–3×.
+  const situational = Math.min(1.22, speed * traffic * accel * stopGo);
+  const l100 = base * age * gear * REAL_WORLD_MARGIN * learned * elev * situational;
   return Math.round(((distanceKm * l100) / 100) * 100) / 100;
 }
 
