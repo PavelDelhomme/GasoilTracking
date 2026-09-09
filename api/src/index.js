@@ -12,6 +12,7 @@ import nodemailer from 'nodemailer';
 import Database from 'better-sqlite3';
 import multer from 'multer';
 import QRCode from 'qrcode';
+import { execFileSync } from 'child_process';
 import { compareSemver, pickLatestRelease } from './semver.js';
 
 const PORT = Number(process.env.PORT || 4000);
@@ -1303,6 +1304,13 @@ function assertValidApkFile(filePath) {
   if (st.size < 5_000_000) {
     throw new Error(`APK trop petit (${st.size} o) — upload incomplet`);
   }
+  // Builds prod = arm64-v8a seul (~40–55 Mo). Les APK « fat » multi-ABI (~120 Mo)
+  // ont souvent un versionCode périmé → échec OTA (« package non validé »).
+  if (st.size > 80_000_000) {
+    throw new Error(
+      `APK trop volumineux (${st.size} o) — refuse le build multi-ABI ; utiliser ./scripts/build-release-apk.sh (arm64)`
+    );
+  }
   const fd = fs.openSync(filePath, 'r');
   const buf = Buffer.alloc(4);
   fs.readSync(fd, buf, 0, 4, 0);
@@ -1310,6 +1318,24 @@ function assertValidApkFile(filePath) {
   // ZIP local file header
   if (buf[0] !== 0x50 || buf[1] !== 0x4b) {
     throw new Error('Fichier non-APK (magique ZIP manquante)');
+  }
+  // Détecte les ABI émulateur / 32-bit dans le zip (sans aapt).
+  try {
+    const listing = execFileSync('unzip', ['-Z1', filePath], {
+      encoding: 'utf8',
+      maxBuffer: 20_000_000,
+    });
+    if (/^lib\/(x86|x86_64|armeabi-v7a)\//m.test(listing)) {
+      throw new Error(
+        'APK multi-ABI détecté (x86/armeabi) — republier un APK arm64-v8a uniquement'
+      );
+    }
+    if (!/^lib\/arm64-v8a\//m.test(listing)) {
+      throw new Error('APK sans lib/arm64-v8a — incompatible téléphones cibles');
+    }
+  } catch (e) {
+    if (e instanceof Error && /multi-ABI|arm64-v8a|trop /.test(e.message)) throw e;
+    /* unzip absent : la limite de taille reste la garde principale */
   }
   return st.size;
 }
@@ -1333,12 +1359,19 @@ function saveRelease({ version, notes, force, file, versionCode }) {
   let filename = null;
   let apkSha256 = null;
   let apkSize = null;
-  const vc =
-    versionCode != null && Number.isFinite(Number(versionCode))
-      ? Math.trunc(Number(versionCode))
-      : null;
+  const vcRaw = versionCode != null && versionCode !== '' ? Number(versionCode) : NaN;
+  const vc = Number.isFinite(vcRaw) ? Math.trunc(vcRaw) : null;
 
   if (file) {
+    if (vc == null) {
+      unlinkQuiet(file.path);
+      return {
+        ok: false,
+        skipped: true,
+        reason: 'versionCode-required',
+        error: 'versionCode obligatoire à l’upload (évite OTA avec ancien code Android)',
+      };
+    }
     try {
       apkSize = assertValidApkFile(file.path);
     } catch (e) {
@@ -1352,18 +1385,23 @@ function saveRelease({ version, notes, force, file, versionCode }) {
     }
     // Garde anti-régression : un versionCode déclaré plus bas que le précédent casse l’OTA
     // (Android refuse le « downgrade » → « package n’a pas pu être validé »).
-    if (vc != null && best?.version_code != null && vc < Number(best.version_code)) {
+    const bestVc = rows
+      .map((r) => Number(r.version_code))
+      .filter((n) => Number.isFinite(n))
+      .reduce((a, b) => Math.max(a, b), 0);
+    if (bestVc > 0 && vc < bestVc) {
       unlinkQuiet(file.path);
       return {
         ok: false,
         skipped: true,
         reason: 'versionCode-downgrade',
         versionCode: vc,
-        currentVersionCode: best.version_code,
+        currentVersionCode: bestVc,
       };
     }
     apkSha256 = crypto.createHash('sha256').update(fs.readFileSync(file.path)).digest('hex');
-    filename = `gasoil-tracking-${String(version).replace(/[^\w.\-]/g, '')}.apk`;
+    // Nom unique par versionCode — évite d’écraser un bon APK par un mauvais au même semver.
+    filename = `gasoil-tracking-${String(version).replace(/[^\w.\-]/g, '')}-vc${vc}.apk`;
     fs.renameSync(file.path, path.join(DATA_DIR, 'apks', filename));
   }
   db.prepare(

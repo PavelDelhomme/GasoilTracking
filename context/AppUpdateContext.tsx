@@ -12,6 +12,7 @@ import {
   compareVersions,
   fetchAppVersion,
   getLocalAppVersion,
+  getLocalVersionCode,
   type AppVersionInfo,
 } from '@/lib/api';
 import { followsProductionOta } from '@/lib/appFlavor';
@@ -66,7 +67,15 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
 
   const evaluate = useCallback(async (remote: AppVersionInfo, ignoreSnooze = false) => {
     const local = getLocalAppVersion();
-    const newer = compareVersions(remote.version, local) > 0;
+    const localVc = getLocalVersionCode();
+    const remoteVc =
+      remote.versionCode != null && Number.isFinite(Number(remote.versionCode))
+        ? Number(remote.versionCode)
+        : null;
+    // Priorité versionCode (évite faux « à jour » ou OTA avec semver égal mais code Android bas).
+    const newerByCode = remoteVc != null && localVc > 0 && remoteVc > localVc;
+    const newerBySemver = compareVersions(remote.version, local) > 0;
+    const newer = newerByCode || (remoteVc == null && newerBySemver);
     setUpdateAvailable(newer);
     if (!newer) {
       setVisible(false);
@@ -172,7 +181,14 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
       setInfo(remote);
       await writeSnooze(null);
       const local = getLocalAppVersion();
-      const newer = compareVersions(remote.version, local) > 0;
+      const localVc = getLocalVersionCode();
+      const remoteVc =
+        remote.versionCode != null && Number.isFinite(Number(remote.versionCode))
+          ? Number(remote.versionCode)
+          : null;
+      const newer =
+        (remoteVc != null && localVc > 0 && remoteVc > localVc) ||
+        (remoteVc == null && compareVersions(remote.version, local) > 0);
       if (!newer) {
         setUpdateAvailable(false);
         setVisible(false);

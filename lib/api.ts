@@ -562,4 +562,11 @@ export function getLocalAppVersion(): string {
   return Constants.expoConfig?.version || '1.0.0';
 }
 
+/** versionCode Android (entier) — base de l’OTA, plus fiable que le seul semver. */
+export function getLocalVersionCode(): number {
+  const raw = Constants.expoConfig?.android?.versionCode;
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export { API_URL };
