@@ -372,8 +372,7 @@ export default function EditVehicleScreen() {
 
       <Text style={[styles.sectionTitle, { color: colors.text }]}>Niveau carburant estimé</Text>
       <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 8, lineHeight: 18 }}>
-        Réglez la jauge comme sur le tableau de bord (glisser la barre). Utile avec plusieurs
-        voitures.
+        Réglez la jauge comme sur le tableau de bord (E → F). Utile avec plusieurs voitures.
       </Text>
       {vehicle && (
         <View style={{ marginBottom: 12 }}>

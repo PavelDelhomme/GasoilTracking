@@ -288,8 +288,7 @@ export async function getSinceLastFillStats(vehicleId: number): Promise<SinceLas
 
 /**
  * Adapte la conso du véhicule aux pleins de CET utilisateur.
- * Mesures récentes pondérées + lissage + plafond ±20 %.
- * Désactivable via consumptionAutoAdapt = false (valeur manuelle).
+ * Priorité forte au dernier plein (surtout complet) — lissage léger, pas de plafond trop serré.
  */
 export async function adaptVehicleConsumption(
   vehicleId: number
@@ -306,7 +305,6 @@ export async function adaptVehicleConsumption(
   const fulls = ordered.filter((f) => f.isFull);
   for (let i = 1; i < fulls.length; i++) {
     const distance = fillUpDistance(fulls[i - 1], fulls[i]);
-    // Segments trop courts = bruit (ville / erreur de saisie)
     if (distance && distance >= 30 && fulls[i].liters > 0) {
       samples.push((fulls[i].liters / distance) * 100);
     }
@@ -320,18 +318,20 @@ export async function adaptVehicleConsumption(
   const sane = samples.filter((c) => isSaneConsumptionSample(c, vehicle.fuelType));
   if (sane.length === 0) return null;
 
-  const recent = sane.slice(-5);
+  // Dernières mesures : poids croissant (le dernier plein compte le plus)
+  const recent = sane.slice(-6);
   let wSum = 0;
   let cSum = 0;
   recent.forEach((c, i) => {
-    const w = i + 1;
+    const w = (i + 1) * (i + 1); // 1,4,9… — très orienté récent
     wSum += w;
     cSum += c * w;
   });
   const measured = cSum / wSum;
   const prev = vehicle.consumptionPer100 > 0 ? vehicle.consumptionPer100 : measured;
-  let next = measured * 0.6 + prev * 0.4;
-  const maxDelta = Math.max(0.8, prev * 0.2);
+  // 75 % mesure / 25 % précédente — réagit vite après un plein
+  let next = measured * 0.75 + prev * 0.25;
+  const maxDelta = Math.max(1.2, prev * 0.35);
   next = Math.min(prev + maxDelta, Math.max(prev - maxDelta, next));
   next = Math.round(next * 10) / 10;
 
@@ -344,7 +344,12 @@ export async function adaptVehicleConsumption(
     };
   }
 
-  await updateVehicle(vehicleId, { consumptionPer100: next });
+  // La conso catalogue est maintenant à jour → reset le facteur d’apprentissage
+  // pour éviter de re-multiplier (double peine vers 7–8 L/100).
+  await updateVehicle(vehicleId, {
+    consumptionPer100: next,
+    consumptionLearnFactor: 1,
+  });
   return {
     previous: prev,
     next,

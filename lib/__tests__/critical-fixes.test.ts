@@ -94,10 +94,10 @@ describe('consumptionModel (anti-surconso)', () => {
   it('marge réelle modérée', () => {
     expect(REAL_WORLD_MARGIN).toBeLessThanOrEqual(1.08);
   });
-  it('âge 206 (2003) plafonné', () => {
-    expect(vehicleAgeFactor(2003, 2026)).toBeLessThanOrEqual(1.2);
+  it('âge 206 (2003) plafonné bas', () => {
+    expect(vehicleAgeFactor(2003, 2026)).toBeLessThanOrEqual(1.09);
   });
-  it('AR ~90 km 206 ≈ 6–9 L (pas 20+)', () => {
+  it('AR ~90 km 206 ≈ 4–8 L (pas 15+)', () => {
     const v = {
       id: 2,
       name: 'Peugeot 206',
@@ -105,7 +105,7 @@ describe('consumptionModel (anti-surconso)', () => {
       model: '206',
       year: 2003,
       fuelType: 'essence' as const,
-      consumptionPer100: 6.2,
+      consumptionPer100: 5.2,
       tankCapacity: 50,
       defaultFuelPrice: 1.79,
       currentOdometer: 120000,
@@ -123,7 +123,8 @@ describe('consumptionModel (anti-surconso)', () => {
       stopGoFactor: 1.05,
       ascentM: 120,
     });
-    expect(burned).toBeGreaterThan(4);
-    expect(burned).toBeLessThan(12);
+    expect(burned).toBeGreaterThan(3.5);
+    expect(burned).toBeLessThan(9);
+    expect((burned / 90) * 100).toBeLessThan(9);
   });
 });

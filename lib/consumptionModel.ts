@@ -22,12 +22,12 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
 }
 
 export function vehicleAgeFactor(year: number, nowYear = new Date().getFullYear()): number {
-  if (!year || year < 1970) return 1.05;
+  if (!year || year < 1970) return 1.04;
   const age = Math.max(0, nowYear - year);
-  if (age <= 5) return 1;
-  if (age <= 12) return 1 + (age - 5) * 0.008;
-  if (age <= 20) return 1.056 + (age - 12) * 0.01;
-  return Math.min(1.18, 1.136 + (age - 20) * 0.008);
+  if (age <= 8) return 1;
+  if (age <= 15) return 1 + (age - 8) * 0.005;
+  if (age <= 25) return 1.035 + (age - 15) * 0.004;
+  return Math.min(1.08, 1.075 + (age - 25) * 0.002);
 }
 
 export function transmissionFactor(gears?: number | null): number {
@@ -43,7 +43,7 @@ export function elevationFactor(ascentM: number, distanceKm: number): number {
   return Math.min(1.45, 1 + (per10km / 100) * 0.08);
 }
 
-export const REAL_WORLD_MARGIN = 1.06;
+export const REAL_WORLD_MARGIN = 1.04;
 
 export type ConsumptionContext = {
   ascentM?: number;
@@ -151,8 +151,9 @@ export function estimateTripFuelLiters(
   const traffic = trafficIdleFactor(ctx.idleRatio ?? 0);
   const accel = ctx.accelFactor && ctx.accelFactor > 0.9 ? ctx.accelFactor : 1;
   const stopGo = ctx.stopGoFactor && ctx.stopGoFactor > 0.9 ? ctx.stopGoFactor : 1;
-  // Évite l’empilement agressif (ville × idle × accel × stop) qui surconsommait ~2–3×.
-  const situational = Math.min(1.22, speed * traffic * accel * stopGo);
+  // Évite l’empilement agressif — l’estimation reste proche de la conso véhicule
+  // (recalibrée à chaque plein). Les facteurs ne font qu’un léger ajustement trajet.
+  const situational = Math.min(1.1, speed * traffic * accel * stopGo);
   const l100 = base * age * gear * REAL_WORLD_MARGIN * learned * elev * situational;
   return Math.round(((distanceKm * l100) / 100) * 100) / 100;
 }
