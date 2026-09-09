@@ -226,6 +226,20 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
   const remoteW = snapshotWeight(remoteSnap);
   const localW = snapshotWeight(local);
 
+  // Local quasi vide + cloud riche → toujours tirer (jamais pousser un wipe).
+  const localEmptyish = localW < 5 || (local.vehicles?.length || 0) === 0;
+  const remoteHasData = !!remoteSnap && remoteW >= 5 && (remoteSnap.vehicles?.length || 0) > 0;
+  if (localEmptyish && remoteHasData) {
+    await applySnapshot(remoteSnap!, 'replace');
+    try {
+      await repairFillUpVehiclesAndBudgets();
+    } catch {
+      /* ignore */
+    }
+    await saveLocalBackup(await collectSnapshot());
+    return 'pulled';
+  }
+
   const remoteClearlyNewer = remoteAt > localAt + 2000;
   const remoteRicherAndNotOlder =
     remoteW > localW + 5 && remoteAt >= localAt - 2000;
@@ -234,6 +248,11 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
     !!remoteSnap &&
     localW > remoteW + 8 &&
     (local.vehicles?.length || 0) > (remoteSnap.vehicles?.length || 0);
+
+  // Ne jamais pousser un local vide/pauvre par-dessus un cloud non vide.
+  if (localEmptyish && remoteSnap) {
+    return 'skipped';
+  }
 
   if (remoteSnap && !remoteClearlyPoorer && (remoteClearlyNewer || remoteRicherAndNotOlder)) {
     await applySnapshot(remoteSnap, 'replace');

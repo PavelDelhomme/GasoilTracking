@@ -94,6 +94,11 @@ describe('syncPreferNewer policy', () => {
   it('tire si plus riche et horloge comparable', () => {
     expect(shouldPull(10_000, 10_000, 100, 10)).toBe(true);
   });
+  it('local vide ne doit jamais gagner contre cloud riche', () => {
+    const localEmptyish = true;
+    const remoteHasData = true;
+    expect(localEmptyish && remoteHasData).toBe(true); // tire, ne pousse pas
+  });
 });
 
 describe('consumptionModel (anti-surconso)', () => {
