@@ -42,7 +42,7 @@ export function InstallAppHint() {
       /* ignore */
     }
 
-    setVisible(true);
+    setVisible(false);
 
     const onBip = (e: Event) => {
       e.preventDefault();
@@ -52,6 +52,19 @@ export function InstallAppHint() {
     window.addEventListener('beforeinstallprompt', onBip);
     return () => window.removeEventListener('beforeinstallprompt', onBip);
   }, []);
+
+  // iOS Safari : petit rappel discret une fois par session (pas de beforeinstallprompt)
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    if (isStandaloneDisplay()) return;
+    if (!ios) return;
+    try {
+      if (sessionStorage.getItem(DISMISS_KEY) === '1') return;
+    } catch {
+      /* ignore */
+    }
+    setVisible(true);
+  }, [ios]);
 
   if (Platform.OS !== 'web' || !visible) return null;
 

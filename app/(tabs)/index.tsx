@@ -299,13 +299,14 @@ export default function HomeScreen() {
           <>
             <Card style={styles.vehicleHeader}>
               <View style={styles.vehicleRow}>
-                <Ionicons name="car-sport" size={32} color={colors.accent} />
                 <View style={styles.vehicleInfo}>
                   <Text style={[styles.vehicleName, { color: colors.text }]}>
                     {activeVehicle.name}
                   </Text>
                   <Text style={[styles.vehicleDetail, { color: colors.textSecondary }]}>
-                    {activeVehicle.brand} {activeVehicle.model} • {activeVehicle.year}
+                    {displayOdometerKm(activeVehicle).toLocaleString(locale)} km
+                    {' · '}
+                    {activeVehicle.year}
                   </Text>
                 </View>
                 <Pressable
@@ -314,14 +315,11 @@ export default function HomeScreen() {
                   style={[styles.iconBtn, { borderColor: colors.border }]}
                   accessibilityLabel="Actualiser les données"
                 >
-                  <Ionicons name="refresh" size={20} color={colors.accent} />
+                  <Ionicons name="refresh" size={18} color={colors.accent} />
                 </Pressable>
               </View>
-              <Text style={[styles.odometer, { color: colors.text }]}>
-                {displayOdometerKm(activeVehicle).toLocaleString(locale)} km
-              </Text>
               <View
-                style={{ marginTop: 10 }}
+                style={{ marginTop: 6 }}
                 onStartShouldSetResponder={() => true}
                 onMoveShouldSetResponder={() => true}
               >
@@ -336,12 +334,12 @@ export default function HomeScreen() {
                     await setFuelLiters(activeVehicle, L);
                     await refresh();
                     await reloadStats(activeVehicle.id);
-                    notify('Réservoir', `${L.toFixed(1)} L · autonomie mise à jour`);
+                    notify('Réservoir', `${L.toFixed(1)} L`);
                   }}
                 />
               </View>
               {vehicles.length > 1 && (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                   {vehicles.map((v) => {
                     const selected = v.id === activeVehicle.id;
                     return (
@@ -363,7 +361,7 @@ export default function HomeScreen() {
                           style={{
                             color: selected ? colors.accent : colors.text,
                             fontWeight: '700',
-                            fontSize: 13,
+                            fontSize: 12,
                           }}
                           numberOfLines={1}
                         >
@@ -434,79 +432,46 @@ export default function HomeScreen() {
 
             <View style={styles.statsRow}>
               <StatCard
-                label="Conso. moyenne"
+                label="Conso."
                 value={
                   stats && stats.averageConsumption > 0
                     ? formatConsumption(stats.averageConsumption, activeVehicle.fuelType)
                     : formatConsumption(activeVehicle.consumptionPer100, activeVehicle.fuelType)
                 }
                 subtitle={
-                  stats && stats.averageConsumption > 0
-                    ? activeVehicle.consumptionAutoAdapt !== false
-                      ? `Adaptée à vos pleins (~${stats.averageConsumption.toFixed(1)} mesurée)`
-                      : 'Valeur manuelle (auto off)'
-                    : 'Catalogue / saisie — s’adapte aux pleins'
+                  stats && stats.averageConsumption > 0 ? 'D’après vos pleins' : 'Catalogue'
                 }
               />
               <StatCard
-                label="Autonomie rest."
+                label="Autonomie"
                 value={formatDistance(sinceFill?.rangeKm ?? 0)}
                 color={fuelColor}
                 subtitle={
-                  sinceFill?.lastFill
-                    ? `~${sinceFill.fuelRemainingEst.toFixed(1)} L restants`
-                    : 'Après un plein + trajets'
+                  homeFuelDraft != null ? `${homeFuelDraft.toFixed(0)} L restants` : undefined
                 }
               />
             </View>
 
             {sinceFill?.lastFill && (
-              <Card
-                style={{
-                  marginBottom: 16,
-                  borderColor: fuelTone === 'ok' || fuelTone === 'unknown' ? colors.border : fuelColor,
-                  borderWidth: fuelTone === 'ok' || fuelTone === 'unknown' ? 1 : 1.5,
-                }}
-              >
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  Depuis le dernier plein · {activeVehicle.name}
+              <Card style={{ marginBottom: 12 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '700' }}>
+                  Depuis le plein · {formatRelativeDay(sinceFill.lastFill.date)}
                 </Text>
-                <Text
-                  style={{
-                    color: colors.text,
-                    fontWeight: '800',
-                    fontSize: 22,
-                    marginBottom: 6,
-                  }}
-                >
+                <Text style={{ color: colors.text, fontWeight: '800', fontSize: 18, marginTop: 4 }}>
                   {formatDistance(sinceFill.tripKm)}
-                </Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18 }}>
-                  {sinceFill.tripCount} trajet{sinceFill.tripCount > 1 ? 's' : ''} · ~
-                  {formatEuro(sinceFill.costEst)} · ~{sinceFill.fuelUsedEst.toFixed(1)} L
-                  {'\n'}
-                  Plein du {formatRelativeDay(sinceFill.lastFill.date)} (
-                  {formatEuro(sinceFill.lastFill.totalCost)})
-                </Text>
-                {fuelTone !== 'unknown' && (
-                  <Text style={{ color: fuelColor, fontWeight: '700', fontSize: 13, marginTop: 8 }}>
-                    {fuelTone === 'ok'
-                      ? `Autonomie correcte · ~${formatDistance(sinceFill.rangeKm)}`
-                      : fuelTone === 'warn'
-                        ? `Autonomie basse · ~${formatDistance(sinceFill.rangeKm)} restants`
-                        : `Réservoir critique · ~${formatDistance(sinceFill.rangeKm)} restants`}
+                  <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 13 }}>
+                    {' '}
+                    · {sinceFill.tripCount} trajet{sinceFill.tripCount > 1 ? 's' : ''} · ~
+                    {sinceFill.fuelUsedEst.toFixed(1)} L
                   </Text>
-                )}
+                </Text>
               </Card>
             )}
 
             {!sinceFill?.lastFill && (
-              <Card style={{ marginBottom: 16 }}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  Depuis le dernier plein
-                </Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 12 }}>
-                  Enregistrez un plein pour suivre km, litres et autonomie.
+              <Card style={{ marginBottom: 12 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 10 }}>
+                  Enregistrez un plein pour suivre km et autonomie.
                 </Text>
                 <Button title="Nouveau plein" onPress={() => router.push('/fillup/add')} />
               </Card>
@@ -515,35 +480,31 @@ export default function HomeScreen() {
             {(fuelTone === 'warn' || fuelTone === 'critical') && (
               <Card
                 style={{
-                  marginBottom: 16,
+                  marginBottom: 12,
                   borderColor: fuelColor,
                   borderWidth: 1.5,
                 }}
               >
-                <Text style={{ color: fuelColor, fontWeight: '800', fontSize: 15 }}>
+                <Text style={{ color: fuelColor, fontWeight: '800', fontSize: 14 }}>
                   {fuelTone === 'critical' ? 'Réservoir critique' : 'Carburant bas'}
                 </Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 4, marginBottom: 10 }}>
-                  Pensez à faire le plein bientôt
-                  {sinceFill?.rangeKm
-                    ? ` · ~${formatDistance(sinceFill.rangeKm)} d’autonomie`
-                    : ''}
-                  .
-                </Text>
-                <Button title="Nouveau plein" onPress={() => router.push('/fillup/add')} />
+                <Button
+                  title="Nouveau plein"
+                  onPress={() => router.push('/fillup/add')}
+                  style={{ marginTop: 8 }}
+                />
               </Card>
             )}
 
             <View style={styles.statsRow}>
               <StatCard
-                label="Total dépensé"
+                label="Dépensé"
                 value={formatEuro(stats?.totalCost ?? 0)}
-                subtitle={`${stats?.fillUpCount ?? 0} plein(s) enregistré(s)`}
+                subtitle={`${stats?.fillUpCount ?? 0} plein(s)`}
               />
               <StatCard
                 label="Distance"
                 value={formatDistance(stats?.totalDistance ?? 0)}
-                subtitle="Pleins + trajets GPS"
               />
             </View>
 

@@ -1,6 +1,6 @@
 /**
- * Jauge carburant demi-cercle — comme derrière le volant (E ← haut → F).
- * Verrouillée par défaut : « Modifier la jauge » puis glisser / repères, puis Confirmer.
+ * Jauge carburant demi-cercle — E → F, comme derrière le volant.
+ * Verrouillée par défaut : Modifier → tourner / repères → Confirmer.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -63,13 +63,13 @@ export function FuelGaugeSlider({
   const displayL = requireConfirm && editing ? draft : savedL;
   const fraction = displayL / capacity;
 
-  const size = compact ? 220 : 300;
-  const stroke = compact ? 16 : 22;
-  const pad = stroke / 2 + 8;
+  const size = compact ? 200 : 260;
+  const stroke = compact ? 14 : 18;
+  const pad = stroke / 2 + 6;
   const cx = size / 2;
-  const cy = size / 2 - 4;
+  const cy = size / 2 - 2;
   const r = size / 2 - pad;
-  const svgH = cy + stroke / 2 + 28;
+  const svgH = cy + stroke / 2 + 22;
 
   const [dragging, setDragging] = useState(false);
   const centerPageRef = useRef({ x: 0, y: 0 });
@@ -111,12 +111,11 @@ export function FuelGaugeSlider({
   );
 
   const measureCenter = useCallback(() => {
-    dialRef.current?.measureInWindow((x, y, width, height) => {
-      // Pivot = centre du demi-cercle (bas de l’arc), pas le milieu du View
+    dialRef.current?.measureInWindow((x, y, width) => {
       const scale = width > 0 ? width / size : 1;
       centerPageRef.current = {
-        x: x + (cx * scale),
-        y: y + (cy * scale),
+        x: x + cx * scale,
+        y: y + cy * scale,
       };
     });
   }, [cx, cy, size]);
@@ -164,7 +163,7 @@ export function FuelGaugeSlider({
       pointerEvents={disabled ? 'none' : 'auto'}
       accessibilityRole="adjustable"
       accessibilityLabel="Niveau de carburant"
-      accessibilityHint="Jauge demi-cercle comme au tableau de bord — Modifier puis tourner E vers F"
+      accessibilityHint="Modifier puis tourner E vers F"
       accessibilityValue={{
         min: 0,
         max: Math.round(capacity),
@@ -179,66 +178,18 @@ export function FuelGaugeSlider({
             backgroundColor: colors.background,
             borderColor: colors.border,
             opacity: disabled ? 0.55 : 1,
-            paddingVertical: compact ? 10 : 14,
+            paddingVertical: compact ? 8 : 10,
           },
         ]}
       >
-        {/* Pourcentage + litres (toujours visibles, en plus de la jauge) */}
-        <View style={styles.headerRow}>
-          <View style={styles.headerLeft}>
-            <Ionicons
-              name={low ? 'warning' : 'speedometer-outline'}
-              size={compact ? 18 : 22}
-              color={low ? colors.danger : fillColor}
-            />
-            <View style={{ flex: 1 }}>
-              <View style={styles.pctRow}>
-                <Text
-                  style={{
-                    color: colors.text,
-                    fontSize: compact ? 26 : 36,
-                    fontWeight: '900',
-                    lineHeight: compact ? 30 : 40,
-                  }}
-                >
-                  {known || editing ? `${pct} %` : '— %'}
-                </Text>
-                <Text
-                  style={{
-                    color: fillColor,
-                    fontWeight: '800',
-                    fontSize: compact ? 14 : 16,
-                    marginLeft: 10,
-                  }}
-                >
-                  {mark}
-                </Text>
-              </View>
-              <Text
-                style={{
-                  color: colors.textSecondary,
-                  fontSize: compact ? 12 : 13,
-                  fontWeight: '600',
-                  marginTop: 2,
-                }}
-              >
-                {known || editing
-                  ? `${displayL.toFixed(1)} L / ${capacity.toFixed(0)} L`
-                  : 'Réglez comme derrière le volant'}
-              </Text>
-            </View>
-          </View>
-        </View>
-
         <View
           ref={dialRef}
           collapsable={false}
-          style={[styles.dial, { width: size, height: svgH, opacity: locked ? 0.9 : 1 }]}
+          style={[styles.dial, { width: size, height: svgH, opacity: locked ? 0.95 : 1 }]}
           onLayout={onLayout}
           {...(interactive ? pan.panHandlers : {})}
         >
           <Svg width={size} height={svgH}>
-            {/* Piste */}
             <Path
               d={trackPath}
               stroke={colors.border}
@@ -246,7 +197,6 @@ export function FuelGaugeSlider({
               fill="none"
               strokeLinecap="round"
             />
-            {/* Zone vide (rouge) */}
             {dangerPath ? (
               <Path
                 d={dangerPath}
@@ -254,10 +204,9 @@ export function FuelGaugeSlider({
                 strokeWidth={stroke}
                 fill="none"
                 strokeLinecap="butt"
-                opacity={0.55}
+                opacity={0.5}
               />
             ) : null}
-            {/* Niveau */}
             {fillPath ? (
               <Path
                 d={fillPath}
@@ -268,11 +217,10 @@ export function FuelGaugeSlider({
               />
             ) : null}
 
-            {/* Graduations */}
             {MARKS.map((m) => {
-              const outer = gaugePolar(cx, cy, r + stroke * 0.15, m.f);
-              const inner = gaugePolar(cx, cy, r - stroke * 0.55, m.f);
-              const labelPos = gaugePolar(cx, cy, r - stroke - (compact ? 14 : 18), m.f);
+              const outer = gaugePolar(cx, cy, r + stroke * 0.12, m.f);
+              const inner = gaugePolar(cx, cy, r - stroke * 0.5, m.f);
+              const labelPos = gaugePolar(cx, cy, r - stroke - (compact ? 12 : 14), m.f);
               const active = Math.abs(fraction - m.f) < 0.06;
               return (
                 <G key={m.label}>
@@ -282,16 +230,16 @@ export function FuelGaugeSlider({
                     x2={outer.x}
                     y2={outer.y}
                     stroke={active ? fillColor : colors.textSecondary}
-                    strokeWidth={active ? 3 : 2}
+                    strokeWidth={active ? 2.5 : 1.5}
                     strokeLinecap="round"
-                    opacity={active ? 1 : 0.55}
+                    opacity={active ? 1 : 0.45}
                   />
                   <SvgText
                     x={labelPos.x}
                     y={labelPos.y + 4}
-                    fill={active ? fillColor : colors.text}
-                    fontSize={compact ? 13 : 16}
-                    fontWeight="800"
+                    fill={active ? fillColor : colors.textSecondary}
+                    fontSize={compact ? 12 : 14}
+                    fontWeight="700"
                     textAnchor="middle"
                   >
                     {m.label}
@@ -300,25 +248,23 @@ export function FuelGaugeSlider({
               );
             })}
 
-            {/* Aiguille */}
             <Line
               x1={cx}
               y1={cy}
               x2={needleTip.x}
               y2={needleTip.y}
               stroke={fillColor}
-              strokeWidth={compact ? 3.5 : 4.5}
+              strokeWidth={compact ? 3 : 4}
               strokeLinecap="round"
             />
-            <Circle cx={cx} cy={cy} r={compact ? 8 : 10} fill={fillColor} />
-            <Circle cx={cx} cy={cy} r={compact ? 3.5 : 4.5} fill="#fff" />
+            <Circle cx={cx} cy={cy} r={compact ? 7 : 9} fill={fillColor} />
+            <Circle cx={cx} cy={cy} r={compact ? 3 : 4} fill="#fff" />
 
-            {/* % au centre */}
             <SvgText
               x={cx}
-              y={cy - (compact ? 28 : 36)}
-              fill={colors.text}
-              fontSize={compact ? 28 : 40}
+              y={cy - (compact ? 26 : 32)}
+              fill={low ? colors.danger : colors.text}
+              fontSize={compact ? 26 : 34}
               fontWeight="900"
               textAnchor="middle"
             >
@@ -326,9 +272,9 @@ export function FuelGaugeSlider({
             </SvgText>
             <SvgText
               x={cx}
-              y={cy - (compact ? 10 : 12)}
+              y={cy - (compact ? 8 : 10)}
               fill={colors.textSecondary}
-              fontSize={compact ? 11 : 13}
+              fontSize={11}
               fontWeight="700"
               textAnchor="middle"
             >
@@ -337,40 +283,50 @@ export function FuelGaugeSlider({
           </Svg>
         </View>
 
-        <View style={styles.marks}>
-          {MARKS.map((m) => {
-            const active = Math.abs(fraction - m.f) < 0.06;
-            return (
-              <Pressable
-                key={m.label}
-                disabled={!interactive}
-                onPress={() => {
-                  const next = Math.round(capacity * m.f * 10) / 10;
-                  setLive(next);
-                  if (!requireConfirm) onChangeEnd?.(next);
-                }}
-                hitSlop={10}
-                style={[
-                  styles.markBtn,
-                  active && { backgroundColor: fillColor + '22', borderColor: fillColor },
-                  !active && { borderColor: colors.border },
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel={`Régler à ${m.a11y}`}
-              >
-                <Text
-                  style={{
-                    color: active ? fillColor : colors.textSecondary,
-                    fontWeight: active ? '900' : '700',
-                    fontSize: compact ? 13 : 14,
+        <Text style={[styles.litersLine, { color: colors.textSecondary }]}>
+          {known || editing
+            ? `${displayL.toFixed(1)} L / ${capacity.toFixed(0)} L · ${mark}`
+            : 'Régler le niveau'}
+        </Text>
+
+        {/* Repères cliquables seulement en édition */}
+        {interactive ? (
+          <View style={styles.marks}>
+            {MARKS.map((m) => {
+              const active = Math.abs(fraction - m.f) < 0.06;
+              return (
+                <Pressable
+                  key={m.label}
+                  onPress={() => {
+                    const next = Math.round(capacity * m.f * 10) / 10;
+                    setLive(next);
+                    if (!requireConfirm) onChangeEnd?.(next);
                   }}
+                  hitSlop={8}
+                  style={[
+                    styles.markBtn,
+                    {
+                      borderColor: active ? fillColor : colors.border,
+                      backgroundColor: active ? fillColor + '18' : 'transparent',
+                    },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Régler à ${m.a11y}`}
                 >
-                  {m.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+                  <Text
+                    style={{
+                      color: active ? fillColor : colors.textSecondary,
+                      fontWeight: '800',
+                      fontSize: 13,
+                    }}
+                  >
+                    {m.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
       </View>
 
       {requireConfirm ? (
@@ -384,14 +340,14 @@ export function FuelGaugeSlider({
               style={[
                 styles.confirmBtn,
                 styles.confirmBtnWide,
-                { borderColor: colors.accent, backgroundColor: colors.accent + '18' },
+                { borderColor: colors.border, backgroundColor: colors.background },
               ]}
               accessibilityRole="button"
               accessibilityLabel="Modifier le niveau de carburant"
             >
-              <Ionicons name="create-outline" size={16} color={colors.accent} />
-              <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 14 }}>
-                Modifier la jauge
+              <Ionicons name="create-outline" size={15} color={colors.accent} />
+              <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }}>
+                Modifier
               </Text>
             </Pressable>
           ) : (
@@ -404,7 +360,7 @@ export function FuelGaugeSlider({
                 }}
                 style={[styles.confirmBtn, { borderColor: colors.border, flex: 1 }]}
               >
-                <Text style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 14 }}>
+                <Text style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 13 }}>
                   Annuler
                 </Text>
               </Pressable>
@@ -415,11 +371,11 @@ export function FuelGaugeSlider({
                 }}
                 style={[
                   styles.confirmBtn,
-                  { borderColor: colors.accent, backgroundColor: colors.accent, flex: 1.4 },
+                  { borderColor: colors.accent, backgroundColor: colors.accent, flex: 1.3 },
                 ]}
               >
-                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>
-                  Confirmer · {pct} %
+                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>
+                  OK · {pct} %
                 </Text>
               </Pressable>
             </>
@@ -429,30 +385,14 @@ export function FuelGaugeSlider({
         <Text
           style={{
             color: dragging ? fillColor : colors.textSecondary,
-            fontSize: 12,
-            marginTop: 8,
-            fontWeight: '600',
-            textAlign: 'center',
-          }}
-        >
-          {dragging
-            ? `${pct} % · ${displayL.toFixed(1)} L`
-            : 'Tournez l’aiguille — E (vide) → F (plein)'}
-        </Text>
-      )}
-      {locked ? (
-        <Text
-          style={{
-            color: colors.textSecondary,
             fontSize: 11,
             marginTop: 6,
-            lineHeight: 16,
             textAlign: 'center',
           }}
         >
-          Verrouillée — un geste volontaire pour régler, comme sur le tableau de bord.
+          {dragging ? `${pct} %` : 'Glisser E → F'}
         </Text>
-      ) : null}
+      )}
     </View>
   );
 }
@@ -461,63 +401,50 @@ const styles = StyleSheet.create({
   wrap: { width: '100%' },
   panel: {
     width: '100%',
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     alignItems: 'center',
-  },
-  headerRow: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-    paddingHorizontal: 4,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-  },
-  pctRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
   },
   dial: {
     alignSelf: 'center',
+  },
+  litersLine: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 2,
+    marginBottom: 4,
+    textAlign: 'center',
   },
   marks: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
-    marginTop: 4,
-    marginBottom: 4,
+    marginTop: 6,
     gap: 4,
     paddingHorizontal: 2,
   },
   markBtn: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: 8,
-    borderRadius: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
     borderWidth: 1,
   },
   confirmRow: {
     flexDirection: 'row',
     gap: 8,
-    marginTop: 12,
-    flexWrap: 'wrap',
+    marginTop: 8,
   },
   confirmBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    gap: 6,
+    gap: 5,
   },
   confirmBtnWide: {
     width: '100%',
