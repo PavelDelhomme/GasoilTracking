@@ -526,6 +526,10 @@ export type AppVersionInfo = {
   forceUpdate: boolean;
   apkUrl: string | null;
   apkAvailable?: boolean;
+  /** SHA-256 hex de l’APK publiée (vérif OTA). */
+  apkSha256?: string | null;
+  apkSize?: number | null;
+  versionCode?: number | null;
   webUrl?: string;
   iosInstallUrl?: string;
   releaseNotes: string;

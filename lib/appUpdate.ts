@@ -148,6 +148,30 @@ export async function performSafeApkUpdate(
   if (!infoFile.exists || (infoFile.size != null && infoFile.size < 1_000_000)) {
     throw new Error('APK téléchargée invalide ou trop petite');
   }
+  if (info.apkSize != null && infoFile.size != null) {
+    const delta = Math.abs(infoFile.size - info.apkSize);
+    if (delta > 64 * 1024) {
+      throw new Error(
+        `APK incomplète (${infoFile.size} o ≠ ${info.apkSize} o). Réessayez la mise à jour.`
+      );
+    }
+  }
+
+  // Magique ZIP (APK) — évite d’ouvrir un HTML d’erreur → « package non validé ».
+  try {
+    const head = await FileSystem.readAsStringAsync(result.uri, {
+      encoding: 'base64' as FileSystem.EncodingType,
+      length: 4,
+      position: 0,
+    });
+    // "PK\x03\x04" in base64 starts with "UEsD"
+    if (!head.startsWith('UEs')) {
+      throw new Error('Fichier téléchargé n’est pas un APK (réseau / cache).');
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('APK')) throw e;
+    /* lecture partielle non supportée sur certaines implémentations — ignore */
+  }
 
   onProgress?.({
     phase: 'install',
@@ -155,7 +179,14 @@ export async function performSafeApkUpdate(
     message: 'Ouverture de l’installateur…',
   });
 
-  await launchApkInstaller(result.uri);
+  try {
+    await launchApkInstaller(result.uri);
+  } catch (e) {
+    throw new Error(
+      (e instanceof Error ? e.message : 'Installation impossible') +
+        ' Si Android dit que le package n’a pas pu être validé : réessayez la mise à jour (APK incomplète) ou contactez le support si le versionCode est trop bas.'
+    );
+  }
 
   onProgress?.({
     phase: 'done',

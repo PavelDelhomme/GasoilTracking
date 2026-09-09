@@ -139,6 +139,17 @@ try {
 } catch {
   /* déjà présent */
 }
+for (const sql of [
+  'ALTER TABLE app_releases ADD COLUMN apk_sha256 TEXT',
+  'ALTER TABLE app_releases ADD COLUMN apk_size INTEGER',
+  'ALTER TABLE app_releases ADD COLUMN version_code INTEGER',
+]) {
+  try {
+    db.exec(sql);
+  } catch {
+    /* déjà présent */
+  }
+}
 
 /** Access JWT court ; refresh opaque rotatif (révocation possible) */
 const ACCESS_TTL = process.env.JWT_ACCESS_TTL || '20m';
@@ -716,6 +727,9 @@ app.get('/api/version', (_req, res) => {
     forceUpdate: Boolean(latest?.force_update),
     apkUrl,
     apkAvailable,
+    apkSha256: latest?.apk_sha256 || null,
+    apkSize: latest?.apk_size || null,
+    versionCode: latest?.version_code || null,
     webUrl: PUBLIC_URL,
     /** Hub multi-plateformes (Android APK + iPhone PWA + web) */
     downloadPage: `${PUBLIC_URL}/download`,
@@ -1275,19 +1289,38 @@ const upload = multer({
   limits: { fileSize: 120 * 1024 * 1024 },
 });
 
-function saveRelease({ version, notes, force, file }) {
+function unlinkQuiet(p) {
+  try {
+    if (p && fs.existsSync(p)) fs.unlinkSync(p);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Refuse un faux APK (HTML, truncature) — cause « package n’a pas pu être validé » sur Nothing/Android. */
+function assertValidApkFile(filePath) {
+  const st = fs.statSync(filePath);
+  if (st.size < 5_000_000) {
+    throw new Error(`APK trop petit (${st.size} o) — upload incomplet`);
+  }
+  const fd = fs.openSync(filePath, 'r');
+  const buf = Buffer.alloc(4);
+  fs.readSync(fd, buf, 0, 4, 0);
+  fs.closeSync(fd);
+  // ZIP local file header
+  if (buf[0] !== 0x50 || buf[1] !== 0x4b) {
+    throw new Error('Fichier non-APK (magique ZIP manquante)');
+  }
+  return st.size;
+}
+
+function saveRelease({ version, notes, force, file, versionCode }) {
   const rows = db
     .prepare('SELECT * FROM app_releases WHERE apk_filename IS NOT NULL')
     .all();
   const best = pickLatestRelease(rows);
   if (best && compareSemver(version, best.version) < 0) {
-    if (file?.path && fs.existsSync(file.path)) {
-      try {
-        fs.unlinkSync(file.path);
-      } catch {
-        /* ignore */
-      }
-    }
+    unlinkQuiet(file?.path);
     return {
       ok: false,
       skipped: true,
@@ -1298,13 +1331,56 @@ function saveRelease({ version, notes, force, file }) {
   }
 
   let filename = null;
+  let apkSha256 = null;
+  let apkSize = null;
+  const vc =
+    versionCode != null && Number.isFinite(Number(versionCode))
+      ? Math.trunc(Number(versionCode))
+      : null;
+
   if (file) {
+    try {
+      apkSize = assertValidApkFile(file.path);
+    } catch (e) {
+      unlinkQuiet(file.path);
+      return {
+        ok: false,
+        skipped: true,
+        reason: 'invalid-apk',
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+    // Garde anti-régression : un versionCode déclaré plus bas que le précédent casse l’OTA
+    // (Android refuse le « downgrade » → « package n’a pas pu être validé »).
+    if (vc != null && best?.version_code != null && vc < Number(best.version_code)) {
+      unlinkQuiet(file.path);
+      return {
+        ok: false,
+        skipped: true,
+        reason: 'versionCode-downgrade',
+        versionCode: vc,
+        currentVersionCode: best.version_code,
+      };
+    }
+    apkSha256 = crypto.createHash('sha256').update(fs.readFileSync(file.path)).digest('hex');
     filename = `gasoil-tracking-${String(version).replace(/[^\w.\-]/g, '')}.apk`;
     fs.renameSync(file.path, path.join(DATA_DIR, 'apks', filename));
   }
   db.prepare(
-    'INSERT INTO app_releases (version, platform, apk_filename, release_notes, force_update, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(version, 'android', filename, notes, force ? 1 : 0, new Date().toISOString());
+    `INSERT INTO app_releases
+      (version, platform, apk_filename, release_notes, force_update, created_at, apk_sha256, apk_size, version_code)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    version,
+    'android',
+    filename,
+    notes,
+    force ? 1 : 0,
+    new Date().toISOString(),
+    apkSha256,
+    apkSize,
+    vc
+  );
   // Clear pending only if this version covers the announced build
   try {
     const pendingPath = path.join(DATA_DIR, 'build-pending.json');
@@ -1321,6 +1397,9 @@ function saveRelease({ version, notes, force, file }) {
   return {
     ok: true,
     version,
+    versionCode: vc,
+    apkSha256,
+    apkSize,
     apkUrl: filename ? `${PUBLIC_URL}/api/download/${filename}` : null,
   };
 }
@@ -1354,7 +1433,8 @@ app.post('/api/ci/releases', upload.single('apk'), (req, res) => {
   const version = req.body?.version || APP_VERSION;
   const notes = req.body?.releaseNotes || 'Mise à jour automatique';
   const force = req.body?.forceUpdate === '1' || req.body?.forceUpdate === true;
-  const result = saveRelease({ version, notes, force, file: req.file });
+  const versionCode = req.body?.versionCode ?? req.body?.version_code ?? null;
+  const result = saveRelease({ version, notes, force, file: req.file, versionCode });
   if (result.skipped) return res.status(409).json(result);
   res.status(201).json(result);
 });
@@ -1880,7 +1960,15 @@ app.post('/api/admin/releases', auth, requireAdmin, upload.single('apk'), (req, 
   const version = req.body?.version || APP_VERSION;
   const notes = req.body?.releaseNotes || '';
   const force = req.body?.forceUpdate === '1' || req.body?.forceUpdate === true;
-  res.status(201).json(saveRelease({ version, notes, force, file: req.file }));
+  res.status(201).json(
+    saveRelease({
+      version,
+      notes,
+      force,
+      file: req.file,
+      versionCode: req.body?.versionCode ?? req.body?.version_code ?? null,
+    })
+  );
 });
 
 app.use((err, _req, res, next) => {
