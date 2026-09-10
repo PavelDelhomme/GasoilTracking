@@ -18,7 +18,8 @@ import { createVehicle, getVehicles } from '@/lib/database';
 import { confirm, notify } from '@/lib/notify';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
 import { PRESET_VEHICLES, searchVehicles, presetDisplayName, type VehiclePreset } from '@/constants/vehicles';
-import type { FuelType } from '@/types';
+import type { FuelType, VehicleSegment } from '@/types';
+import { SEGMENT_DEFAULTS, suggestPhysicsFields } from '@/lib/vehiclePhysics';
 
 export default function AddVehicleScreen() {
   const { refresh, vehicles, selectVehicle } = useApp();
@@ -34,13 +35,27 @@ export default function AddVehicleScreen() {
   const [fuelPrice, setFuelPrice] = useState(String(country.defaultFuelPrice));
   const [odometer, setOdometer] = useState('0');
   const [hasOdometer, setHasOdometer] = useState(true);
+  const [gears, setGears] = useState('6');
+  const [curbWeight, setCurbWeight] = useState('1300');
+  const [dragScx, setDragScx] = useState('0.68');
+  const [payload, setPayload] = useState('150');
+  const [segment, setSegment] = useState<VehicleSegment>('sedan');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
 
   const results = useMemo(() => searchVehicles(search), [search]);
 
-  const saveVehicle = async (payload: {
+  const applyPhysicsSuggest = (b: string, m: string, g?: number | null) => {
+    const s = suggestPhysicsFields(b, m, g);
+    setSegment(s.vehicleSegment);
+    setCurbWeight(String(s.curbWeightKg));
+    setDragScx(String(s.dragAreaScx));
+    setGears(String(s.transmissionGears));
+    setPayload(String(s.payloadKg));
+  };
+
+  const saveVehicle = async (payloadIn: {
     name: string;
     brand: string;
     model: string;
@@ -55,16 +70,19 @@ export default function AddVehicleScreen() {
     estimatedFuelLiters?: number | null;
     consumptionAutoAdapt?: boolean;
     isActive?: boolean;
+    transmissionGears?: number | null;
+    curbWeightKg?: number | null;
+    dragAreaScx?: number | null;
+    vehicleSegment?: VehicleSegment | null;
+    payloadKg?: number | null;
   }) => {
-    // Anti-doublons : si le même modèle existe déjà, on propose de le sélectionner
-    // au lieu d’en créer un autre (évite d’avoir 2× le même 806 dans la liste).
     const list = vehicles.length ? vehicles : await getVehicles();
     const duplicate = list.find(
       (v) =>
-        v.brand === payload.brand &&
-        v.model === payload.model &&
-        v.year === payload.year &&
-        v.fuelType === payload.fuelType
+        v.brand === payloadIn.brand &&
+        v.model === payloadIn.model &&
+        v.year === payloadIn.year &&
+        v.fuelType === payloadIn.fuelType
     );
 
     if (duplicate) {
@@ -88,23 +106,32 @@ export default function AddVehicleScreen() {
     setLoading(true);
     setStatus('Enregistrement…');
     try {
+      const suggested = suggestPhysicsFields(
+        payloadIn.brand,
+        payloadIn.model,
+        payloadIn.transmissionGears
+      );
+      const phys = {
+        ...payloadIn,
+        transmissionGears: payloadIn.transmissionGears ?? suggested.transmissionGears,
+        curbWeightKg: payloadIn.curbWeightKg ?? suggested.curbWeightKg,
+        dragAreaScx: payloadIn.dragAreaScx ?? suggested.dragAreaScx,
+        vehicleSegment: payloadIn.vehicleSegment ?? suggested.vehicleSegment,
+        payloadKg: payloadIn.payloadKg ?? suggested.payloadKg,
+      };
       const id = await createVehicle({
-        ...payload,
-        trackedKm: payload.trackedKm ?? 0,
-        estimatedFuelLiters: payload.estimatedFuelLiters ?? null,
-        consumptionAutoAdapt: payload.consumptionAutoAdapt !== false,
-        isActive: payload.isActive ?? true,
+        ...phys,
+        trackedKm: phys.trackedKm ?? 0,
+        estimatedFuelLiters: phys.estimatedFuelLiters ?? null,
+        consumptionAutoAdapt: phys.consumptionAutoAdapt !== false,
+        isActive: phys.isActive ?? true,
       });
-      if (!id && id !== 0) {
-        // lastInsertRowId peut être 1+ ; 0 serait bizarre mais on vérifie falsy non-number
-      }
       if (id == null || Number(id) < 1) {
         throw new Error(`ID invalide (${String(id)}) — base locale inaccessible`);
       }
       await refresh();
-      setStatus(`OK — ${payload.name} (#${id})`);
-      notify('Véhicule ajouté', `${payload.name} est actif.`);
-      // Remplace l’écran modal par la liste véhicules
+      setStatus(`OK — ${phys.name} (#${id})`);
+      notify('Véhicule ajouté', `${phys.name} est actif.`);
       if (router.canGoBack()) {
         router.back();
       }
@@ -122,6 +149,7 @@ export default function AddVehicleScreen() {
   const addPresetNow = async (preset: VehiclePreset) => {
     if (loading) return;
     const vehicleName = presetDisplayName(preset);
+    const s = suggestPhysicsFields(preset.brand, preset.model);
     await saveVehicle({
       name: vehicleName,
       brand: preset.brand,
@@ -137,6 +165,11 @@ export default function AddVehicleScreen() {
       estimatedFuelLiters: null,
       consumptionAutoAdapt: true,
       isActive: true,
+      transmissionGears: s.transmissionGears,
+      curbWeightKg: s.curbWeightKg,
+      dragAreaScx: s.dragAreaScx,
+      vehicleSegment: s.vehicleSegment,
+      payloadKg: s.payloadKg,
     });
   };
 
@@ -149,6 +182,7 @@ export default function AddVehicleScreen() {
     setTankCapacity(String(preset.tank));
     setHasOdometer(!preset.odometerUnreliable);
     setName(presetDisplayName(preset));
+    applyPhysicsSuggest(preset.brand, preset.model);
     setStatus(`Formulaire rempli : ${presetDisplayName(preset)} — cliquez Enregistrer`);
   };
 
@@ -173,10 +207,18 @@ export default function AddVehicleScreen() {
       estimatedFuelLiters: null,
       consumptionAutoAdapt: true,
       isActive: true,
+      transmissionGears: gears.trim() ? parseInt(gears, 10) || null : null,
+      curbWeightKg: curbWeight.trim()
+        ? parseFloat(curbWeight.replace(',', '.')) || null
+        : null,
+      dragAreaScx: dragScx.trim() ? parseFloat(dragScx.replace(',', '.')) || null : null,
+      vehicleSegment: segment,
+      payloadKg: payload.trim() ? parseFloat(payload.replace(',', '.')) || null : null,
     });
   };
 
   const fuelTypes: FuelType[] = ['diesel', 'essence', 'gpl', 'electrique'];
+  const segments = Object.keys(SEGMENT_DEFAULTS) as VehicleSegment[];
 
   return (
     <ScrollView
@@ -186,7 +228,8 @@ export default function AddVehicleScreen() {
       nestedScrollEnabled
     >
       <Text style={[styles.hint, { color: colors.textSecondary }]}>
-        Favoris = modèles rapides. Un tap ajoute le véhicule tout de suite.
+        Favoris = modèles rapides. Un tap ajoute le véhicule tout de suite. Masse / SCx sont
+        préremplis selon le segment (modifiables).
       </Text>
 
       {!!status && (
@@ -255,9 +298,9 @@ export default function AddVehicleScreen() {
               <Text style={{ color: colors.text, fontWeight: '600' }}>
                 {preset.brand} {preset.model} ({preset.year}) · {preset.fuel}
               </Text>
-            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-              {preset.consumption} L/100 · réservoir {preset.tank} L
-            </Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                {preset.consumption} L/100 · réservoir {preset.tank} L
+              </Text>
             </View>
             <Text style={{ color: colors.accent, fontWeight: '700' }}>+ Ajouter</Text>
           </Pressable>
@@ -266,8 +309,22 @@ export default function AddVehicleScreen() {
 
       <Text style={[styles.sectionTitle, { color: colors.text }]}>Saisie manuelle</Text>
       <Input label="Nom du véhicule" placeholder="Mon 806" value={name} onChangeText={setName} />
-      <Input label="Marque" value={brand} onChangeText={setBrand} />
-      <Input label="Modèle" value={model} onChangeText={setModel} />
+      <Input
+        label="Marque"
+        value={brand}
+        onChangeText={(t) => {
+          setBrand(t);
+          if (t.trim() && model.trim()) applyPhysicsSuggest(t, model);
+        }}
+      />
+      <Input
+        label="Modèle"
+        value={model}
+        onChangeText={(t) => {
+          setModel(t);
+          if (brand.trim() && t.trim()) applyPhysicsSuggest(brand, t);
+        }}
+      />
       <Input label="Année" value={year} onChangeText={setYear} keyboardType="numeric" />
 
       <Text style={[styles.label, { color: colors.text }]}>Type de carburant</Text>
@@ -284,7 +341,13 @@ export default function AddVehicleScreen() {
             ]}
             onPress={() => setFuelType(type)}
           >
-            <Text style={{ color: fuelType === type ? '#fff' : colors.text, fontWeight: '600', fontSize: 13 }}>
+            <Text
+              style={{
+                color: fuelType === type ? '#fff' : colors.text,
+                fontWeight: '600',
+                fontSize: 13,
+              }}
+            >
               {FUEL_TYPE_LABELS[type]}
             </Text>
           </Pressable>
@@ -297,6 +360,72 @@ export default function AddVehicleScreen() {
         onChangeText={setConsumption}
         keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
       />
+
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>Physique (conso GPS)</Text>
+      <Text style={[styles.hint, { color: colors.textSecondary }]}>
+        Prérempli selon le modèle. Ajustez masse / SCx pour affiner sans boîtier OBD.
+      </Text>
+      <Text style={[styles.label, { color: colors.text }]}>Segment</Text>
+      <View style={styles.fuelTypes}>
+        {segments.map((seg) => (
+          <Pressable
+            key={seg}
+            style={[
+              styles.fuelChip,
+              {
+                backgroundColor: segment === seg ? colors.accent : colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={() => {
+              setSegment(seg);
+              const def = SEGMENT_DEFAULTS[seg];
+              setCurbWeight(String(def.curbWeightKg));
+              setDragScx(String(def.dragAreaScx));
+              setGears(String(def.gears));
+            }}
+          >
+            <Text
+              style={{
+                color: segment === seg ? '#fff' : colors.text,
+                fontWeight: '600',
+                fontSize: 12,
+              }}
+            >
+              {SEGMENT_DEFAULTS[seg].label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      <Input
+        label="Masse à vide (kg)"
+        value={curbWeight}
+        onChangeText={setCurbWeight}
+        keyboardType="numeric"
+        placeholder="1300"
+      />
+      <Input
+        label="S × Cx (m²)"
+        value={dragScx}
+        onChangeText={setDragScx}
+        keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
+        placeholder="0.68"
+      />
+      <Input
+        label="Charge (passagers / bagages, kg)"
+        value={payload}
+        onChangeText={setPayload}
+        keyboardType="numeric"
+        placeholder="150"
+      />
+      <Input
+        label="Boîte (nb de rapports)"
+        value={gears}
+        onChangeText={setGears}
+        keyboardType="numeric"
+        placeholder="5 ou 6"
+      />
+
       <Input
         label="Capacité réservoir (L)"
         value={tankCapacity}

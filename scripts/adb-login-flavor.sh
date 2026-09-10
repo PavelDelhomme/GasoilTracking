@@ -43,7 +43,7 @@ sleep 3
 
 # Si déjà connecté (pas d’écran auth), on sort OK
 DUMP=$("${ADB[@]}" exec-out uiautomator dump /dev/tty 2>/dev/null | sed 's/UI hier.*$//' || true)
-if echo "$DUMP" | grep -qiE 'Profil|Véhicules|Trajet|Budget|Accueil'; then
+if echo "$DUMP" | grep -qiE 'Profil|Véhicules|Mon Garage|Trajet|Budget|Accueil'; then
   if ! echo "$DUMP" | grep -qiE 'Connexion|Se connecter|Mot de passe'; then
     echo "Déjà sur l’app (session existante ?) — OK"
     exit 0
@@ -110,7 +110,7 @@ fi
 
 sleep 4
 DUMP3=$("${ADB[@]}" exec-out uiautomator dump /dev/tty 2>/dev/null | tr '\n' ' ' || true)
-if echo "$DUMP3" | grep -qiE 'Véhicules|Trajet|Budget|Profil|Accueil|sync'; then
+if echo "$DUMP3" | grep -qiE 'Véhicules|Mon Garage|Trajet|Budget|Profil|Accueil|sync'; then
   echo "LOGIN OK $FLAVOR"
   exit 0
 fi

@@ -518,6 +518,7 @@ export function calculateTripStats(
   const points = routePointsJson ? parseRoutePoints(routePointsJson) : [];
   const fuelUsed = estimateTripFuelLiters(vehicle, distanceKm, {
     learnedFactor: vehicle.consumptionLearnFactor,
+    points: points.length >= 2 ? points : undefined,
     avgSpeedKmh: points.length >= 2 ? averageMovingSpeedKmh(distanceKm, points) : undefined,
     idleRatio: idleRatioFromPoints(points),
     accelFactor: accelAggressionFactor(points),

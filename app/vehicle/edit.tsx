@@ -22,7 +22,8 @@ import { searchVehicles, presetDisplayName, type VehiclePreset } from '@/constan
 import { setFuelLiters } from '@/lib/fuelLevel';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
 import { refreshVehicleReminders } from '@/lib/reminders';
-import type { FuelType, Vehicle } from '@/types';
+import type { FuelType, Vehicle, VehicleSegment } from '@/types';
+import { SEGMENT_DEFAULTS, suggestPhysicsFields, resolveVehiclePhysics } from '@/lib/vehiclePhysics';
 
 /**
  * Modifier un véhicule existant.
@@ -50,6 +51,10 @@ export default function EditVehicleScreen() {
   const [notifyFuel, setNotifyFuel] = useState(false);
   const [fuelThreshold, setFuelThreshold] = useState('');
   const [gears, setGears] = useState('');
+  const [curbWeight, setCurbWeight] = useState('');
+  const [dragScx, setDragScx] = useState('');
+  const [payload, setPayload] = useState('150');
+  const [segment, setSegment] = useState<VehicleSegment>('sedan');
   const [plate, setPlate] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
@@ -87,6 +92,12 @@ export default function EditVehicleScreen() {
         v.lowFuelThresholdLiters != null ? String(v.lowFuelThresholdLiters) : ''
       );
       setGears(v.transmissionGears != null ? String(v.transmissionGears) : '');
+      const phys = resolveVehiclePhysics(v);
+      setSegment(phys.segment);
+      setCurbWeight(String(phys.curbWeightKg));
+      setDragScx(String(phys.dragAreaScx));
+      setPayload(String(phys.payloadKg));
+      if (v.transmissionGears == null) setGears(String(phys.gears ?? ''));
       setPlate(v.plateNumber || '');
       setSearch('');
       setVehicle(v);
@@ -111,6 +122,12 @@ export default function EditVehicleScreen() {
     if (!name.trim() || name === `${brand} ${model}` || /·/.test(name) === false) {
       setName(labeled);
     }
+    const s = suggestPhysicsFields(preset.brand, preset.model);
+    setSegment(s.vehicleSegment);
+    setCurbWeight(String(s.curbWeightKg));
+    setDragScx(String(s.dragAreaScx));
+    setGears(String(s.transmissionGears));
+    setPayload(String(s.payloadKg));
     setStatus(`Base catalogue : ${labeled} — ajustez puis enregistrez.`);
   };
 
@@ -142,6 +159,12 @@ export default function EditVehicleScreen() {
         transmissionGears: gears.trim()
           ? parseInt(gears.replace(',', '.'), 10) || null
           : null,
+        curbWeightKg: curbWeight.trim()
+          ? parseFloat(curbWeight.replace(',', '.')) || null
+          : null,
+        dragAreaScx: dragScx.trim() ? parseFloat(dragScx.replace(',', '.')) || null : null,
+        vehicleSegment: segment,
+        payloadKg: payload.trim() ? parseFloat(payload.replace(',', '.')) || null : null,
         plateNumber: plate.trim() || null,
       });
       await refresh();
@@ -262,6 +285,63 @@ export default function EditVehicleScreen() {
         placeholder="4, 5, 6…"
         keyboardType="numeric"
       />
+
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>Physique (conso GPS)</Text>
+      <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 8, lineHeight: 18 }}>
+        Masse et aérodynamique pour le modèle de forces. Valeurs par défaut selon le segment —
+        modifiez si vous connaissez la fiche technique.
+      </Text>
+      <Text style={[styles.label, { color: colors.text }]}>Segment</Text>
+      <View style={styles.fuelTypes}>
+        {(Object.keys(SEGMENT_DEFAULTS) as VehicleSegment[]).map((seg) => (
+          <Pressable
+            key={seg}
+            style={[
+              styles.fuelChip,
+              {
+                backgroundColor: segment === seg ? colors.accent : colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={() => {
+              setSegment(seg);
+              const def = SEGMENT_DEFAULTS[seg];
+              setCurbWeight(String(def.curbWeightKg));
+              setDragScx(String(def.dragAreaScx));
+              setGears(String(def.gears));
+            }}
+          >
+            <Text
+              style={{
+                color: segment === seg ? '#fff' : colors.text,
+                fontWeight: '600',
+                fontSize: 12,
+              }}
+            >
+              {SEGMENT_DEFAULTS[seg].label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      <Input
+        label="Masse à vide (kg)"
+        value={curbWeight}
+        onChangeText={setCurbWeight}
+        keyboardType="numeric"
+      />
+      <Input
+        label="S × Cx (m²)"
+        value={dragScx}
+        onChangeText={setDragScx}
+        keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
+      />
+      <Input
+        label="Charge (passagers / bagages, kg)"
+        value={payload}
+        onChangeText={setPayload}
+        keyboardType="numeric"
+      />
+
       {measuredConso != null && (
         <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 10, marginTop: -4 }}>
           Mesurée sur vos pleins : ~{measuredConso.toFixed(1)} L/100

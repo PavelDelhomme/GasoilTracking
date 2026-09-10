@@ -1,12 +1,21 @@
 /**
- * Modèle de consommation : âge véhicule, dénivelé, marge réaliste, vitesse en mouvement.
+ * Modèle de consommation :
+ * - physique (forces → puissance → litres) quand tracé GPS dispo
+ * - heuristique (facteurs L/100) en repli distance-only
  */
 import type { Vehicle } from '@/types';
+import {
+  AIR_DENSITY,
+  GRAVITY,
+  resolveVehiclePhysics,
+} from '@/lib/vehiclePhysics';
 
 export type PointLike = {
   latitude: number;
   longitude: number;
   timestamp: number;
+  /** Altitude (m) si connue (GPS ou profil Open-Meteo). */
+  altitude?: number | null;
 };
 
 function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -47,16 +56,18 @@ export const REAL_WORLD_MARGIN = 1.04;
 
 export type ConsumptionContext = {
   ascentM?: number;
+  /** Profil d’altitude (m) aligné sur points. */
+  altitudes?: number[];
   gears?: number | null;
   learnedFactor?: number;
-  /** Vitesse moyenne en mouvement (km/h) — impact conso */
   avgSpeedKmh?: number;
-  /** Part du temps quasi à l’arrêt (0–1) — embouteillage / feux */
   idleRatio?: number;
-  /** Facteur accélérations / freinages (1 = neutre) */
   accelFactor?: number;
-  /** Facteur stop-and-go (1 = neutre) */
   stopGoFactor?: number;
+  /** Tracé GPS → active le modèle physique point à point. */
+  points?: PointLike[];
+  /** Forcer l’heuristique même si points fournis. */
+  forceHeuristic?: boolean;
 };
 
 /** Surconso vs vitesse : ville lente / autoroute rapide. */
@@ -78,10 +89,6 @@ export function trafficIdleFactor(idleRatio: number): number {
   return 1 + r * 0.12;
 }
 
-/**
- * Style de conduite (accélérations / freinages) à partir des vitesses segment.
- * Compte les |Δv| élevés → jusqu’à +12 %.
- */
 export function accelAggressionFactor(points: PointLike[]): number {
   if (points.length < 3) return 1;
   let samples = 0;
@@ -100,7 +107,6 @@ export function accelAggressionFactor(points: PointLike[]): number {
     if (v1 > 130 || v2 > 130) continue;
     samples += 1;
     const dv = Math.abs(v2 - v1);
-    // ~+15 km/h en < 4 s ≈ agressif
     if (dv >= 15 && Math.min(dt1, dt2) < 4000) harsh += 1;
   }
   if (samples < 8) return 1;
@@ -108,10 +114,6 @@ export function accelAggressionFactor(points: PointLike[]): number {
   return 1 + ratio * 0.14;
 }
 
-/**
- * Stop-and-go : transitions arrêt → mouvement (feux / bouchon).
- * Jusqu’à +10 %.
- */
 export function stopAndGoFactor(points: PointLike[]): number {
   if (points.length < 4) return 1;
   let transitions = 0;
@@ -122,16 +124,93 @@ export function stopAndGoFactor(points: PointLike[]): number {
     const dt = b.timestamp - a.timestamp;
     if (!Number.isFinite(dt) || dt <= 0 || dt > 180_000) continue;
     const dKm = haversineKm(a.latitude, a.longitude, b.latitude, b.longitude);
-    const speedKmh = dKm / (dt / 3600000);
+    const speedKmh = dKm / (dt / 3_600_000);
     const idle = speedKmh < 5;
     if (wasIdle && !idle) transitions += 1;
     wasIdle = idle;
   }
-  const per10kmProxy = Math.min(25, transitions); // borne
-  return 1 + (per10kmProxy / 25) * 0.1;
+  const ratio = Math.min(0.5, transitions / Math.max(1, points.length / 4));
+  return 1 + ratio * 0.2;
 }
 
-export function estimateTripFuelLiters(
+const IDLE_POWER_W = 1750;
+
+/**
+ * Modèle physique : somme des débits L/s sur chaque segment GPS.
+ * F = Fair + Froll + Fgrade + Finertia ; P_moteur = P_roues / η_trans (0 si frein moteur).
+ */
+export function estimateTripFuelPhysics(
+  vehicle: Vehicle,
+  points: PointLike[],
+  opts?: { altitudes?: number[]; learnedFactor?: number }
+): number {
+  if (points.length < 2) return 0;
+  const phys = resolveVehiclePhysics(vehicle);
+  const learned =
+    opts?.learnedFactor && opts.learnedFactor > 0.5
+      ? opts.learnedFactor
+      : vehicle.consumptionLearnFactor && vehicle.consumptionLearnFactor > 0.5
+        ? vehicle.consumptionLearnFactor
+        : 1;
+
+  const alts = opts?.altitudes;
+  let liters = 0;
+  let prevV = 0;
+
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const dt = (b.timestamp - a.timestamp) / 1000;
+    if (!Number.isFinite(dt) || dt <= 0 || dt > 180) continue;
+    const dKm = haversineKm(a.latitude, a.longitude, b.latitude, b.longitude);
+    const dM = dKm * 1000;
+    if (dM > 500) continue;
+    const v = dM / dt;
+    if (v > 50) continue;
+    const accel = (v - prevV) / dt;
+    prevV = v;
+
+    let sinTheta = 0;
+    let cosTheta = 1;
+    const altA =
+      alts && alts[i - 1] != null
+        ? alts[i - 1]
+        : a.altitude != null
+          ? a.altitude
+          : null;
+    const altB =
+      alts && alts[i] != null ? alts[i] : b.altitude != null ? b.altitude : null;
+    if (altA != null && altB != null && dM > 0.5) {
+      const rise = altB - altA;
+      const ratio = Math.max(-0.35, Math.min(0.35, rise / dM));
+      sinTheta = ratio;
+      cosTheta = Math.sqrt(Math.max(0, 1 - ratio * ratio));
+    }
+
+    const vAir = Math.max(0, v);
+    const fAir = 0.5 * AIR_DENSITY * phys.dragAreaScx * vAir * vAir;
+    const fRoll = phys.rollingCr * phys.massKg * GRAVITY * cosTheta;
+    const fGrade = phys.massKg * GRAVITY * sinTheta;
+    const fInert = phys.massKg * Math.max(-6, Math.min(6, accel));
+    const fTotal = fAir + fRoll + fGrade + fInert;
+
+    let pMotor = 0;
+    if (vAir < 2 / 3.6) {
+      pMotor = IDLE_POWER_W;
+    } else if (fTotal > 0) {
+      pMotor = (fTotal * vAir) / phys.etaTrans;
+    }
+
+    const denom = phys.etaEngine * phys.energyJPerL;
+    if (denom <= 0) continue;
+    liters += (pMotor / denom) * dt;
+  }
+
+  liters *= learned;
+  return Math.round(Math.max(0, liters) * 100) / 100;
+}
+
+function estimateTripFuelHeuristic(
   vehicle: Vehicle,
   distanceKm: number,
   ctx: ConsumptionContext = {}
@@ -151,11 +230,29 @@ export function estimateTripFuelLiters(
   const traffic = trafficIdleFactor(ctx.idleRatio ?? 0);
   const accel = ctx.accelFactor && ctx.accelFactor > 0.9 ? ctx.accelFactor : 1;
   const stopGo = ctx.stopGoFactor && ctx.stopGoFactor > 0.9 ? ctx.stopGoFactor : 1;
-  // Évite l’empilement agressif — l’estimation reste proche de la conso véhicule
-  // (recalibrée à chaque plein). Les facteurs ne font qu’un léger ajustement trajet.
   const situational = Math.min(1.1, speed * traffic * accel * stopGo);
   const l100 = base * age * gear * REAL_WORLD_MARGIN * learned * elev * situational;
   return Math.round(((distanceKm * l100) / 100) * 100) / 100;
+}
+
+/**
+ * Estimation litres pour un trajet.
+ * Priorité : modèle physique si `ctx.points` (≥2) ; sinon heuristique L/100.
+ */
+export function estimateTripFuelLiters(
+  vehicle: Vehicle,
+  distanceKm: number,
+  ctx: ConsumptionContext = {}
+): number {
+  if (distanceKm <= 0 && !(ctx.points && ctx.points.length >= 2)) return 0;
+  if (!ctx.forceHeuristic && ctx.points && ctx.points.length >= 2) {
+    const phys = estimateTripFuelPhysics(vehicle, ctx.points, {
+      altitudes: ctx.altitudes,
+      learnedFactor: ctx.learnedFactor,
+    });
+    if (phys > 0 || distanceKm <= 0.05) return phys;
+  }
+  return estimateTripFuelHeuristic(vehicle, distanceKm, ctx);
 }
 
 export function movingDurationMinutes(points: PointLike[]): number {
@@ -180,7 +277,6 @@ export function averageMovingSpeedKmh(distanceKm: number, points: PointLike[]): 
   return (distanceKm / mins) * 60;
 }
 
-/** Ratio de temps passé quasi à l’arrêt (< 5 km/h) sur la durée totale du tracé. */
 export function idleRatioFromPoints(points: PointLike[]): number {
   if (points.length < 2) return 0;
   let totalMs = 0;
@@ -203,53 +299,40 @@ export type RouteSpeedStats = {
   avgKmh: number;
   maxKmh: number;
   minKmh: number;
-  /** Vitesse estimée au point i (0 au départ) */
   pointSpeedsKmh: number[];
 };
 
-/** Plafond réaliste FR (hors erreur GPS). */
 export const MAX_PLAUSIBLE_SPEED_KMH = 130;
 
-/**
- * Vitesses segment par segment (device `speed` ou haversine/dt).
- * Ignore arrêt / outliers / sauts GPS.
- */
 export function computeRouteSpeedStats(
   points: Array<PointLike & { speed?: number }>
 ): RouteSpeedStats {
-  const pointSpeedsKmh = points.map(() => 0);
-  const samples: number[] = [];
+  const pointSpeedsKmh: number[] = [0];
+  const speeds: number[] = [];
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1];
     const b = points[i];
-    let kmh = 0;
-    if (b.speed != null && Number.isFinite(b.speed) && b.speed >= 0) {
-      kmh = b.speed * 3.6;
-    } else {
-      const dt = b.timestamp - a.timestamp;
-      if (!Number.isFinite(dt) || dt <= 0 || dt > 180_000) continue;
-      const dKm = haversineKm(a.latitude, a.longitude, b.latitude, b.longitude);
-      // Saut GPS : > 400 m en < 3 s → ignorer
-      if (dKm > 0.4 && dt < 3000) continue;
-      kmh = dKm / (dt / 3_600_000);
+    const dt = b.timestamp - a.timestamp;
+    if (!Number.isFinite(dt) || dt <= 0 || dt > 180_000) {
+      pointSpeedsKmh.push(pointSpeedsKmh[pointSpeedsKmh.length - 1] || 0);
+      continue;
     }
-    if (kmh < 3 || kmh > MAX_PLAUSIBLE_SPEED_KMH) continue;
-    pointSpeedsKmh[i] = Math.round(kmh * 10) / 10;
-    samples.push(kmh);
+    const fromDevice = typeof b.speed === 'number' && b.speed >= 0 ? b.speed * 3.6 : null;
+    const dKm = haversineKm(a.latitude, a.longitude, b.latitude, b.longitude);
+    const fromGeo = dKm / (dt / 3_600_000);
+    const v = fromDevice != null && fromDevice < MAX_PLAUSIBLE_SPEED_KMH ? fromDevice : fromGeo;
+    if (v > 0.5 && v <= MAX_PLAUSIBLE_SPEED_KMH) speeds.push(v);
+    pointSpeedsKmh.push(v > MAX_PLAUSIBLE_SPEED_KMH ? 0 : v);
   }
-  if (!samples.length) {
-    return { avgKmh: 0, maxKmh: 0, minKmh: 0, pointSpeedsKmh };
-  }
-  const sum = samples.reduce((a, b) => a + b, 0);
+  if (!speeds.length) return { avgKmh: 0, maxKmh: 0, minKmh: 0, pointSpeedsKmh };
   return {
-    avgKmh: Math.round((sum / samples.length) * 10) / 10,
-    maxKmh: Math.round(Math.max(...samples) * 10) / 10,
-    minKmh: Math.round(Math.min(...samples) * 10) / 10,
+    avgKmh: speeds.reduce((s, x) => s + x, 0) / speeds.length,
+    maxKmh: Math.max(...speeds),
+    minKmh: Math.min(...speeds),
     pointSpeedsKmh,
   };
 }
 
-/** Affichage durée trajet (minutes → « 42 min » / « 1 h 05 »). */
 export function formatDurationMinutes(mins: number): string {
   const m = Math.max(0, Math.round(mins));
   if (m < 60) return `${m} min`;
@@ -259,9 +342,25 @@ export function formatDurationMinutes(mins: number): string {
 }
 
 export async function fetchElevationAscentM(points: PointLike[]): Promise<number> {
-  if (points.length < 2) return 0;
+  const profile = await fetchElevationProfile(points);
+  if (profile.length < 2) return 0;
+  let ascent = 0;
+  for (let i = 1; i < profile.length; i++) {
+    const d = profile[i] - profile[i - 1];
+    if (d > 1) ascent += d;
+  }
+  return Math.round(ascent);
+}
+
+/** Profil d’altitude (m) le long du tracé (Open-Meteo), interpolé. */
+export async function fetchElevationProfile(points: PointLike[]): Promise<number[]> {
+  if (points.length < 2) return [];
   const step = Math.max(1, Math.ceil(points.length / 40));
-  const sample = points.filter((_, i) => i % step === 0 || i === points.length - 1);
+  const sampleIdx: number[] = [];
+  for (let i = 0; i < points.length; i++) {
+    if (i % step === 0 || i === points.length - 1) sampleIdx.push(i);
+  }
+  const sample = sampleIdx.map((i) => points[i]);
   const lats = sample.map((p) => p.latitude.toFixed(5)).join(',');
   const lons = sample.map((p) => p.longitude.toFixed(5)).join(',');
   const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -272,18 +371,26 @@ export async function fetchElevationAscentM(points: PointLike[]): Promise<number
       headers: { Accept: 'application/json', 'User-Agent': 'GasoilTracking/1.4' },
       signal: ctrl?.signal,
     });
-    if (!res.ok) return 0;
+    if (!res.ok) return [];
     const data = (await res.json()) as { elevation?: number[] };
     const elev = data.elevation;
-    if (!Array.isArray(elev) || elev.length < 2) return 0;
-    let ascent = 0;
-    for (let i = 1; i < elev.length; i++) {
-      const d = elev[i] - elev[i - 1];
-      if (d > 1) ascent += d;
+    if (!Array.isArray(elev) || elev.length !== sample.length) return [];
+    const out = new Array(points.length).fill(elev[0]);
+    for (let s = 0; s < sampleIdx.length; s++) out[sampleIdx[s]] = elev[s];
+    for (let s = 0; s < sampleIdx.length - 1; s++) {
+      const i0 = sampleIdx[s];
+      const i1 = sampleIdx[s + 1];
+      const e0 = elev[s];
+      const e1 = elev[s + 1];
+      const span = i1 - i0;
+      for (let i = i0 + 1; i < i1; i++) {
+        const t = (i - i0) / span;
+        out[i] = e0 + (e1 - e0) * t;
+      }
     }
-    return Math.round(ascent);
+    return out;
   } catch {
-    return 0;
+    return [];
   } finally {
     clearTimeout(timer);
   }
@@ -298,10 +405,6 @@ export function learnedFactorFromGauge(
   return Math.min(1.55, Math.max(0.85, raw));
 }
 
-/**
- * Calibration conso à partir des pleins complets (L/100 réelle vs catalogue).
- * Retourne un facteur ~0.85–1.55 ou null si pas assez d’échantillons.
- */
 export function learnFactorFromFullFillUps(
   fillUps: Array<{ liters: number; distanceSinceLastKm: number | null; isFull: boolean }>,
   catalogueL100: number

@@ -82,7 +82,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { shouldDeleteShortTrip } from '@/lib/shortTrip';
 import {
   estimateTripFuelLiters,
-  fetchElevationAscentM,
+  fetchElevationProfile,
   averageMovingSpeedKmh,
   idleRatioFromPoints,
   accelAggressionFactor,
@@ -1211,7 +1211,13 @@ export default function TripScreen() {
       const vehicle =
         (vehicleSnapshot && (await getVehicleById(vehicleSnapshot.id).catch(() => null))) ||
         vehicleSnapshot;
-      const ascentM = await fetchElevationAscentM(pts).catch(() => 0);
+      const altitudes = await fetchElevationProfile(pts).catch(() => [] as number[]);
+      let ascentM = 0;
+      for (let i = 1; i < altitudes.length; i++) {
+        const d = altitudes[i] - altitudes[i - 1];
+        if (d > 1) ascentM += d;
+      }
+      ascentM = Math.round(ascentM);
       const avgSpeedKmh = averageMovingSpeedKmh(trip.distanceKm, pts);
       const idleRatio = idleRatioFromPoints(pts);
       const accelFactor = accelAggressionFactor(pts);
@@ -1219,6 +1225,8 @@ export default function TripScreen() {
       const fuelUsed = vehicle
         ? estimateTripFuelLiters(vehicle, trip.distanceKm, {
             ascentM,
+            altitudes: altitudes.length >= 2 ? altitudes : undefined,
+            points: pts,
             learnedFactor: vehicle.consumptionLearnFactor,
             avgSpeedKmh,
             idleRatio,

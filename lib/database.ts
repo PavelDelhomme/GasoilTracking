@@ -162,6 +162,10 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
   await alterSafe('ALTER TABLE vehicles ADD COLUMN low_fuel_threshold_liters REAL');
   await alterSafe('ALTER TABLE vehicles ADD COLUMN consumption_learn_factor REAL NOT NULL DEFAULT 1');
   await alterSafe('ALTER TABLE vehicles ADD COLUMN transmission_gears INTEGER');
+  await alterSafe('ALTER TABLE vehicles ADD COLUMN curb_weight_kg REAL');
+  await alterSafe('ALTER TABLE vehicles ADD COLUMN drag_area_scx REAL');
+  await alterSafe('ALTER TABLE vehicles ADD COLUMN vehicle_segment TEXT');
+  await alterSafe('ALTER TABLE vehicles ADD COLUMN payload_kg REAL');
   await alterSafe('ALTER TABLE vehicles ADD COLUMN maintenance_up_to_date INTEGER');
   await alterSafe('ALTER TABLE vehicles ADD COLUMN maintenance_checklist TEXT');
   await alterSafe('ALTER TABLE vehicles ADD COLUMN plate_number TEXT');
@@ -210,6 +214,22 @@ function mapVehicle(row: unknown): Vehicle {
       r.transmission_gears === null || r.transmission_gears === undefined
         ? null
         : (r.transmission_gears as number),
+    curbWeightKg:
+      r.curb_weight_kg === null || r.curb_weight_kg === undefined
+        ? null
+        : (r.curb_weight_kg as number),
+    dragAreaScx:
+      r.drag_area_scx === null || r.drag_area_scx === undefined
+        ? null
+        : (r.drag_area_scx as number),
+    vehicleSegment:
+      r.vehicle_segment === null || r.vehicle_segment === undefined
+        ? null
+        : (r.vehicle_segment as Vehicle['vehicleSegment']),
+    payloadKg:
+      r.payload_kg === null || r.payload_kg === undefined
+        ? null
+        : (r.payload_kg as number),
     maintenanceUpToDate:
       r.maintenance_up_to_date === null || r.maintenance_up_to_date === undefined
         ? null
@@ -486,8 +506,8 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
       await database.runAsync('UPDATE vehicles SET is_active = 0');
     }
     const result = await database.runAsync(
-      `INSERT INTO vehicles (name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, consumption_learn_factor, transmission_gears, is_active, plate_number, registration_photo_uri)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO vehicles (name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, consumption_learn_factor, transmission_gears, curb_weight_kg, drag_area_scx, vehicle_segment, payload_kg, is_active, plate_number, registration_photo_uri)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         vehicle.name,
         vehicle.brand,
@@ -507,6 +527,10 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
         vehicle.lowFuelThresholdLiters ?? null,
         vehicle.consumptionLearnFactor ?? 1,
         vehicle.transmissionGears ?? null,
+        vehicle.curbWeightKg ?? null,
+        vehicle.dragAreaScx ?? null,
+        vehicle.vehicleSegment ?? null,
+        vehicle.payloadKg ?? null,
         vehicle.isActive ? 1 : 0,
         vehicle.plateNumber ?? null,
         vehicle.registrationPhotoUri ?? null,
@@ -574,6 +598,22 @@ export async function updateVehicle(id: number, vehicle: Partial<Vehicle>): Prom
   if (vehicle.transmissionGears !== undefined) {
     fields.push('transmission_gears = ?');
     values.push(vehicle.transmissionGears);
+  }
+  if (vehicle.curbWeightKg !== undefined) {
+    fields.push('curb_weight_kg = ?');
+    values.push(vehicle.curbWeightKg);
+  }
+  if (vehicle.dragAreaScx !== undefined) {
+    fields.push('drag_area_scx = ?');
+    values.push(vehicle.dragAreaScx);
+  }
+  if (vehicle.vehicleSegment !== undefined) {
+    fields.push('vehicle_segment = ?');
+    values.push(vehicle.vehicleSegment);
+  }
+  if (vehicle.payloadKg !== undefined) {
+    fields.push('payload_kg = ?');
+    values.push(vehicle.payloadKg);
   }
   if (vehicle.maintenanceUpToDate !== undefined) {
     fields.push('maintenance_up_to_date = ?');
@@ -1278,8 +1318,8 @@ export async function replaceAllData(data: {
 
       for (const v of data.vehicles || []) {
         await database.runAsync(
-          `INSERT INTO vehicles (id, name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, consumption_learn_factor, transmission_gears, is_active, created_at, plate_number, registration_photo_uri)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO vehicles (id, name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, consumption_learn_factor, transmission_gears, curb_weight_kg, drag_area_scx, vehicle_segment, payload_kg, is_active, created_at, plate_number, registration_photo_uri)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             v.id,
             v.name,
@@ -1300,6 +1340,10 @@ export async function replaceAllData(data: {
             v.lowFuelThresholdLiters ?? null,
             v.consumptionLearnFactor ?? 1,
             v.transmissionGears ?? null,
+            v.curbWeightKg ?? null,
+            v.dragAreaScx ?? null,
+            v.vehicleSegment ?? null,
+            v.payloadKg ?? null,
             v.isActive ? 1 : 0,
             v.createdAt || new Date().toISOString(),
             v.plateNumber ?? null,

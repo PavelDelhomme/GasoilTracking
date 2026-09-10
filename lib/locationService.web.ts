@@ -71,6 +71,7 @@ async function flushPending() {
       const pts = parseRoutePoints(routePoints);
       const fuelUsed = estimateTripFuelLiters(vehicle, distanceKm, {
         learnedFactor: vehicle.consumptionLearnFactor,
+        points: pts,
         avgSpeedKmh: averageMovingSpeedKmh(distanceKm, pts),
         idleRatio: idleRatioFromPoints(pts),
         accelFactor: accelAggressionFactor(pts),

@@ -1,5 +1,8 @@
 export type FuelType = 'diesel' | 'essence' | 'gpl' | 'electrique';
 
+/** Segment pour défauts masse / SCx (modèle physique). */
+export type VehicleSegment = 'city' | 'sedan' | 'suv' | 'mpv' | 'van' | 'pickup';
+
 export interface Vehicle {
   id: number;
   name: string;
@@ -39,6 +42,14 @@ export interface Vehicle {
   consumptionLearnFactor?: number;
   /** Nombre de rapports (4 / 5 / 6…) pour affiner la conso. */
   transmissionGears?: number | null;
+  /** Masse à vide (kg) — modèle physique ; défaut selon segment. */
+  curbWeightKg?: number | null;
+  /** Surface frontale × Cx (m²) — modèle physique. */
+  dragAreaScx?: number | null;
+  /** Segment (citadine, SUV…) pour défauts auto. */
+  vehicleSegment?: VehicleSegment | null;
+  /** Charge conducteur + passagers / bagages (kg), défaut ~150. */
+  payloadKg?: number | null;
   /**
    * Entretien régulier à jour ? null = non renseigné, true = Oui, false = Non.
    */

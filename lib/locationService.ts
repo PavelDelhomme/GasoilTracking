@@ -124,6 +124,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
       const distanceKm = calculateRouteDistance(routePoints);
       const fuelUsed = estimateTripFuelLiters(vehicle, distanceKm, {
         learnedFactor: vehicle.consumptionLearnFactor,
+        points,
         avgSpeedKmh: averageMovingSpeedKmh(distanceKm, points),
         idleRatio: idleRatioFromPoints(points),
         accelFactor: accelAggressionFactor(points),

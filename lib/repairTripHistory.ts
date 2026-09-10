@@ -18,7 +18,7 @@ import {
 import {
   computeRouteSpeedStats,
   estimateTripFuelLiters,
-  fetchElevationAscentM,
+  fetchElevationProfile,
 } from '@/lib/consumptionModel';
 import { parseRoutePoints, haversineDistance } from '@/lib/calculations';
 import { SIM_HOME, SIM_WORK } from '@/lib/gpsCarSimulator';
@@ -127,11 +127,19 @@ async function fillEmptyRoute(trip: Trip, places: Place[]): Promise<boolean> {
 
   const vehicle = await getVehicleById(trip.vehicleId);
   const elevPts = parseRoutePoints(routeJson);
-  const ascent = await fetchElevationAscentM(elevPts);
+  const altitudes = await fetchElevationProfile(elevPts);
+  let ascent = 0;
+  for (let i = 1; i < altitudes.length; i++) {
+    const d = altitudes[i] - altitudes[i - 1];
+    if (d > 1) ascent += d;
+  }
+  ascent = Math.round(ascent);
   const speeds = computeRouteSpeedStats(elevPts);
   const fuel = vehicle
     ? estimateTripFuelLiters(vehicle, distanceKm, {
         ascentM: ascent,
+        altitudes: altitudes.length >= 2 ? altitudes : undefined,
+        points: elevPts,
         learnedFactor: vehicle.consumptionLearnFactor,
         avgSpeedKmh: speeds.avgKmh || 68,
       })
@@ -195,10 +203,18 @@ async function ensureOutboundForDay(
     timestamp: startTs + Math.round((i / Math.max(1, n - 1)) * durationMin * 60_000),
   }));
   const distanceKm = route.distanceKm;
-  const elev = await fetchElevationAscentM(stamped);
+  const elevProfile = await fetchElevationProfile(stamped);
+  let elev = 0;
+  for (let i = 1; i < elevProfile.length; i++) {
+    const d = elevProfile[i] - elevProfile[i - 1];
+    if (d > 1) elev += d;
+  }
+  elev = Math.round(elev);
   const speeds = computeRouteSpeedStats(stamped);
   const fuel = estimateTripFuelLiters(vehicle, distanceKm, {
     ascentM: elev,
+    altitudes: elevProfile.length >= 2 ? elevProfile : undefined,
+    points: stamped,
     learnedFactor: vehicle.consumptionLearnFactor,
     avgSpeedKmh: speeds.avgKmh || 68,
   });
@@ -315,11 +331,19 @@ export async function fixImplausibleTripSpeeds(vehicleId?: number): Promise<numb
       const stamped = stampRouteAtSpeed(route.coordinates, startTs, mins);
       const distanceKm = route.distanceKm;
       const vehicle = await getVehicleById(t.vehicleId);
-      const ascent = await fetchElevationAscentM(stamped);
+      const ascentProfile = await fetchElevationProfile(stamped);
+      let ascent = 0;
+      for (let i = 1; i < ascentProfile.length; i++) {
+        const d = ascentProfile[i] - ascentProfile[i - 1];
+        if (d > 1) ascent += d;
+      }
+      ascent = Math.round(ascent);
       const speeds = computeRouteSpeedStats(stamped);
       const fuel = vehicle
         ? estimateTripFuelLiters(vehicle, distanceKm, {
             ascentM: ascent,
+            altitudes: ascentProfile.length >= 2 ? ascentProfile : undefined,
+            points: stamped,
             learnedFactor: vehicle.consumptionLearnFactor,
             avgSpeedKmh: speeds.avgKmh || 68,
           })

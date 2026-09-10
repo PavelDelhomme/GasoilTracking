@@ -70,6 +70,10 @@ async function load(): Promise<Store> {
         lowFuelThresholdLiters: v.lowFuelThresholdLiters ?? null,
         consumptionLearnFactor: v.consumptionLearnFactor ?? 1,
         transmissionGears: v.transmissionGears ?? null,
+        curbWeightKg: v.curbWeightKg ?? null,
+        dragAreaScx: v.dragAreaScx ?? null,
+        vehicleSegment: v.vehicleSegment ?? null,
+        payloadKg: v.payloadKg ?? null,
         maintenanceUpToDate: v.maintenanceUpToDate ?? null,
         maintenanceChecklist: v.maintenanceChecklist,
         plateNumber: v.plateNumber ?? null,
@@ -153,6 +157,10 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
     lowFuelThresholdLiters: vehicle.lowFuelThresholdLiters ?? null,
     consumptionLearnFactor: vehicle.consumptionLearnFactor ?? 1,
     transmissionGears: vehicle.transmissionGears ?? null,
+    curbWeightKg: vehicle.curbWeightKg ?? null,
+    dragAreaScx: vehicle.dragAreaScx ?? null,
+    vehicleSegment: vehicle.vehicleSegment ?? null,
+    payloadKg: vehicle.payloadKg ?? null,
     createdAt: nowIso(),
   });
   await save(s);
