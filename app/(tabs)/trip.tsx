@@ -153,6 +153,8 @@ export default function TripScreen() {
     purgeFirst?: string;
     tab?: string;
     reset?: string;
+    /** Nonce pour forcer un reset même si reset=1 inchangé (2ᵉ appui FAB Accueil). */
+    r?: string;
   }>();
   const { activeVehicle, activeTrip, refresh, vehicles, selectVehicle } = useApp();
   const { colors } = useTheme();
@@ -341,8 +343,9 @@ export default function TripScreen() {
         setTab(params.tab);
       }
       const resetFlag = Array.isArray(params.reset) ? params.reset[0] : params.reset;
+      const resetNonce = Array.isArray(params.r) ? params.r[0] : params.r;
       if (resetFlag === '1') {
-        const key = `${params.tab || ''}|${resetFlag}|${params.dest || ''}`;
+        const key = `${params.tab || ''}|${resetFlag}|${resetNonce || ''}|${params.dest || ''}`;
         if (resetHandledRef.current !== key) {
           resetHandledRef.current = key;
           setTab('live');
@@ -367,6 +370,7 @@ export default function TripScreen() {
       params.destLon,
       params.tab,
       params.reset,
+      params.r,
     ])
   );
 
@@ -1877,8 +1881,8 @@ export default function TripScreen() {
             <FloatingFuelBadge
               liters={liveFuelRemaining}
               tankCapacity={activeVehicle?.tankCapacity || 50}
-              bottomInset={120 + insets.bottom}
-              topInset={100}
+              bottomInset={140 + insets.bottom}
+              topInset={96 + insets.top}
             />
           ) : null}
           <View style={styles.map}>
@@ -2556,6 +2560,7 @@ export default function TripScreen() {
                 styles.stickyStart,
                 {
                   paddingBottom: Math.max(12, insets.bottom + 8),
+                  paddingRight: 72,
                   backgroundColor: colors.background,
                   borderTopColor: colors.border,
                 },
@@ -2587,7 +2592,8 @@ export default function TripScreen() {
           {!activeTrip ? (
             <SpeedDialFab
               fan
-              extraBottom={!activeTrip && activeVehicle ? 64 : 0}
+              anchor="content"
+              extraBottom={activeVehicle ? 10 : 0}
               actions={[
                 {
                   key: 'maps',
@@ -3008,7 +3014,7 @@ const styles = StyleSheet.create({
     textShadowRadius: 2,
   },
   panel: { flex: 1 },
-  panelContent: { padding: 16, paddingBottom: 40 },
+  panelContent: { padding: 16, paddingBottom: 100 },
   stickyStart: {
     position: 'absolute',
     left: 0,

@@ -799,7 +799,7 @@ export default function HomeScreen() {
                   }
                   router.push({
                     pathname: '/(tabs)/trip',
-                    params: { tab: 'live', reset: '1' },
+                    params: { tab: 'live', reset: '1', r: String(Date.now()) },
                   } as never);
                 },
               },

@@ -110,7 +110,7 @@ export function AccountDrawer() {
                 {user ? `${user.name} · ${user.email}` : 'Non connecté — données locales'}
               </Text>
               <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }}>
-                v{getLocalAppVersion()} · {flavor.androidPackage}
+                v{getLocalAppVersion()}
                 {info?.version ? ` · serveur ${info.version}` : ''}
               </Text>
             </View>

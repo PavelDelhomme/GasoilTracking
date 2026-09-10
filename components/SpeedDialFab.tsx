@@ -20,6 +20,11 @@ type Props = {
   fan?: boolean;
   /** Décalage bas supplémentaire (ex. bouton sticky) */
   extraBottom?: number;
+  /**
+   * `screen` = compte la tab bar (~56).
+   * `content` = déjà au-dessus des tabs (ex. page Trajet) — évite double décalage.
+   */
+  anchor?: 'screen' | 'content';
 };
 
 function ActionIcon({
@@ -40,11 +45,19 @@ function ActionIcon({
 /**
  * FAB actions — dual (plein + trajet), éventail, ou speed-dial « + ».
  */
-export function SpeedDialFab({ actions, disabled, dual, fan, extraBottom = 0 }: Props) {
+export function SpeedDialFab({
+  actions,
+  disabled,
+  dual,
+  fan,
+  extraBottom = 0,
+  anchor = 'screen',
+}: Props) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
-  const bottom = Math.max(16, insets.bottom + 8) + 56 + extraBottom;
+  const tabLift = anchor === 'screen' ? 56 : 0;
+  const bottom = Math.max(12, insets.bottom + (anchor === 'content' ? 4 : 8)) + tabLift + extraBottom;
 
   if (dual && actions.length >= 1) {
     const primary = actions[0];
