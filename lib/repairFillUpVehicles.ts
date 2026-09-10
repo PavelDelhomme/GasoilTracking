@@ -1,6 +1,7 @@
 import {
   getBudgets,
   getFillUps,
+  getTrips,
   getVehicles,
   updateBudget,
   updateFillUp,
@@ -15,12 +16,17 @@ export const TOTAL_THORIGNE_GAZOLE_EUR = 2.25;
 /**
  * Tickets diesel Total Thorigné : montants payés exacts → litres recalculés au vrai prix/L.
  * (Les saisies avaient dérivé litres depuis defaultFuelPrice 1,72 € — irréaliste.)
+ * Note : le 02/09 70,04 € est un plein **essence 206**, pas diesel 806.
  */
 const DIESEL_TICKETS: { totalCost: number; day: string }[] = [
-  { totalCost: 70.04, day: '2026-09-02' },
   { totalCost: 104.03, day: '2026-08-25' },
   { totalCost: 78.37, day: '2026-08-18' },
   { totalCost: 76.39, day: '2026-08-12' }, // Touran — même station
+];
+
+/** Tickets essence Total Thorigné (206). */
+const ESSENCE_TICKETS: { totalCost: number; day: string }[] = [
+  { totalCost: 70.04, day: '2026-09-02' },
 ];
 
 function almostEq(a: number, b: number, eps = 0.02): boolean {
@@ -59,7 +65,10 @@ export async function repairFillUpVehiclesAndBudgets(): Promise<{
       const day = String(f.date).slice(0, 10);
       let nextId: number | null = null;
       let nextNote: string | undefined;
-      if (v806 && (day === '2026-09-02' || day === '2026-08-25' || day === '2026-08-18')) {
+      // 02/09 70,04 € → 206 essence (corrigé : n’était pas le 806 diesel)
+      if (v206 && day === '2026-09-02' && almostEq(f.totalCost, 70.04)) {
+        nextId = v206.id;
+      } else if (v806 && (day === '2026-08-25' || day === '2026-08-18')) {
         nextId = v806.id;
       } else if (touran && day === '2026-08-12') {
         nextId = touran.id;
@@ -80,7 +89,7 @@ export async function repairFillUpVehiclesAndBudgets(): Promise<{
   }
 
   // Prix/L + litres : tickets diesel Total Thorigné
-  const fills = await getFillUps();
+  let fills = await getFillUps();
   for (const f of fills) {
     const day = String(f.date).slice(0, 10);
     const ticket = DIESEL_TICKETS.find(
@@ -108,7 +117,73 @@ export async function repairFillUpVehiclesAndBudgets(): Promise<{
     pricesFixed += 1;
   }
 
+  // Tickets essence 206 Total Thorigné
+  fills = await getFillUps();
+  for (const f of fills) {
+    const day = String(f.date).slice(0, 10);
+    const ticket = ESSENCE_TICKETS.find(
+      (t) => t.day === day && almostEq(f.totalCost, t.totalCost)
+    );
+    if (!ticket || !v206 || f.vehicleId !== v206.id) continue;
+
+    const ppl =
+      v206.defaultFuelPrice > 0.7 && v206.defaultFuelPrice < 3.5
+        ? v206.defaultFuelPrice
+        : 1.79;
+    const liters = litersFromTicket(f.totalCost, ppl);
+    const note = `Plein essence ${f.totalCost.toFixed(2).replace('.', ',')} € — Total Thorigné · ${ppl
+      .toFixed(2)
+      .replace('.', ',')} €/L · ${liters.toFixed(2).replace('.', ',')} L`;
+
+    const distPatch: { distanceSinceLastKm?: number } = {};
+    // Distance depuis le plein 206 précédent (20/08) via trajets GPS
+    try {
+      const trips = await getTrips(v206.id);
+      const prevFill = fills
+        .filter(
+          (x) =>
+            x.vehicleId === v206.id &&
+            x.id !== f.id &&
+            String(x.date) < String(f.date)
+        )
+        .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+      const from = prevFill ? String(prevFill.date) : '2026-08-20';
+      const to = String(f.date);
+      const km = trips
+        .filter(
+          (t) =>
+            t.status !== 'rejected' &&
+            String(t.startTime) >= from &&
+            String(t.startTime) < to
+        )
+        .reduce((s, t) => s + (t.distanceKm || 0), 0);
+      if (km > 1) distPatch.distanceSinceLastKm = Math.round(km * 10) / 10;
+    } catch {
+      /* ignore */
+    }
+
+    if (
+      almostEq(f.pricePerLiter, ppl) &&
+      almostEq(f.liters, liters) &&
+      (f.note || '') === note &&
+      (distPatch.distanceSinceLastKm == null ||
+        almostEq(f.distanceSinceLastKm ?? 0, distPatch.distanceSinceLastKm))
+    ) {
+      continue;
+    }
+
+    await updateFillUp(f.id, {
+      pricePerLiter: ppl,
+      liters,
+      note,
+      isFull: true,
+      ...distPatch,
+    });
+    pricesFixed += 1;
+  }
+
   // Prix défaut diesel + niveaux après dernier plein marqué « complet »
+  fills = await getFillUps();
   for (const v of vehicles) {
     if (v.fuelType !== 'diesel') continue;
     const patch: { defaultFuelPrice?: number; estimatedFuelLiters?: number } = {};
@@ -126,6 +201,35 @@ export async function repairFillUpVehiclesAndBudgets(): Promise<{
     if (Object.keys(patch).length > 0) {
       await updateVehicle(v.id, patch);
       if (patch.estimatedFuelLiters !== undefined) levelsFixed += 1;
+    }
+  }
+
+  // 206 : après plein complet du 02/09, niveau = réservoir − conso trajets depuis
+  if (v206) {
+    const vehicleFills = fills
+      .filter((f) => f.vehicleId === v206.id)
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    const last = vehicleFills[0];
+    if (last?.isFull && String(last.date).slice(0, 10) === '2026-09-02') {
+      try {
+        const trips = await getTrips(v206.id);
+        const burned = trips
+          .filter(
+            (t) =>
+              t.status !== 'rejected' && String(t.startTime) > String(last.date)
+          )
+          .reduce((s, t) => s + (t.estimatedFuelUsed || 0), 0);
+        const next = Math.max(
+          0,
+          Math.round((v206.tankCapacity - burned) * 10) / 10
+        );
+        if (v206.estimatedFuelLiters == null || !almostEq(v206.estimatedFuelLiters, next, 0.15)) {
+          await updateVehicle(v206.id, { estimatedFuelLiters: next });
+          levelsFixed += 1;
+        }
+      } catch {
+        /* ignore */
+      }
     }
   }
 
