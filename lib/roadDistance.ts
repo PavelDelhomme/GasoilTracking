@@ -8,6 +8,16 @@ import type { Place } from '@/types';
 
 export type Geo = { latitude: number; longitude: number };
 
+/** Manœuvre OSRM (turn-by-turn in-app). */
+export type RouteManeuver = {
+  instruction: string;
+  distanceM: number;
+  location: Geo;
+  type: string;
+  modifier?: string;
+  name?: string;
+};
+
 export type DrivingRoute = {
   id: string;
   label: string;
@@ -17,6 +27,8 @@ export type DrivingRoute = {
   coordinates: Geo[];
   /** Points intermédiaires utiles pour ouvrir Maps sur le même passage */
   via?: Geo[];
+  /** Étapes turn-by-turn (OSRM steps=true) */
+  steps?: RouteManeuver[];
   source: 'osrm' | 'estimate';
 };
 
@@ -31,7 +43,92 @@ type RawRoute = {
   durationMinutes: number | null;
   coordinates: Geo[];
   via?: Geo[];
+  steps?: RouteManeuver[];
 };
+
+/** Libellé FR à partir d’une manœuvre OSRM. */
+export function formatOsrmManeuver(
+  type: string | undefined,
+  modifier?: string,
+  name?: string
+): string {
+  const road = name?.trim() ? ` · ${name.trim()}` : '';
+  const mod = (modifier || '').toLowerCase();
+  const t = (type || '').toLowerCase();
+  switch (t) {
+    case 'depart':
+      return `Départ${road}`;
+    case 'arrive':
+      return `Arrivée${road}`;
+    case 'turn':
+      if (mod.includes('uturn')) return `Demi-tour${road}`;
+      if (mod.includes('left')) return `Tournez à gauche${road}`;
+      if (mod.includes('right')) return `Tournez à droite${road}`;
+      if (mod.includes('straight')) return `Tout droit${road}`;
+      return `Tournez${road}`;
+    case 'new name':
+    case 'continue':
+      return `Continuez${road}`;
+    case 'merge':
+      return `Fusionnez${road}`;
+    case 'on ramp':
+      return `Prenez la bretelle${road}`;
+    case 'off ramp':
+      return `Sortie${road}`;
+    case 'fork':
+      if (mod.includes('left')) return `Bifurcation à gauche${road}`;
+      if (mod.includes('right')) return `Bifurcation à droite${road}`;
+      return `Bifurcation${road}`;
+    case 'end of road':
+      if (mod.includes('left')) return `En bout de voie, à gauche${road}`;
+      if (mod.includes('right')) return `En bout de voie, à droite${road}`;
+      return `En bout de voie${road}`;
+    case 'roundabout':
+    case 'rotary':
+      return `Rond-point${road}`;
+    case 'exit roundabout':
+    case 'exit rotary':
+      return `Sortez du rond-point${road}`;
+    case 'notification':
+      return road ? `Attention${road}` : 'Attention';
+    default:
+      return road ? `Suivez ${name!.trim()}` : 'Continuez';
+  }
+}
+
+function parseOsrmSteps(
+  legs?: Array<{
+    steps?: Array<{
+      name?: string;
+      distance?: number;
+      maneuver?: {
+        type?: string;
+        modifier?: string;
+        location?: [number, number];
+      };
+    }>;
+  }>
+): RouteManeuver[] {
+  const out: RouteManeuver[] = [];
+  for (const leg of legs || []) {
+    for (const step of leg.steps || []) {
+      const loc = step.maneuver?.location;
+      if (!loc || loc.length < 2) continue;
+      const type = step.maneuver?.type || 'continue';
+      const modifier = step.maneuver?.modifier;
+      const name = step.name || undefined;
+      out.push({
+        instruction: formatOsrmManeuver(type, modifier, name),
+        distanceM: Math.max(0, Math.round(step.distance || 0)),
+        location: { latitude: loc[1], longitude: loc[0] },
+        type,
+        modifier,
+        name,
+      });
+    }
+  }
+  return out;
+}
 
 function downsampleGeo(pts: Geo[], max = 160): Geo[] {
   if (pts.length <= max) return pts;
@@ -59,7 +156,7 @@ async function osrmRoute(points: Geo[], maxAlternatives: number): Promise<RawRou
     maxAlternatives <= 0 ? 'false' : String(Math.max(1, Math.min(3, maxAlternatives)));
   const url =
     `https://router.project-osrm.org/route/v1/driving/${path}` +
-    `?overview=full&geometries=geojson&alternatives=${alt}&steps=false`;
+    `?overview=full&geometries=geojson&alternatives=${alt}&steps=true`;
   const res = await fetch(url, {
     headers: { Accept: 'application/json', 'User-Agent': 'GasoilTracking/1.4' },
   });
@@ -70,6 +167,17 @@ async function osrmRoute(points: Geo[], maxAlternatives: number): Promise<RawRou
       distance?: number;
       duration?: number;
       geometry?: { coordinates?: [number, number][] };
+      legs?: Array<{
+        steps?: Array<{
+          name?: string;
+          distance?: number;
+          maneuver?: {
+            type?: string;
+            modifier?: string;
+            location?: [number, number];
+          };
+        }>;
+      }>;
     }>;
   };
   if (data.code !== 'Ok' || !data.routes?.length) return [];
@@ -77,10 +185,12 @@ async function osrmRoute(points: Geo[], maxAlternatives: number): Promise<RawRou
     .filter((r) => r.distance != null && r.distance > 0)
     .map((r) => {
       const coordinates = toCoords(r.geometry);
+      const steps = parseOsrmSteps(r.legs);
       return {
         distanceKm: Math.round((r.distance! / 1000) * 10) / 10,
         durationMinutes: r.duration != null ? Math.round(r.duration / 60) : null,
         coordinates,
+        steps: steps.length ? steps : undefined,
       };
     });
 }
@@ -211,6 +321,7 @@ export async function fetchDrivingRouteAlternatives(
       coordinates: r.coordinates,
       // Uniquement un via OSRM réel — jamais un point milieu (ça devient un stop Maps)
       via: r.via?.length ? r.via : undefined,
+      steps: r.steps,
       source: 'osrm',
     });
     return true;

@@ -9,18 +9,22 @@ export type VehiclePreset = {
   tank: number;
   /** Si true : défaut hasOdometer=false (sans message UI) */
   odometerUnreliable?: boolean;
+  /** Masse à vide indicative (kg) — optionnel, sinon segment / KNOWN_PHYSICS */
+  curbWeightKg?: number;
+  /** Surface de traînée SCx (m²) — rare en open data, optionnel */
+  dragAreaScx?: number;
 };
 
 /** Catalogue searchable (conso & réservoir indicatifs constructeur / moyennes) */
 export const VEHICLE_CATALOG: VehiclePreset[] = [
   // Peugeot
   { brand: "Peugeot", model: "108", year: 2018, consumption: 4.6, fuel: 'essence', tank: 35 },
-  { brand: "Peugeot", model: "208", year: 2022, consumption: 4.1, fuel: 'essence', tank: 44 },
-  { brand: "Peugeot", model: "208", year: 2019, consumption: 3.7, fuel: 'diesel', tank: 50 },
-  { brand: "Peugeot", model: "2008", year: 2021, consumption: 4.8, fuel: 'essence', tank: 44 },
-  { brand: "Peugeot", model: "308", year: 2022, consumption: 4.2, fuel: 'essence', tank: 52 },
-  { brand: "Peugeot", model: "308 SW", year: 2020, consumption: 4.5, fuel: 'diesel', tank: 53 },
-  { brand: "Peugeot", model: "3008", year: 2023, consumption: 5, fuel: 'essence', tank: 53 },
+  { brand: "Peugeot", model: "208", year: 2022, consumption: 4.1, fuel: 'essence', tank: 44, curbWeightKg: 1180, dragAreaScx: 0.61 },
+  { brand: "Peugeot", model: "208", year: 2019, consumption: 3.7, fuel: 'diesel', tank: 50, curbWeightKg: 1180, dragAreaScx: 0.61 },
+  { brand: "Peugeot", model: "2008", year: 2021, consumption: 4.8, fuel: 'essence', tank: 44, curbWeightKg: 1280, dragAreaScx: 0.72 },
+  { brand: "Peugeot", model: "308", year: 2022, consumption: 4.2, fuel: 'essence', tank: 52, curbWeightKg: 1320, dragAreaScx: 0.65 },
+  { brand: "Peugeot", model: "308 SW", year: 2020, consumption: 4.5, fuel: 'diesel', tank: 53, curbWeightKg: 1380, dragAreaScx: 0.68 },
+  { brand: "Peugeot", model: "3008", year: 2023, consumption: 5, fuel: 'essence', tank: 53, curbWeightKg: 1480, dragAreaScx: 0.78 },
   { brand: "Peugeot", model: "3008 Hybrid", year: 2022, consumption: 1.4, fuel: 'essence', tank: 43 },
   { brand: "Peugeot", model: "5008", year: 2022, consumption: 5.3, fuel: 'diesel', tank: 56 },
   { brand: "Peugeot", model: "508", year: 2021, consumption: 4.4, fuel: 'diesel', tank: 55 },
@@ -32,15 +36,15 @@ export const VEHICLE_CATALOG: VehiclePreset[] = [
   { brand: "Peugeot", model: "406", year: 2002, consumption: 6.5, fuel: 'diesel', tank: 70 },
   { brand: "Peugeot", model: "407", year: 2007, consumption: 6.8, fuel: 'diesel', tank: 66 },
   { brand: "Peugeot", model: "607", year: 2004, consumption: 7.2, fuel: 'diesel', tank: 80 },
-  { brand: "Peugeot", model: "206", year: 2001, consumption: 5.2, fuel: 'essence', tank: 50 },
-  { brand: "Peugeot", model: "206", year: 2003, consumption: 5.2, fuel: 'essence', tank: 50 },
-  { brand: "Peugeot", model: "206+", year: 2011, consumption: 4.8, fuel: 'diesel', tank: 50 },
+  { brand: "Peugeot", model: "206", year: 2001, consumption: 5.2, fuel: 'essence', tank: 50, curbWeightKg: 1025, dragAreaScx: 0.63 },
+  { brand: "Peugeot", model: "206", year: 2003, consumption: 5.2, fuel: 'essence', tank: 50, curbWeightKg: 1025, dragAreaScx: 0.63 },
+  { brand: "Peugeot", model: "206+", year: 2011, consumption: 4.8, fuel: 'diesel', tank: 50, curbWeightKg: 1050, dragAreaScx: 0.63 },
   { brand: "Peugeot", model: "207", year: 2010, consumption: 4.6, fuel: 'diesel', tank: 50 },
   { brand: "Peugeot", model: "207 CC", year: 2009, consumption: 6.8, fuel: 'essence', tank: 50 },
   { brand: "Peugeot", model: "1007", year: 2006, consumption: 5.8, fuel: 'essence', tank: 40 },
   { brand: "Peugeot", model: "iOn", year: 2015, consumption: 12.5, fuel: 'electrique', tank: 16 },
   { brand: "Peugeot", model: "e-208", year: 2023, consumption: 15.5, fuel: 'electrique', tank: 50 },
-  { brand: "Peugeot", model: "806", year: 1998, consumption: 8.0, fuel: 'diesel', tank: 80, odometerUnreliable: true },
+  { brand: "Peugeot", model: "806", year: 1998, consumption: 8.0, fuel: 'diesel', tank: 80, odometerUnreliable: true, curbWeightKg: 1680, dragAreaScx: 0.9 },
   { brand: "Peugeot", model: "806 Roland Garros", year: 2000, consumption: 7.8, fuel: 'diesel', tank: 80, odometerUnreliable: true },
   { brand: "Peugeot", model: "807", year: 2005, consumption: 7.5, fuel: 'diesel', tank: 80 },
   { brand: "Peugeot", model: "Traveller", year: 2020, consumption: 6.2, fuel: 'diesel', tank: 69 },
@@ -98,8 +102,8 @@ export const VEHICLE_CATALOG: VehiclePreset[] = [
   { brand: "Volkswagen", model: "Tiguan", year: 2023, consumption: 5.6, fuel: 'diesel', tank: 58 },
   { brand: "Volkswagen", model: "Passat", year: 2021, consumption: 4.6, fuel: 'diesel', tank: 66 },
   { brand: "Volkswagen", model: "Arteon", year: 2022, consumption: 5, fuel: 'diesel', tank: 66 },
-  { brand: "Volkswagen", model: "Touran", year: 2016, consumption: 5.4, fuel: 'diesel', tank: 58 },
-  { brand: "Volkswagen", model: "Touran", year: 2020, consumption: 5.2, fuel: 'diesel', tank: 58 },
+  { brand: "Volkswagen", model: "Touran", year: 2016, consumption: 5.4, fuel: 'diesel', tank: 58, curbWeightKg: 1550, dragAreaScx: 0.84 },
+  { brand: "Volkswagen", model: "Touran", year: 2020, consumption: 5.2, fuel: 'diesel', tank: 58, curbWeightKg: 1550, dragAreaScx: 0.84 },
   { brand: "Volkswagen", model: "Caddy", year: 2022, consumption: 5.4, fuel: 'diesel', tank: 50 },
   { brand: "Volkswagen", model: "Transporter", year: 2021, consumption: 7.5, fuel: 'diesel', tank: 80 },
   { brand: "Volkswagen", model: "Crafter", year: 2020, consumption: 8.2, fuel: 'diesel', tank: 75 },

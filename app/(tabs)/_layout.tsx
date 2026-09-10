@@ -77,6 +77,14 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="maps"
+        options={{
+          title: 'Maps',
+          tabBarLabel: 'Maps',
+          tabBarIcon: ({ color }) => <Ionicons name="map" size={20} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="budget"
         options={{
           title: 'Budget',

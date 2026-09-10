@@ -96,19 +96,69 @@ export const SEGMENT_DEFAULTS: Record<VehicleSegment, Omit<SegmentDefaults, 'seg
   },
 };
 
-/** Masse / SCx connus pour modèles fréquents (fiche technique / moyennes). */
+/** Masse / SCx connus pour modèles fréquents (fiches / moyennes constructeur).
+ * Pas d’API Cx gratuite fiable — enrichissement local uniquement.
+ * Masse : catalogues publics / NHTSA vPIC possibles ; Cx/SCx rarement exposés.
+ */
 const KNOWN_PHYSICS: Array<{
   re: RegExp;
   curbWeightKg: number;
   dragAreaScx: number;
   gears?: number;
 }> = [
-  { re: /\b206\b/i, curbWeightKg: 1025, dragAreaScx: 0.63, gears: 5 },
+  { re: /\b108\b/i, curbWeightKg: 940, dragAreaScx: 0.58, gears: 5 },
+  { re: /\b106\b/i, curbWeightKg: 850, dragAreaScx: 0.62, gears: 5 },
+  { re: /\b206\+?\b/i, curbWeightKg: 1025, dragAreaScx: 0.63, gears: 5 },
+  { re: /\b207\b/i, curbWeightKg: 1200, dragAreaScx: 0.65, gears: 5 },
   { re: /\b208\b/i, curbWeightKg: 1180, dragAreaScx: 0.61, gears: 6 },
-  { re: /\b806\b/i, curbWeightKg: 1680, dragAreaScx: 0.9, gears: 5 },
-  { re: /\btouran\b/i, curbWeightKg: 1550, dragAreaScx: 0.84, gears: 6 },
-  { re: /\bclio\b/i, curbWeightKg: 1150, dragAreaScx: 0.64, gears: 5 },
+  { re: /\b2008\b/i, curbWeightKg: 1280, dragAreaScx: 0.72, gears: 6 },
+  { re: /\b306\b/i, curbWeightKg: 1100, dragAreaScx: 0.66, gears: 5 },
+  { re: /\b307\b/i, curbWeightKg: 1280, dragAreaScx: 0.68, gears: 5 },
+  { re: /\b308\b/i, curbWeightKg: 1320, dragAreaScx: 0.65, gears: 6 },
   { re: /\b3008\b/i, curbWeightKg: 1480, dragAreaScx: 0.78, gears: 6 },
+  { re: /\b406\b/i, curbWeightKg: 1380, dragAreaScx: 0.68, gears: 5 },
+  { re: /\b407\b/i, curbWeightKg: 1520, dragAreaScx: 0.7, gears: 6 },
+  { re: /\b5008\b/i, curbWeightKg: 1580, dragAreaScx: 0.82, gears: 6 },
+  { re: /\b508\b/i, curbWeightKg: 1500, dragAreaScx: 0.66, gears: 6 },
+  { re: /\b806\b/i, curbWeightKg: 1680, dragAreaScx: 0.9, gears: 5 },
+  { re: /\b807\b/i, curbWeightKg: 1750, dragAreaScx: 0.92, gears: 6 },
+  { re: /\bpartner\b/i, curbWeightKg: 1420, dragAreaScx: 0.88, gears: 5 },
+  { re: /\brifter\b/i, curbWeightKg: 1450, dragAreaScx: 0.86, gears: 6 },
+  { re: /\bexpert\b/i, curbWeightKg: 1750, dragAreaScx: 1.05, gears: 6 },
+  { re: /\bboxer\b/i, curbWeightKg: 2100, dragAreaScx: 1.25, gears: 6 },
+  { re: /\btouran\b/i, curbWeightKg: 1550, dragAreaScx: 0.84, gears: 6 },
+  { re: /\bgolf\b/i, curbWeightKg: 1320, dragAreaScx: 0.64, gears: 6 },
+  { re: /\bpolo\b/i, curbWeightKg: 1120, dragAreaScx: 0.62, gears: 5 },
+  { re: /\bpassat\b/i, curbWeightKg: 1480, dragAreaScx: 0.66, gears: 6 },
+  { re: /\btiguan\b/i, curbWeightKg: 1620, dragAreaScx: 0.8, gears: 7 },
+  { re: /\bcaddy\b/i, curbWeightKg: 1480, dragAreaScx: 0.9, gears: 6 },
+  { re: /\bclio\b/i, curbWeightKg: 1150, dragAreaScx: 0.64, gears: 5 },
+  { re: /\btwingo\b/i, curbWeightKg: 980, dragAreaScx: 0.6, gears: 5 },
+  { re: /\bcaptur\b/i, curbWeightKg: 1280, dragAreaScx: 0.74, gears: 6 },
+  { re: /\bm[eé]gane\b/i, curbWeightKg: 1350, dragAreaScx: 0.65, gears: 6 },
+  { re: /\bsc[eé]nic\b/i, curbWeightKg: 1500, dragAreaScx: 0.82, gears: 6 },
+  { re: /\bkangoo\b/i, curbWeightKg: 1380, dragAreaScx: 0.92, gears: 5 },
+  { re: /\btrafic\b/i, curbWeightKg: 1850, dragAreaScx: 1.15, gears: 6 },
+  { re: /\bduster\b/i, curbWeightKg: 1320, dragAreaScx: 0.82, gears: 6 },
+  { re: /\bsandero\b/i, curbWeightKg: 1080, dragAreaScx: 0.66, gears: 5 },
+  { re: /\bc1\b/i, curbWeightKg: 900, dragAreaScx: 0.58, gears: 5 },
+  { re: /\bc3 aircross\b/i, curbWeightKg: 1280, dragAreaScx: 0.76, gears: 6 },
+  { re: /\bc3\b/i, curbWeightKg: 1100, dragAreaScx: 0.64, gears: 5 },
+  { re: /\bc4\b/i, curbWeightKg: 1300, dragAreaScx: 0.66, gears: 6 },
+  { re: /\bc5 aircross\b/i, curbWeightKg: 1550, dragAreaScx: 0.8, gears: 8 },
+  { re: /\bberlingo\b/i, curbWeightKg: 1420, dragAreaScx: 0.88, gears: 6 },
+  { re: /\bfiesta\b/i, curbWeightKg: 1120, dragAreaScx: 0.63, gears: 5 },
+  { re: /\bfocus\b/i, curbWeightKg: 1320, dragAreaScx: 0.65, gears: 6 },
+  { re: /\byaris\b/i, curbWeightKg: 1100, dragAreaScx: 0.6, gears: 5 },
+  { re: /\bcorolla\b/i, curbWeightKg: 1350, dragAreaScx: 0.62, gears: 6 },
+  { re: /\bcivic\b/i, curbWeightKg: 1320, dragAreaScx: 0.63, gears: 6 },
+  { re: /\bjazz\b/i, curbWeightKg: 1120, dragAreaScx: 0.62, gears: 5 },
+  { re: /\bqashqai\b/i, curbWeightKg: 1450, dragAreaScx: 0.76, gears: 6 },
+  { re: /\bsportage\b/i, curbWeightKg: 1580, dragAreaScx: 0.8, gears: 7 },
+  { re: /\btucson\b/i, curbWeightKg: 1550, dragAreaScx: 0.78, gears: 7 },
+  { re: /\bcorsa\b/i, curbWeightKg: 1100, dragAreaScx: 0.62, gears: 5 },
+  { re: /\bastra\b/i, curbWeightKg: 1320, dragAreaScx: 0.65, gears: 6 },
+  { re: /\btransit\b/i, curbWeightKg: 2100, dragAreaScx: 1.2, gears: 6 },
 ];
 
 const SEGMENT_KEYWORDS: Array<{ segment: VehicleSegment; re: RegExp }> = [
@@ -313,8 +363,8 @@ export function suggestPhysicsFields(
   const cat = findCatalogueMatch(brand, model, opts?.year, opts?.fuel);
   return {
     vehicleSegment: segment,
-    curbWeightKg: known?.curbWeightKg ?? def.curbWeightKg,
-    dragAreaScx: known?.dragAreaScx ?? def.dragAreaScx,
+    curbWeightKg: known?.curbWeightKg ?? cat?.curbWeightKg ?? def.curbWeightKg,
+    dragAreaScx: known?.dragAreaScx ?? cat?.dragAreaScx ?? def.dragAreaScx,
     transmissionGears:
       gears != null && gears > 0 ? gears : known?.gears ?? def.gears,
     payloadKg: DEFAULT_PAYLOAD_KG,

@@ -95,6 +95,7 @@ import {
   fetchDrivingRouteAlternatives,
   type DrivingRoute,
 } from '@/lib/roadDistance';
+import { fetchSpeedLimitNear, type SpeedLimitInfo } from '@/lib/roadSpeedLimits';
 import { forwardGeocode } from '@/lib/geocode';
 import { notify, confirm } from '@/lib/notify';
 import { TripHistoryCard } from '@/components/TripHistoryCard';
@@ -239,7 +240,7 @@ export default function TripScreen() {
   const autoStartDone = useRef(false);
   const resetHandledRef = useRef<string | null>(null);
   const [tab, setTab] = useState<TripTab>('live');
-  const [startMode, setStartMode] = useState<StartMode>('nav');
+  const [startMode, setStartMode] = useState<StartMode>('free');
   const [destination, setDestination] = useState('');
   const [destCoords, setDestCoords] = useState<GeoCoords | null>(null);
   const [places, setPlaces] = useState<Place[]>([]);
@@ -247,6 +248,8 @@ export default function TripScreen() {
   const [routeOptions, setRouteOptions] = useState<DrivingRoute[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [routesLoading, setRoutesLoading] = useState(false);
+  const [liveSpeedLimit, setLiveSpeedLimit] = useState<SpeedLimitInfo | null>(null);
+  const [navSteps, setNavSteps] = useState<DrivingRoute['steps']>(undefined);
   const [isStarting, setIsStarting] = useState(false);
   const [nearDestination, setNearDestination] = useState(false);
   const [smartDismissed, setSmartDismissed] = useState(false);
@@ -379,6 +382,25 @@ export default function TripScreen() {
       }
     })();
   }, []);
+
+  /** Panneau maxspeed OSM (Overpass) pendant un trajet actif. */
+  useEffect(() => {
+    if (!activeTrip || !userLocation) {
+      if (!activeTrip) setLiveSpeedLimit(null);
+      return;
+    }
+    let cancelled = false;
+    const run = async () => {
+      const info = await fetchSpeedLimitNear(userLocation.latitude, userLocation.longitude);
+      if (!cancelled && info) setLiveSpeedLimit(info);
+    };
+    void run();
+    const id = setInterval(() => void run(), 18_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [activeTrip?.id, userLocation?.latitude, userLocation?.longitude]);
 
   const persistStartMode = useCallback((mode: StartMode) => {
     setStartMode(mode);
@@ -675,6 +697,7 @@ export default function TripScreen() {
   const applyRouteSelection = useCallback((route: DrivingRoute) => {
     try {
       setSelectedRouteId(route.id);
+      setNavSteps(route.steps);
       const coords = downsampleRoute(route.coordinates, 120);
       const valid = coords.filter(
         (p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude)
@@ -910,6 +933,7 @@ export default function TripScreen() {
                   alts[0];
                 if (preferred) {
                   setSelectedRouteId(preferred.id);
+                  setNavSteps(preferred.steps);
                   setPlannedRoute(downsampleRoute(preferred.coordinates, 120));
                 }
                 notify(
@@ -935,6 +959,7 @@ export default function TripScreen() {
         setPlannedRoute([]);
         setRouteOptions([]);
         setSelectedRouteId(null);
+        setNavSteps(undefined);
         mapsDest = null;
         mapsLabel = '';
       }
@@ -1851,6 +1876,7 @@ export default function TripScreen() {
       destinationLabel: activeTrip.destinationName || liveDestLabel,
       route: plannedRoute.length > 1 ? plannedRoute : mapRoute,
       headingDeg: liveHeading,
+      steps: navSteps ?? selectedRoute?.steps ?? null,
     });
   }, [
     activeTrip,
@@ -1860,6 +1886,8 @@ export default function TripScreen() {
     plannedRoute,
     mapRoute,
     liveHeading,
+    navSteps,
+    selectedRoute?.steps,
   ]);
 
   const quickPlaces = useMemo(() => {
@@ -2098,54 +2126,63 @@ export default function TripScreen() {
             {...tabSwipe.panHandlers}
           >
             {activeTrip && navGuidance ? (
-              <Pressable
-                onPress={() => {
-                  if (activeTrip.destinationName) {
-                    void handleOpenGoogleMaps();
-                  }
-                }}
-                style={[
-                  styles.navBar,
-                  {
-                    backgroundColor: colors.card,
-                    borderColor: paused ? colors.warning : colors.accent,
-                  },
-                ]}
-              >
-                <View
+              <View style={{ flexDirection: 'row', alignItems: 'stretch', gap: 8, marginBottom: 12 }}>
+                {liveSpeedLimit ? (
+                  <View style={styles.speedLimitSign} accessibilityLabel={`Limitation ${liveSpeedLimit.limitKmh}`}>
+                    <Text style={styles.speedLimitValue}>{liveSpeedLimit.limitKmh}</Text>
+                  </View>
+                ) : null}
+                <Pressable
+                  onPress={() => {
+                    if (activeTrip.destinationName) {
+                      void handleOpenGoogleMaps();
+                    }
+                  }}
                   style={[
-                    styles.navArrowWrap,
-                    { backgroundColor: (paused ? colors.warning : colors.accent) + '22' },
+                    styles.navBar,
+                    {
+                      flex: 1,
+                      marginBottom: 0,
+                      backgroundColor: colors.card,
+                      borderColor: paused ? colors.warning : colors.accent,
+                    },
                   ]}
                 >
-                  <Ionicons
-                    name="navigate"
-                    size={28}
-                    color={paused ? colors.warning : colors.accent}
-                    style={{ transform: [{ rotate: `${navGuidance.arrowRotateDeg}deg` }] }}
-                  />
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text
-                    style={{ color: colors.text, fontWeight: '800', fontSize: 16 }}
-                    numberOfLines={1}
+                  <View
+                    style={[
+                      styles.navArrowWrap,
+                      { backgroundColor: (paused ? colors.warning : colors.accent) + '22' },
+                    ]}
                   >
-                    {navGuidance.title}
+                    <Ionicons
+                      name="navigate"
+                      size={28}
+                      color={paused ? colors.warning : colors.accent}
+                      style={{ transform: [{ rotate: `${navGuidance.arrowRotateDeg}deg` }] }}
+                    />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text
+                      style={{ color: colors.text, fontWeight: '800', fontSize: 16 }}
+                      numberOfLines={1}
+                    >
+                      {navGuidance.title}
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }} numberOfLines={1}>
+                      {navGuidance.subtitle}
+                    </Text>
+                  </View>
+                  <Text
+                    style={{
+                      color: paused ? colors.warning : colors.accent,
+                      fontWeight: '800',
+                      fontSize: 15,
+                    }}
+                  >
+                    {navGuidance.distanceLabel}
                   </Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 13 }} numberOfLines={1}>
-                    {navGuidance.subtitle}
-                  </Text>
-                </View>
-                <Text
-                  style={{
-                    color: paused ? colors.warning : colors.accent,
-                    fontWeight: '800',
-                    fontSize: 15,
-                  }}
-                >
-                  {navGuidance.distanceLabel}
-                </Text>
-              </Pressable>
+                </Pressable>
+              </View>
             ) : null}
 
             {activeTrip && nearDestination && (
@@ -3246,6 +3283,22 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 12,
     marginBottom: 12,
+  },
+  speedLimitSign: {
+    width: 56,
+    borderRadius: 12,
+    borderWidth: 3,
+    borderColor: '#dc2626',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+  },
+  speedLimitValue: {
+    color: '#0f172a',
+    fontWeight: '900',
+    fontSize: 22,
+    lineHeight: 26,
   },
   navArrowWrap: {
     width: 48,

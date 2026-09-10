@@ -1,9 +1,19 @@
 /**
- * Guidance navigation simple (flèche + distance) à partir du tracé / destination.
+ * Guidance navigation (flèche + manœuvres OSRM) à partir du tracé / destination.
  */
-import { haversineDistance } from '@/lib/calculations';
+import { haversineDistance } from '@/lib/geoMath';
 
 export type Geo = { latitude: number; longitude: number };
+
+/** Manœuvre (compatible OSRM / DrivingRoute.steps). */
+export type NavManeuver = {
+  instruction: string;
+  distanceM: number;
+  location: Geo;
+  type: string;
+  modifier?: string;
+  name?: string;
+};
 
 export type NavGuidance = {
   /** Rotation de la flèche « navigate » (0 = haut = cible devant) */
@@ -12,6 +22,8 @@ export type NavGuidance = {
   subtitle: string;
   distanceLabel: string;
   remainingKm: number;
+  /** Limite panneau (si fournie par l’appelant) — affichage HUD séparé */
+  nextManeuver?: NavManeuver | null;
 };
 
 /** Écart max au corridor prévu avant de considérer un autre itinéraire volontaire. */
@@ -51,9 +63,46 @@ function turnHint(rel: number, offCorridor: boolean): string {
   return 'Demi-tour';
 }
 
+/** Prochaine manœuvre OSRM encore devant l’utilisateur. */
+export function findUpcomingManeuver(
+  user: Geo,
+  steps: NavManeuver[] | undefined | null
+): NavManeuver | null {
+  if (!steps?.length) return null;
+  let nearestIdx = 0;
+  let best = Infinity;
+  for (let i = 0; i < steps.length; i++) {
+    const d = haversineDistance(
+      user.latitude,
+      user.longitude,
+      steps[i].location.latitude,
+      steps[i].location.longitude
+    );
+    if (d < best) {
+      best = d;
+      nearestIdx = i;
+    }
+  }
+  // Si on est déjà sur/après la manœuvre, prendre la suivante
+  const start = best < 0.035 ? nearestIdx + 1 : nearestIdx;
+  for (let i = start; i < steps.length; i++) {
+    const s = steps[i];
+    if (s.type === 'depart') continue;
+    const d = haversineDistance(
+      user.latitude,
+      user.longitude,
+      s.location.latitude,
+      s.location.longitude
+    );
+    if (d >= 0.03 || s.type === 'arrive') return s;
+  }
+  return steps[steps.length - 1] || null;
+}
+
 /**
  * Calcule flèche + texte pour la barre live.
  * `headingDeg` : direction de déplacement (ou null → flèche absolue N=0).
+ * `steps` : manœuvres OSRM si dispo (guidage type Maps).
  */
 export function computeNavGuidance(opts: {
   user: Geo | null;
@@ -61,8 +110,9 @@ export function computeNavGuidance(opts: {
   destinationLabel?: string | null;
   route: Geo[];
   headingDeg?: number | null;
+  steps?: NavManeuver[] | null;
 }): NavGuidance | null {
-  const { user, destination, destinationLabel, route, headingDeg } = opts;
+  const { user, destination, destinationLabel, route, headingDeg, steps } = opts;
   if (!user) {
     return {
       arrowRotateDeg: 0,
@@ -128,16 +178,40 @@ export function computeNavGuidance(opts: {
       haversineDistance(user.latitude, user.longitude, end.latitude, end.longitude) * 10
     ) / 10;
 
+  const upcoming = !offCorridor ? findUpcomingManeuver(user, steps) : null;
+  if (upcoming) {
+    target = upcoming.location;
+  }
+
   const targetBearing = bearingDeg(user, target);
   const heading = headingDeg != null && Number.isFinite(headingDeg) ? headingDeg : targetBearing;
   const rel = relativeBearing(heading, targetBearing);
 
+  const toManeuverKm = upcoming
+    ? haversineDistance(
+        user.latitude,
+        user.longitude,
+        upcoming.location.latitude,
+        upcoming.location.longitude
+      )
+    : remainingKm;
+
+  const title = upcoming?.instruction || turnHint(rel, offCorridor);
+  const street = upcoming?.name?.trim();
+  const subtitleParts = [
+    destinationLabel?.trim() || null,
+    street && street !== destinationLabel?.trim() ? street : null,
+    remainingKm > 0 ? `Reste ${formatRemainingKm(remainingKm)}` : null,
+    offCorridor ? 'Itinéraire libre' : null,
+  ].filter(Boolean);
+
   return {
     arrowRotateDeg: rel,
-    title: turnHint(rel, offCorridor),
-    subtitle: destinationLabel?.trim() || (offCorridor ? 'Itinéraire libre' : 'Destination'),
-    distanceLabel: formatRemainingKm(remainingKm),
+    title,
+    subtitle: subtitleParts.join(' · ') || 'Destination',
+    distanceLabel: formatRemainingKm(toManeuverKm),
     remainingKm,
+    nextManeuver: upcoming,
   };
 }
 
