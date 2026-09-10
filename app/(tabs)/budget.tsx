@@ -424,11 +424,8 @@ export default function BudgetScreen() {
     vehicles: outlookVehicles,
     plannedMonthSpend: plannedMonthSpendFromRoutes(routes, outlookVehicles),
   });
-  const displayRemaining =
-    outlook.rangeKm > 0 || outlook.plannedRemainingSpend > 0
-      ? outlook.adjustedRemaining
-      : currentRemaining;
-  const displayOver = displayRemaining < 0;
+  const displayRemaining = currentRemaining;
+  const displayOver = overBudget;
 
   const vehicleName = (id: number) => vehicles.find((v) => v.id === id)?.name || `Véhicule #${id}`;
 
@@ -486,13 +483,14 @@ export default function BudgetScreen() {
                 accessibilityState={{ selected }}
                 accessibilityLabel={`Véhicule ${v.name}`}
                 style={{
-                  paddingHorizontal: 12,
+                  paddingHorizontal: selected ? 14 : 12,
                   paddingVertical: 8,
                   borderRadius: 18,
                   borderWidth: 1,
                   borderColor: selected ? colors.accent : colors.border,
                   backgroundColor: selected ? colors.accent + '22' : colors.card,
-                  maxWidth: 140,
+                  maxWidth: selected ? '100%' : 140,
+                  flexShrink: selected ? 1 : 1,
                 }}
               >
                 <Text
@@ -501,7 +499,7 @@ export default function BudgetScreen() {
                     fontWeight: '700',
                     fontSize: 13,
                   }}
-                  numberOfLines={1}
+                  numberOfLines={selected ? 2 : 1}
                 >
                   {v.name}
                 </Text>
@@ -542,8 +540,8 @@ export default function BudgetScreen() {
                   : `Il reste ${formatEuro(displayRemaining)}`}
             </Text>
             <Text style={{ color: colors.text, marginTop: 4, fontSize: 14 }}>
-              {formatEuro(currentMonthSpent)} dépensés sur {formatEuro(monthlyAllocation)}
-              {activeVehicle ? ` · ${activeVehicle.name}` : ''}
+              {formatEuro(currentMonthSpent)} dépensés sur {formatEuro(monthlyAllocation)} ce mois
+              {activeVehicle && !budgetAllVehicles ? ` · ${activeVehicle.name}` : ''}
             </Text>
             <ProgressBar
               percent={monthlyAllocation > 0 ? (currentMonthSpent / monthlyAllocation) * 100 : 0}
@@ -1262,16 +1260,42 @@ export default function BudgetScreen() {
             <Button title="Nouveau budget" onPress={() => router.push('/budget/add')} />
           </Card>
         ) : (
-          budgetStatuses.map((item: BudgetStatus) => {
-            const isOver = item.percentUsed > 100;
+          budgetStatuses
+            .filter((item) => {
+              if (budgetAllVehicles) return true;
+              if (!activeVehicle) return true;
+              // Global + budgets du véhicule sélectionné
+              return item.budget.vehicleId == null || item.budget.vehicleId === activeVehicle.id;
+            })
+            .map((item: BudgetStatus) => {
+            let spent = item.spent;
+            let remaining = item.remaining;
+            let percentUsed = item.percentUsed;
+            // Filtre véhicule : l’enveloppe globale affiche les dépenses de CE véhicule seulement
+            if (!budgetAllVehicles && activeVehicle && item.budget.vehicleId == null) {
+              spent = allFillsForCompare
+                .filter(
+                  (f) =>
+                    f.vehicleId === activeVehicle.id &&
+                    f.date >= item.budget.startDate &&
+                    f.date <= item.budget.endDate
+                )
+                .reduce((sum, f) => sum + f.totalCost, 0);
+              remaining = Math.max(0, item.budget.amount - spent);
+              percentUsed = item.budget.amount > 0 ? (spent / item.budget.amount) * 100 : 0;
+            }
+            const isOver = percentUsed > 100;
             const statusColor = isOver
               ? colors.danger
-              : item.percentUsed > 80
+              : percentUsed > 80
                 ? colors.warning
                 : colors.success;
-            const vehicleLabel = item.budget.vehicleId
-              ? vehicleName(item.budget.vehicleId)
-              : 'Tous véhicules';
+            const vehicleLabel =
+              !budgetAllVehicles && activeVehicle && item.budget.vehicleId == null
+                ? activeVehicle.name
+                : item.budget.vehicleId
+                  ? vehicleName(item.budget.vehicleId)
+                  : 'Tous véhicules';
             return (
               <Card key={item.budget.id} style={{ marginBottom: 12 }}>
                 <View style={styles.budgetHeader}>
@@ -1281,6 +1305,9 @@ export default function BudgetScreen() {
                     </Text>
                     <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
                       {vehicleLabel} · {item.budget.period === 'monthly' ? 'Mensuel' : item.budget.period}
+                      {!budgetAllVehicles && item.budget.vehicleId == null
+                        ? ' · période budget'
+                        : ''}
                     </Text>
                   </View>
                   <Pressable
@@ -1304,16 +1331,16 @@ export default function BudgetScreen() {
                   </Pressable>
                 </View>
                 <Text style={{ color: statusColor, fontWeight: '800', fontSize: 24, marginBottom: 4 }}>
-                  {item.percentUsed > 100
-                    ? `Dépassé de ${formatEuro(item.spent - item.budget.amount)}`
-                    : `Il reste ${formatEuro(item.remaining)}`}
+                  {percentUsed > 100
+                    ? `Dépassé de ${formatEuro(spent - item.budget.amount)}`
+                    : `Il reste ${formatEuro(remaining)}`}
                 </Text>
-                <ProgressBar percent={item.percentUsed} color={statusColor} height={10} />
+                <ProgressBar percent={percentUsed} color={statusColor} height={10} />
                 <Text style={{ color: colors.textSecondary, marginTop: 8, fontSize: 13 }}>
-                  {formatEuro(item.spent)} dépensés sur {formatEuro(item.budget.amount)} (
-                  {item.percentUsed.toFixed(0)} %)
+                  {formatEuro(spent)} dépensés sur {formatEuro(item.budget.amount)} (
+                  {percentUsed.toFixed(0)} %)
                 </Text>
-                {item.projectedEndOfPeriod > 0 && (
+                {item.projectedEndOfPeriod > 0 && budgetAllVehicles && (
                   <Text
                     style={{
                       color:

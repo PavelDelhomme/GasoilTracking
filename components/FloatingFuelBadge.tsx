@@ -143,8 +143,10 @@ export function FloatingFuelBadge({
       accessibilityRole="text"
       accessibilityLabel={`Carburant restant ${L.toFixed(1)} litres, ${pct} pour cent`}
     >
-      <Text style={[styles.liters, { color: toneColor }]}>{L.toFixed(1)} L</Text>
-      <Text style={[styles.pct, { color: colors.textSecondary }]}>{pct} %</Text>
+      <View style={styles.rowInline}>
+        <Text style={[styles.liters, { color: toneColor }]}>{L.toFixed(1)} L</Text>
+        <Text style={[styles.pct, { color: colors.textSecondary }]}>{pct} %</Text>
+      </View>
     </View>
   );
 }
@@ -166,5 +168,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
   },
   liters: { fontWeight: '900', fontSize: 15 },
-  pct: { fontWeight: '700', fontSize: 11, marginTop: 1 },
+  pct: { fontWeight: '700', fontSize: 12, marginLeft: 4 },
+  rowInline: { flexDirection: 'row', alignItems: 'baseline' },
 });

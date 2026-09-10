@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, Pressable, ActivityIndicator, Alert } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '@/context/AppContext';
@@ -311,14 +311,38 @@ export default function HomeScreen() {
                     {activeVehicle.year}
                   </Text>
                 </View>
-                <Pressable
-                  onPress={onRefresh}
-                  hitSlop={10}
-                  style={[styles.iconBtn, { borderColor: colors.border }]}
-                  accessibilityLabel="Actualiser les données"
-                >
-                  <Ionicons name="refresh" size={18} color={colors.accent} />
-                </Pressable>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {vehicles.length > 1 && (
+                    <Pressable
+                      onPress={() => {
+                        Alert.alert(
+                          'Changer de véhicule',
+                          'Sélectionnez le véhicule actif',
+                          [
+                            ...vehicles.map((v) => ({
+                              text: v.id === activeVehicle.id ? `✓ ${v.name}` : v.name,
+                              onPress: () => void selectVehicle(v.id),
+                            })),
+                            { text: 'Annuler', style: 'cancel' as const },
+                          ]
+                        );
+                      }}
+                      hitSlop={10}
+                      style={[styles.iconBtn, { borderColor: colors.border }]}
+                      accessibilityLabel="Changer de véhicule"
+                    >
+                      <Ionicons name="swap-horizontal" size={18} color={colors.accent} />
+                    </Pressable>
+                  )}
+                  <Pressable
+                    onPress={onRefresh}
+                    hitSlop={10}
+                    style={[styles.iconBtn, { borderColor: colors.border }]}
+                    accessibilityLabel="Actualiser les données"
+                  >
+                    <Ionicons name="refresh" size={18} color={colors.accent} />
+                  </Pressable>
+                </View>
               </View>
               <View
                 style={{ marginTop: 6 }}
@@ -363,67 +387,6 @@ export default function HomeScreen() {
                   );
                 })()}
               </View>
-              {vehicles.length > 1 && (
-                <View style={styles.vehChipRow}>
-                  {(vehicles.length > 3 ? vehicles.slice(0, 3) : vehicles).map((v) => {
-                    const selected = v.id === activeVehicle.id;
-                    return (
-                      <Pressable
-                        key={v.id}
-                        onPress={() => void selectVehicle(v.id)}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected }}
-                        accessibilityLabel={`Véhicule ${v.name}`}
-                        style={[
-                          styles.vehChip,
-                          {
-                            borderColor: selected ? colors.accent : colors.border,
-                            backgroundColor: selected ? colors.accent + '22' : colors.background,
-                            flexShrink: 1,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={{
-                            color: selected ? colors.accent : colors.text,
-                            fontWeight: '700',
-                            fontSize: 12,
-                          }}
-                          numberOfLines={1}
-                        >
-                          {v.name}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                  {vehicles.length > 3 && (
-                    <Pressable
-                      onPress={() => router.push('/(tabs)/vehicles' as never)}
-                      accessibilityRole="button"
-                      accessibilityLabel="Voir tous les véhicules"
-                      style={[
-                        styles.vehChip,
-                        {
-                          borderColor: colors.border,
-                          backgroundColor: colors.background,
-                          flexShrink: 0,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={{
-                          color: colors.accent,
-                          fontWeight: '700',
-                          fontSize: 12,
-                        }}
-                        numberOfLines={1}
-                      >
-                        Voir tous
-                      </Text>
-                    </Pressable>
-                  )}
-                </View>
-              )}
             </Card>
 
             {(todayTrips.length > 0 || todayKm > 0) && (

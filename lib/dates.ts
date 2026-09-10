@@ -59,7 +59,10 @@ export function monthKeyFromDate(input: string | Date): string {
 export function formatMonthLabel(ym: string): string {
   const [y, m] = ym.split('-').map(Number);
   const d = new Date(y, m - 1, 1);
-  const label = d.toLocaleDateString(appLocale, { month: 'long', year: 'numeric' });
+  const nowY = new Date().getFullYear();
+  const opts: Intl.DateTimeFormatOptions =
+    y === nowY ? { month: 'long' } : { month: 'long', year: 'numeric' };
+  const label = d.toLocaleDateString(appLocale, opts);
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
@@ -92,7 +95,9 @@ const MONTH_SHORT_FR = [
 
 export function formatMonthChip(ym: string): string {
   const [y, m] = ym.split('-').map(Number);
-  return `${MONTH_SHORT_FR[(m || 1) - 1] || ym} ${String(y).slice(2)}`;
+  const short = MONTH_SHORT_FR[(m || 1) - 1] || ym;
+  if (y === new Date().getFullYear()) return short;
+  return `${short} ${String(y).slice(2)}`;
 }
 
 /** « Aujourd’hui », « Hier », « Il y a N jours » (2–6), sinon JJ/MM/AAAA */

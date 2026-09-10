@@ -56,8 +56,9 @@ export function SpeedDialFab({
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
-  const tabLift = anchor === 'screen' ? 56 : 0;
-  const bottom = Math.max(12, insets.bottom + (anchor === 'content' ? 4 : 8)) + tabLift + extraBottom;
+  // Tab bar ~49 ; garder les FAB bas (pas trop hauts sur l’écran)
+  const tabLift = anchor === 'screen' ? 44 : 0;
+  const bottom = Math.max(8, insets.bottom + (anchor === 'content' ? 2 : 4)) + tabLift + extraBottom;
 
   if (dual && actions.length >= 1) {
     const primary = actions[0];
@@ -112,11 +113,11 @@ export function SpeedDialFab({
     fn();
   };
 
-  /** Positions éventail : arc haut-gauche depuis le FAB (bas-droite). */
+  /** Quart de cercle autour du FAB (haut → gauche). */
   const fanSlot = (i: number, n: number) => {
     const radius = 78;
-    const start = Math.PI / 2 + 0.15; // un peu à gauche du haut
-    const end = Math.PI - 0.12; // presque horizontal gauche
+    const start = Math.PI / 2;
+    const end = Math.PI;
     const t = n <= 1 ? 0.5 : i / (n - 1);
     const angle = start + t * (end - start);
     return {
@@ -126,9 +127,7 @@ export function SpeedDialFab({
   };
 
   return (
-    <View pointerEvents="box-none" style={[styles.wrap, { bottom }]}>
-      {open && <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />}
-
+    <View pointerEvents="box-none" style={[styles.wrapCompact, { bottom }]}>
       {open &&
         actions.map((a, i) => {
           const slot = fan ? fanSlot(i, actions.length) : null;
@@ -136,14 +135,14 @@ export function SpeedDialFab({
             <Pressable
               key={a.key}
               onPress={() => run(a.onPress)}
+              accessibilityRole="button"
+              accessibilityLabel={a.label}
               style={[
                 fan ? styles.fanItem : styles.actionRow,
                 fan
                   ? {
                       right: slot!.right,
                       bottom: 58 + slot!.bottom,
-                      backgroundColor: colors.card,
-                      borderColor: colors.border,
                     }
                   : {
                       bottom: 72 + i * 58,
@@ -155,17 +154,18 @@ export function SpeedDialFab({
               {!fan && (
                 <Text style={[styles.actionLabel, { color: colors.text }]}>{a.label}</Text>
               )}
-              <View style={[styles.miniFab, { backgroundColor: colors.accent }]}>
-                <ActionIcon name={a.icon} color="#fff" />
+              <View
+                style={[
+                  styles.miniFab,
+                  {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                    borderWidth: 1,
+                  },
+                ]}
+              >
+                <ActionIcon name={a.icon} color={colors.accent} />
               </View>
-              {fan && (
-                <Text
-                  style={[styles.fanLabel, { color: colors.text, backgroundColor: colors.card }]}
-                  numberOfLines={1}
-                >
-                  {a.label}
-                </Text>
-              )}
             </Pressable>
           );
         })}
@@ -234,15 +234,18 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 16,
     left: 16,
-    top: 0,
     zIndex: 50,
     alignItems: 'flex-end',
     justifyContent: 'flex-end',
     gap: 10,
   },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.25)',
+  /** FAB seul : pas de zone plein écran (évite voile / blocage). */
+  wrapCompact: {
+    position: 'absolute',
+    right: 16,
+    width: 200,
+    height: 220,
+    zIndex: 50,
   },
   fab: {
     position: 'absolute',
@@ -253,6 +256,7 @@ const styles = StyleSheet.create({
     borderRadius: 29,
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 2,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -321,21 +325,13 @@ const styles = StyleSheet.create({
     paddingRight: 6,
     borderRadius: 28,
     borderWidth: 1,
+    zIndex: 2,
   },
   fanItem: {
     position: 'absolute',
     alignItems: 'center',
-    gap: 4,
-    maxWidth: 110,
-  },
-  fanLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    overflow: 'hidden',
-    textAlign: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
   },
   actionLabel: { fontSize: 14, fontWeight: '700' },
   miniFab: {
@@ -344,5 +340,15 @@ const styles = StyleSheet.create({
     borderRadius: 23,
     alignItems: 'center',
     justifyContent: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOpacity: 0.15,
+        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 2 },
+      },
+      android: { elevation: 4 },
+      default: {},
+    }),
   },
 });

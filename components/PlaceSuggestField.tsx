@@ -168,29 +168,6 @@ export function PlaceSuggestField({
         onBlur={() => setTimeout(() => setFocused(false), 220)}
       />
 
-      {quick.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chips}
-          keyboardShouldPersistTaps="handled"
-        >
-          {quick.map((p) => (
-            <Pressable
-              key={`q-${p.id}`}
-              onPress={() => pickPlace(p)}
-              accessibilityRole="button"
-              accessibilityLabel={`Choisir ${p.name}`}
-              style={[styles.chip, { backgroundColor: colors.card, borderColor: colors.border }]}
-            >
-              <Text style={{ color: colors.text, fontSize: 12, fontWeight: '700' }}>
-                {KIND_LABEL[p.kind] === p.name ? p.name : `${KIND_LABEL[p.kind]} · ${p.name}`}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      )}
-
       {showList && (placeSuggestions.length > 0 || remote.length > 0) && (
         <View style={[styles.list, { borderColor: colors.border, backgroundColor: colors.card }]}>
           {placeSuggestions.map((p) => (

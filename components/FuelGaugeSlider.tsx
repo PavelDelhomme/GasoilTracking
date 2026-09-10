@@ -318,25 +318,26 @@ export function FuelGaugeSlider({
             <Circle cx={cx} cy={cy} r={compact ? 7 : 9} fill={fillColor} />
             <Circle cx={cx} cy={cy} r={compact ? 3 : 4} fill="#fff" />
 
+            {/* Chiffre + % sur une ligne (pas % en dessous) */}
             <SvgText
-              x={cx}
-              y={cy - (compact ? 26 : 32)}
+              x={cx - (compact ? 10 : 14)}
+              y={cy - (compact ? 14 : 18)}
               fill={tone === 'critical' || tone === 'warn' ? fillColor : colors.text}
               fontSize={compact ? 26 : 34}
               fontWeight="900"
-              textAnchor="middle"
+              textAnchor="end"
             >
               {known || editing ? `${pct}` : '—'}
             </SvgText>
             <SvgText
-              x={cx}
-              y={cy - (compact ? 8 : 10)}
+              x={cx - (compact ? 6 : 8)}
+              y={cy - (compact ? 14 : 18)}
               fill={colors.textSecondary}
-              fontSize={11}
+              fontSize={compact ? 13 : 15}
               fontWeight="700"
-              textAnchor="middle"
+              textAnchor="start"
             >
-              %
+              {known || editing ? '%' : ''}
             </SvgText>
           </Svg>
         </View>

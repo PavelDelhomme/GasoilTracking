@@ -219,11 +219,12 @@ export async function fetchDrivingRouteAlternatives(
   const fastest = byTime[0];
   const eco = byDist[0];
 
-  if (fastest && eco && isSameish(fastest, eco)) {
+  // Toujours proposer « Économique » (plus court) quand dispo — même si proche du rapide.
+  if (eco) add(eco, 'eco', 'Économique');
+  if (fastest && (!eco || !isSameish(fastest, eco))) {
     add(fastest, 'fastest', 'Plus rapide');
-  } else {
-    if (eco) add(eco, 'eco', 'Économique');
-    if (fastest) add(fastest, 'fastest', 'Plus rapide');
+  } else if (fastest && eco && isSameish(fastest, eco) && pick.length === 0) {
+    add(fastest, 'fastest', 'Plus rapide');
   }
 
   // Alternatives restantes (souvent un 3e trajet plus long / différent)

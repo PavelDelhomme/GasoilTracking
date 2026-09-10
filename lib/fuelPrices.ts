@@ -18,6 +18,11 @@ function mapAppFuel(fuel: FuelType): keyof FuelStationPrice['prices'] {
   return 'e10';
 }
 
+/** Clé prix open-data pour le type de carburant app. */
+export function fuelPriceKey(fuel: FuelType): keyof FuelStationPrice['prices'] {
+  return mapAppFuel(fuel);
+}
+
 export function fuelLabel(key: string): string {
   const labels: Record<string, string> = {
     gazole: 'Gazole',

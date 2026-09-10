@@ -75,9 +75,6 @@ export default function VehiclesScreen() {
             vehicle={item}
             isActive={activeVehicle?.id === item.id}
             onSelect={() => void selectVehicle(item.id)}
-            onPress={() =>
-              router.push({ pathname: '/vehicle/[id]' as never, params: { id: String(item.id) } })
-            }
             onView={() =>
               router.push({ pathname: '/vehicle/[id]' as never, params: { id: String(item.id) } })
             }

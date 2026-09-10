@@ -47,7 +47,6 @@ export function VehicleCard({
   const fuelColor = fuelToneColor(fuelTone, colors);
   const [draftLiters, setDraftLiters] = useState<number | null>(vehicle.estimatedFuelLiters);
 
-  // Sync si le véhicule change ailleurs
   React.useEffect(() => {
     setDraftLiters(vehicle.estimatedFuelLiters);
   }, [vehicle.id, vehicle.estimatedFuelLiters]);
@@ -59,8 +58,15 @@ export function VehicleCard({
     onFuelUpdated?.();
   };
 
+  const selectOnTap = () => {
+    if (onSelect && !isActive) onSelect();
+    else onPress?.();
+  };
+
   return (
-    <View
+    <Pressable
+      onPress={selectOnTap}
+      onLongPress={onLongPress}
       style={[
         styles.container,
         {
@@ -69,27 +75,35 @@ export function VehicleCard({
           borderWidth: isActive ? 2 : 1,
         },
       ]}
-      accessibilityLabel={`${vehicle.name}${isActive ? ', véhicule actif' : ''}`}
+      accessibilityRole="button"
+      accessibilityLabel={`${vehicle.name}${isActive ? ', véhicule actif' : ', appuyer pour sélectionner'}`}
+      accessibilityState={{ selected: !!isActive }}
     >
-      <Pressable
-        style={styles.header}
-        onPress={onPress}
-        onLongPress={onLongPress}
-        accessibilityRole="button"
-        accessibilityLabel={`${vehicle.name}${isActive ? ', véhicule actif' : ''}`}
-      >
+      <View style={styles.header}>
         <View style={styles.info}>
           <Text style={[styles.name, { color: colors.text }]}>{vehicle.name}</Text>
           <Text style={[styles.details, { color: colors.textSecondary }]}>
             {vehicle.brand} {vehicle.model} ({vehicle.year})
           </Text>
         </View>
-        {isActive && (
-          <View style={[styles.badge, { backgroundColor: colors.accent }]}>
-            <Text style={styles.badgeText}>Actif</Text>
-          </View>
-        )}
-      </Pressable>
+        <View style={styles.headerRight}>
+          {onDelete && (
+            <Pressable
+              onPress={onDelete}
+              style={[styles.deleteBtn, { borderColor: colors.danger }]}
+              hitSlop={6}
+              accessibilityLabel="Supprimer"
+            >
+              <Ionicons name="trash-outline" size={18} color={colors.danger} />
+            </Pressable>
+          )}
+          {isActive && (
+            <View style={[styles.badge, { backgroundColor: colors.accent }]}>
+              <Text style={styles.badgeText}>Actif</Text>
+            </View>
+          )}
+        </View>
+      </View>
 
       <View style={styles.stats}>
         <View style={styles.stat}>
@@ -112,7 +126,11 @@ export function VehicleCard({
         </View>
       </View>
 
-      <View style={styles.fuelBlock}>
+      <View
+        style={styles.fuelBlock}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+      >
         <FuelGaugeSlider
           requireConfirm
           tankCapacity={vehicle.tankCapacity}
@@ -137,15 +155,6 @@ export function VehicleCard({
       </View>
 
       <View style={styles.actions}>
-        {!isActive && onSelect && (
-          <ActionBtn
-            icon="checkmark-circle-outline"
-            label="Sélectionner"
-            color={colors.accent}
-            borderColor={colors.accent}
-            onPress={onSelect}
-          />
-        )}
         {onEdit && (
           <ActionBtn
             icon="create-outline"
@@ -173,18 +182,8 @@ export function VehicleCard({
             onPress={onMaintenance}
           />
         )}
-        {onDelete && (
-          <Pressable
-            onPress={onDelete}
-            style={[styles.deleteBtn, { borderColor: colors.danger }]}
-            hitSlop={6}
-            accessibilityLabel="Supprimer"
-          >
-            <Ionicons name="trash-outline" size={18} color={colors.danger} />
-          </Pressable>
-        )}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -202,7 +201,12 @@ function ActionBtn({
   onPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} style={[styles.actionBtn, { borderColor }]} accessibilityRole="button" accessibilityLabel={label}>
+    <Pressable
+      onPress={onPress}
+      style={[styles.actionBtn, { borderColor }]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
       <Ionicons name={icon} size={16} color={color} />
       <Text style={[styles.actionLabel, { color }]} numberOfLines={1}>
         {label}
@@ -222,6 +226,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     marginBottom: 12,
+    gap: 8,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   info: { flex: 1 },
   name: { fontSize: 18, fontWeight: '700' },

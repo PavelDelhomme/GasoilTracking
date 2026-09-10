@@ -319,24 +319,47 @@ export default function FillUpsScreen() {
 
       {periodStats.count > 0 && (
         <View style={[styles.summary, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.summaryTitle, { color: colors.text }]}>
-            {selectedMonth !== 'all' ? formatMonthLabel(selectedMonth) : 'Tous les pleins'}
-          </Text>
-          <Text
-            style={[
-              styles.summaryHero,
-              {
-                color:
-                  monthBudgetHint && monthBudgetHint.pct > 100
-                    ? colors.danger
-                    : monthBudgetHint && monthBudgetHint.pct > 80
-                      ? colors.warning
-                      : colors.accent,
-              },
-            ]}
-          >
-            {formatEuro(periodStats.totalCost)}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[styles.summaryTitle, { color: colors.text }]}>
+                {selectedMonth !== 'all' ? formatMonthLabel(selectedMonth) : 'Tous les pleins'}
+              </Text>
+              <Text
+                style={[
+                  styles.summaryHero,
+                  {
+                    color:
+                      monthBudgetHint && monthBudgetHint.pct > 100
+                        ? colors.danger
+                        : monthBudgetHint && monthBudgetHint.pct > 80
+                          ? colors.warning
+                          : colors.accent,
+                  },
+                ]}
+              >
+                {formatEuro(periodStats.totalCost)}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => void exportCsv()}
+              accessibilityRole="button"
+              accessibilityLabel="Exporter CSV du mois"
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+                paddingVertical: 8,
+                paddingHorizontal: 10,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderColor: colors.border,
+                backgroundColor: colors.background,
+              }}
+            >
+              <Ionicons name="download-outline" size={16} color={colors.accent} />
+              <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 12 }}>CSV</Text>
+            </Pressable>
+          </View>
           {monthBudgetHint && (
             <View style={{ marginTop: 8 }}>
               <Text
@@ -372,23 +395,43 @@ export default function FillUpsScreen() {
               />
             </View>
           )}
-          <Text style={[styles.summarySub, { color: colors.textSecondary }]}>
-            {periodStats.count} plein{periodStats.count > 1 ? 's' : ''}
-            {' · '}
-            {periodStats.totalLiters.toFixed(1)} L
-            {periodStats.avgPricePerLiter > 0
-              ? ` · moy. ${formatPerLiter(periodStats.avgPricePerLiter)}`
-              : ''}
-          </Text>
-          {(periodStats.avgConsumption != null || periodStats.totalDistanceKm > 0) && (
-            <Text style={[styles.summarySub, { color: colors.textSecondary, marginTop: 4 }]}>
-              {periodStats.avgConsumption != null && activeVehicle
-                ? `Conso ${formatConsumption(periodStats.avgConsumption, activeVehicle.fuelType)}`
-                : ''}
-              {periodStats.avgConsumption != null && periodStats.totalDistanceKm > 0 ? ' · ' : ''}
-              {periodStats.totalDistanceKm > 0 ? formatDistance(periodStats.totalDistanceKm) : ''}
-            </Text>
-          )}
+          <View style={styles.periodStatsRow}>
+            <View style={[styles.periodStat, { backgroundColor: colors.background, borderColor: colors.border }]}>
+              <Text style={[styles.periodStatVal, { color: colors.text }]}>{periodStats.count}</Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '600' }}>
+                plein{periodStats.count > 1 ? 's' : ''}
+              </Text>
+            </View>
+            <View style={[styles.periodStat, { backgroundColor: colors.background, borderColor: colors.border }]}>
+              <Text style={[styles.periodStatVal, { color: colors.text }]}>
+                {periodStats.totalLiters.toFixed(1)}
+              </Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '600' }}>litres</Text>
+            </View>
+            {periodStats.avgPricePerLiter > 0 && (
+              <View style={[styles.periodStat, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                <Text style={[styles.periodStatVal, { color: colors.accent }]} numberOfLines={1}>
+                  {formatPerLiter(periodStats.avgPricePerLiter)}
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '600' }}>moy. / L</Text>
+              </View>
+            )}
+            {periodStats.avgConsumption != null && activeVehicle ? (
+              <View style={[styles.periodStat, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                <Text style={[styles.periodStatVal, { color: colors.text }]} numberOfLines={1}>
+                  {formatConsumption(periodStats.avgConsumption, activeVehicle.fuelType)}
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '600' }}>conso.</Text>
+              </View>
+            ) : periodStats.totalDistanceKm > 0 ? (
+              <View style={[styles.periodStat, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                <Text style={[styles.periodStatVal, { color: colors.text }]}>
+                  {formatDistance(periodStats.totalDistanceKm)}
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '600' }}>distance</Text>
+              </View>
+            ) : null}
+          </View>
           {monthCompare && monthCompare.previous.count + monthCompare.current.count > 0 && (
             <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 8, lineHeight: 18 }}>
               vs {formatMonthLabel(monthCompare.previous.monthKey)} :{' '}
@@ -402,32 +445,6 @@ export default function FillUpsScreen() {
               {monthCompare.deltaLiters.toFixed(1)} L
             </Text>
           )}
-          <Pressable
-            onPress={() => void exportCsv()}
-            accessibilityRole="button"
-            accessibilityLabel="Exporter CSV du mois"
-            style={{
-              marginTop: 12,
-              alignSelf: 'flex-start',
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              paddingVertical: 8,
-              paddingHorizontal: 12,
-              borderRadius: 10,
-              borderWidth: 1,
-              borderColor: colors.border,
-              backgroundColor: colors.background,
-            }}
-          >
-            <Ionicons name="download-outline" size={16} color={colors.accent} />
-            <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }}>
-              Export CSV
-              {selectedMonth === 'all'
-                ? ` (${formatMonthChip(currentMonthKey())})`
-                : ` (${formatMonthChip(selectedMonth)})`}
-            </Text>
-          </Pressable>
         </View>
       )}
 
@@ -645,6 +662,23 @@ const styles = StyleSheet.create({
   summaryTitle: { fontSize: 14, fontWeight: '700', marginBottom: 4 },
   summaryHero: { fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
   summarySub: { fontSize: 14, marginTop: 4, lineHeight: 20 },
+  periodStatsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  periodStat: {
+    flexGrow: 1,
+    flexBasis: '22%',
+    minWidth: 72,
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  periodStatVal: { fontSize: 15, fontWeight: '800', marginBottom: 2 },
   listFlex: { flex: 1 },
   list: { paddingHorizontal: 14, paddingTop: 4, paddingBottom: 120 },
   empty: { alignItems: 'center', padding: 40, gap: 12 },

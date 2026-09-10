@@ -12,6 +12,7 @@ import {
   AppState,
   RefreshControl,
   PanResponder,
+  Alert,
   type AppStateStatus,
   type GestureResponderEvent,
   type PanResponderGestureState,
@@ -117,7 +118,78 @@ import {
 } from '@/lib/smartSuggestions';
 import type { SinceLastFillStats } from '@/types';
 import type { RoutePoint } from '@/lib/calculations';
+import {
+  fetchCheapestStations,
+  fuelPriceKey,
+  isFrenchFuelOpenDataAvailable,
+} from '@/lib/fuelPrices';
+import { useLocale } from '@/context/LocaleContext';
+import type { Vehicle } from '@/types';
 
+/** Propose stations pas chères si le niveau est critique / bas. */
+async function offerDetourStations(opts: {
+  vehicle: Vehicle;
+  liters: number;
+  origin: { latitude: number; longitude: number } | null;
+  countryCode: string;
+  onPickVia: (via: { latitude: number; longitude: number; label: string }) => void;
+}): Promise<'continue' | 'abort'> {
+  const tone = fuelRemainingTone({
+    litersRemaining: opts.liters,
+    tankCapacity: opts.vehicle.tankCapacity,
+    lowLitersThreshold: opts.vehicle.lowFuelThresholdLiters,
+  });
+  if (tone !== 'critical' && tone !== 'warn') return 'continue';
+  if (!isFrenchFuelOpenDataAvailable(opts.countryCode) || !opts.origin) {
+    return await new Promise<'continue' | 'abort'>((resolve) => {
+      confirm(
+        'Niveau bas',
+        `Réservoir ~${opts.liters.toFixed(1)} L — démarrer quand même ?`,
+        () => resolve('continue'),
+        'Démarrer',
+        () => resolve('abort')
+      );
+    });
+  }
+  try {
+    const stations = await fetchCheapestStations({
+      latitude: opts.origin.latitude,
+      longitude: opts.origin.longitude,
+      radiusKm: 18,
+      fuel: opts.vehicle.fuelType,
+      limit: 4,
+      countryCode: opts.countryCode,
+    });
+    const key = fuelPriceKey(opts.vehicle.fuelType);
+    const top = stations.filter((s) => s.prices[key] != null).slice(0, 3);
+    if (!top.length) return 'continue';
+    return await new Promise<'continue' | 'abort'>((resolve) => {
+      Alert.alert(
+        'Essence basse — stations proches',
+        `Il reste ~${opts.liters.toFixed(1)} L. Ajouter un détour vers une station pas chère ?`,
+        [
+          ...top.map((s) => ({
+            text: `${s.name} · ${s.prices[key]!.toFixed(3)} €/L${
+              s.distanceKm != null ? ` · ${s.distanceKm.toFixed(1)} km` : ''
+            }`,
+            onPress: () => {
+              opts.onPickVia({
+                latitude: s.latitude,
+                longitude: s.longitude,
+                label: s.name,
+              });
+              resolve('continue');
+            },
+          })),
+          { text: 'Démarrer sans détour', onPress: () => resolve('continue') },
+          { text: 'Annuler', style: 'cancel' as const, onPress: () => resolve('abort') },
+        ]
+      );
+    });
+  } catch {
+    return 'continue';
+  }
+}
 type TripTab = 'live' | 'history';
 /** free = suivi GPS sans destination ; nav = avec destination */
 type StartMode = 'free' | 'nav';
@@ -159,6 +231,7 @@ export default function TripScreen() {
   const { activeVehicle, activeTrip, refresh, vehicles, selectVehicle } = useApp();
   const { colors } = useTheme();
   const { showToast } = useToast();
+  const { countryCode } = useLocale();
   const insets = useSafeAreaInsets();
   const mapRef = useRef<TripMapRef>(null);
   const autoStartDone = useRef(false);
@@ -175,6 +248,8 @@ export default function TripScreen() {
   const [isStarting, setIsStarting] = useState(false);
   const [nearDestination, setNearDestination] = useState(false);
   const [smartDismissed, setSmartDismissed] = useState(false);
+  const [mapCollapsed, setMapCollapsed] = useState(false);
+  const [fuelStopVia, setFuelStopVia] = useState<GeoCoords | null>(null);
   const arrivalPromptedRef = useRef(false);
   const startingRef = useRef(false);
   const fittedTripIdRef = useRef<number | null>(null);
@@ -734,18 +809,20 @@ export default function TripScreen() {
     let mapsDest: GeoCoords | null = coordsOverride ?? null;
     let mapsOrigin: GeoCoords | null = null;
     let mapsLabel = destLabel;
+    let stationViaLocal: GeoCoords | null = fuelStopVia;
 
     try {
-      // Suivi libre : pas de modal jauge au démarrage (crash Android avec GPS).
+      // Toujours valider la jauge (nav + suivi libre) — même demi-cercle qu’à l’accueil.
       let startFuel = activeVehicle.estimatedFuelLiters;
-      if (mode === 'nav') {
-        const gauge = await askFuelGaugeApprox(
-          activeVehicle,
-          'Niveau de carburant au départ',
-          'Réglez la jauge pour affiner la consommation estimée.',
-          { softSkip: true }
-        );
-        startFuel = gauge.skipped ? activeVehicle.estimatedFuelLiters : gauge.liters;
+      const gauge = await askFuelGaugeApprox(
+        activeVehicle,
+        'Niveau de carburant au départ',
+        'Réglez la jauge pour affiner la consommation estimée.',
+        { softSkip: true }
+      );
+      startFuel = gauge.skipped ? activeVehicle.estimatedFuelLiters : gauge.liters;
+      if (startFuel != null) {
+        await setFuelLiters(activeVehicle, startFuel);
       }
       setTripStartFuelLiters(startFuel);
 
@@ -768,6 +845,25 @@ export default function TripScreen() {
           longitude: loc.coords.longitude,
         };
         setUserLocation(mapsOrigin);
+      }
+
+      if (startFuel != null) {
+        const stationChoice = await offerDetourStations({
+          vehicle: activeVehicle,
+          liters: startFuel,
+          origin: mapsOrigin,
+          countryCode,
+          onPickVia: (via) => {
+            stationViaLocal = { latitude: via.latitude, longitude: via.longitude };
+            setFuelStopVia(stationViaLocal);
+            notify('Détour station', via.label);
+          },
+        });
+        if (stationChoice === 'abort') {
+          startingRef.current = false;
+          setIsStarting(false);
+          return;
+        }
       }
 
       let resolvedDest: GeoCoords | null = null;
@@ -909,11 +1005,15 @@ export default function TripScreen() {
         }).then(() => getRecentDestinations(6).then(setRecentDests));
 
         await new Promise((r) => setTimeout(r, 400));
-        const via = mapsWaypointsForRoute(routeForNav);
+        const routeVias = mapsWaypointsForRoute(routeForNav);
+        const waypoints = [
+          ...(stationViaLocal ? [stationViaLocal] : []),
+          ...routeVias,
+        ];
         const opened = await launchGoogleMapsNavigation({
           destination: mapsDest,
           origin: mapsOrigin,
-          waypoints: via,
+          waypoints,
           label: mapsLabel,
         });
         if (!opened) {
@@ -922,6 +1022,7 @@ export default function TripScreen() {
             'Impossible d’ouvrir Maps. Le suivi GPS continue dans l’app.'
           );
         }
+        setFuelStopVia(null);
       }
     } catch {
       notify(
@@ -1885,7 +1986,7 @@ export default function TripScreen() {
               topInset={96 + insets.top}
             />
           ) : null}
-          <View style={styles.map}>
+          <View style={[styles.map, mapCollapsed ? styles.mapCollapsed : null]}>
             <TripMap
               ref={mapRef}
               region={currentRegion}
@@ -1899,6 +2000,18 @@ export default function TripScreen() {
               }
               destination={destCoords}
             />
+            <Pressable
+              onPress={() => setMapCollapsed((v) => !v)}
+              style={styles.mapCollapseBtn}
+              accessibilityRole="button"
+              accessibilityLabel={mapCollapsed ? 'Agrandir la carte' : 'Réduire la carte'}
+            >
+              <Ionicons
+                name={mapCollapsed ? 'chevron-down' : 'chevron-up'}
+                size={18}
+                color="#fff"
+              />
+            </Pressable>
             {activeVehicle ? (
               <View style={styles.vehicleFloat} pointerEvents="none">
                 <Text style={styles.vehicleFloatText} numberOfLines={1}>
@@ -1959,11 +2072,7 @@ export default function TripScreen() {
                 </ScrollView>
                 {routesLoading ? (
                   <Text style={styles.routePickerHint}>Calcul des itinéraires…</Text>
-                ) : (
-                  <Text style={styles.routePickerHint}>
-                    Choisissez un trajet — Maps suivra ce corridor (via) au démarrage
-                  </Text>
-                )}
+                ) : null}
               </View>
             )}
           </View>
@@ -2406,6 +2515,86 @@ export default function TripScreen() {
                           }
                         }}
                       />
+                      {(quickPlaces.length > 0 || recentDests.length > 0) && (
+                        <View style={{ marginTop: 10 }}>
+                          <Text
+                            style={{
+                              color: colors.textSecondary,
+                              fontSize: 12,
+                              fontWeight: '700',
+                              marginBottom: 8,
+                            }}
+                          >
+                            Lieux & récents
+                          </Text>
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                            {quickPlaces.map((p) => (
+                              <Pressable
+                                key={`place-${p.id}`}
+                                onPress={() =>
+                                  applyDestination(
+                                    p.address?.trim() || p.name,
+                                    p.latitude,
+                                    p.longitude
+                                  )
+                                }
+                                style={[
+                                  styles.destChip,
+                                  {
+                                    borderColor: colors.accent,
+                                    backgroundColor: colors.accent + '18',
+                                  },
+                                ]}
+                              >
+                                <Ionicons
+                                  name={p.kind === 'home' ? 'home' : 'briefcase'}
+                                  size={14}
+                                  color={colors.accent}
+                                />
+                                <Text
+                                  style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }}
+                                >
+                                  {p.kind === 'home'
+                                    ? 'Domicile'
+                                    : p.kind === 'work'
+                                      ? 'Travail'
+                                      : p.name}
+                                </Text>
+                              </Pressable>
+                            ))}
+                            {recentDests.map((r) => (
+                              <Pressable
+                                key={`recent-${r.label}-${r.at}`}
+                                onPress={() => applyDestination(r.label, r.latitude, r.longitude)}
+                                style={[
+                                  styles.destChip,
+                                  {
+                                    borderColor: colors.border,
+                                    backgroundColor: colors.background,
+                                  },
+                                ]}
+                              >
+                                <Ionicons
+                                  name="time-outline"
+                                  size={14}
+                                  color={colors.textSecondary}
+                                />
+                                <Text
+                                  style={{
+                                    color: colors.text,
+                                    fontWeight: '600',
+                                    fontSize: 13,
+                                    maxWidth: 160,
+                                  }}
+                                  numberOfLines={1}
+                                >
+                                  {r.label}
+                                </Text>
+                              </Pressable>
+                            ))}
+                          </View>
+                        </View>
+                      )}
                     </View>
                   )}
                 </Card>
@@ -2474,66 +2663,31 @@ export default function TripScreen() {
                   </Card>
                 )}
 
-                {(quickPlaces.length > 0 || recentDests.length > 0) && (
-                  <Card style={{ marginTop: 4, marginBottom: 8 }}>
-                    <Text style={{ color: colors.text, fontWeight: '800', marginBottom: 8 }}>
-                      Destinations rapides
-                    </Text>
-                    <Text
-                      style={{
-                        color: colors.textSecondary,
-                        fontSize: 12,
-                        marginBottom: 10,
-                        lineHeight: 17,
-                      }}
-                    >
-                      Touchez une destination pour préparer la navigation (sous le suivi libre).
-                    </Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                      {quickPlaces.map((p) => (
-                        <Pressable
-                          key={`place-${p.id}`}
-                          onPress={() =>
-                            applyDestination(p.address?.trim() || p.name, p.latitude, p.longitude)
-                          }
-                          style={[
-                            styles.destChip,
-                            {
-                              borderColor: colors.accent,
-                              backgroundColor: colors.accent + '18',
-                            },
-                          ]}
-                        >
-                          <Ionicons
-                            name={p.kind === 'home' ? 'home' : 'briefcase'}
-                            size={14}
-                            color={colors.accent}
-                          />
-                          <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }}>
-                            {p.kind === 'home' ? 'Domicile' : p.kind === 'work' ? 'Travail' : p.name}
-                          </Text>
-                        </Pressable>
-                      ))}
-                      {recentDests.map((r) => (
-                        <Pressable
-                          key={`recent-${r.label}-${r.at}`}
-                          onPress={() => applyDestination(r.label, r.latitude, r.longitude)}
-                          style={[
-                            styles.destChip,
-                            { borderColor: colors.border, backgroundColor: colors.background },
-                          ]}
-                        >
-                          <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
-                          <Text
-                            style={{ color: colors.text, fontWeight: '600', fontSize: 13, maxWidth: 160 }}
-                            numberOfLines={1}
-                          >
-                            {r.label}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </Card>
+                {startMode === 'nav' && (destination.trim() || destCoords) && (
+                  <Button
+                    title="Programmer dans le calendrier"
+                    variant="outline"
+                    onPress={() => {
+                      const title = encodeURIComponent(`Trajet · ${destination.trim() || 'Navigation'}`);
+                      const details = encodeURIComponent(
+                        `Ouvrir Gasoil Tracking puis Maps\ngasoiltracking://trip?dest=${encodeURIComponent(destination.trim())}`
+                      );
+                      const start = new Date();
+                      start.setMinutes(0, 0, 0);
+                      start.setHours(start.getHours() + 1);
+                      const end = new Date(start.getTime() + 45 * 60_000);
+                      const fmt = (d: Date) =>
+                        d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+                      const url =
+                        `https://calendar.google.com/calendar/render?action=TEMPLATE` +
+                        `&text=${title}&details=${details}` +
+                        `&dates=${fmt(start)}/${fmt(end)}`;
+                      void Linking.openURL(url).catch(() =>
+                        notify('Calendrier', 'Impossible d’ouvrir le calendrier.')
+                      );
+                    }}
+                    style={{ marginBottom: 8 }}
+                  />
                 )}
 
                 {gpsSimEnabled && (
@@ -2559,8 +2713,8 @@ export default function TripScreen() {
               style={[
                 styles.stickyStart,
                 {
-                  paddingBottom: Math.max(12, insets.bottom + 8),
-                  paddingRight: 72,
+                  paddingBottom: Math.max(10, insets.bottom + 4),
+                  paddingRight: 16,
                   backgroundColor: colors.background,
                   borderTopColor: colors.border,
                 },
@@ -2573,10 +2727,10 @@ export default function TripScreen() {
                     : routesLoading
                       ? 'Calcul des itinéraires…'
                       : selectedRoute
-                        ? `Démarrer · ${selectedRoute.label} + Maps`
+                        ? `Démarrer · ${selectedRoute.label}`
                         : destination.trim()
-                          ? 'Choisissez un itinéraire sur la carte'
-                          : 'Démarrer + navigation Maps'
+                          ? 'Choisissez un itinéraire'
+                          : 'Démarrer + Maps'
                 }
                 onPress={handleStartTrip}
                 loading={isStarting}
@@ -2593,7 +2747,7 @@ export default function TripScreen() {
             <SpeedDialFab
               fan
               anchor="content"
-              extraBottom={activeVehicle ? 10 : 0}
+              extraBottom={activeVehicle ? 62 : 0}
               actions={[
                 {
                   key: 'maps',
@@ -2941,7 +3095,20 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   segments: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth },
   segment: { flex: 1, alignItems: 'center', paddingVertical: 12 },
-  map: { height: '46%', minHeight: 260, position: 'relative' },
+  map: { height: '38%', minHeight: 200, maxHeight: 360, position: 'relative' },
+  mapCollapsed: { height: 132, minHeight: 132, maxHeight: 132 },
+  mapCollapseBtn: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(15,23,42,0.75)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 25,
+  },
   mapHint: {
     position: 'absolute',
     bottom: 8,

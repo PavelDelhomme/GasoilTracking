@@ -17,6 +17,7 @@ import { Card, StatCard } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { TripMiniMap } from '@/components/TripMiniMap';
+import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
 import {
   calculateRealConsumption,
   formatConsumption,
@@ -319,18 +320,50 @@ export default function FillUpDetailScreen() {
           />
         </View>
 
-        {/* Note / chiffres éditables */}
+        {/* Jauge avant / après (plein complet) */}
+        {vehicle && fill.isFull && (
+          <Card style={{ marginTop: 4, marginBottom: 8 }}>
+            <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 8 }]}>
+              Réservoir avant → après
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '700', textAlign: 'center' }}>
+                  Avant
+                </Text>
+                <FuelGaugeSlider
+                  compact
+                  requireConfirm={false}
+                  disabled
+                  tankCapacity={vehicle.tankCapacity}
+                  liters={Math.max(0, vehicle.tankCapacity - fill.liters)}
+                  onChange={() => {}}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '700', textAlign: 'center' }}>
+                  Après
+                </Text>
+                <FuelGaugeSlider
+                  compact
+                  requireConfirm={false}
+                  disabled
+                  tankCapacity={vehicle.tankCapacity}
+                  liters={vehicle.tankCapacity}
+                  onChange={() => {}}
+                />
+              </View>
+            </View>
+          </Card>
+        )}
+
+        {/* Note / édition */}
         <Card style={{ marginTop: 4 }}>
-          <View style={styles.sectionHead}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Corriger le plein</Text>
-            <Pressable onPress={() => setEditing((e) => !e)} hitSlop={8}>
-              <Text style={{ color: colors.accent, fontWeight: '700' }}>
-                {editing ? 'Annuler' : 'Modifier'}
-              </Text>
-            </Pressable>
-          </View>
           {editing ? (
             <>
+              <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 10 }]}>
+                Modifier le plein
+              </Text>
               <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
                 Véhicule
               </Text>
@@ -427,11 +460,25 @@ export default function FillUpDetailScreen() {
                 />
               </View>
               <Button title="Enregistrer" onPress={saveEdits} loading={saving} />
+              <Button
+                title="Annuler"
+                variant="outline"
+                onPress={() => setEditing(false)}
+                style={{ marginTop: 8 }}
+              />
             </>
           ) : (
-            <Text style={{ color: fill.note ? colors.text : colors.textSecondary, lineHeight: 20 }}>
-              {fill.note?.trim() || 'Aucune note — tapez Modifier pour corriger litres / prix / station.'}
-            </Text>
+            <>
+              {fill.note?.trim() ? (
+                <Text style={{ color: colors.text, lineHeight: 20, fontWeight: '600' }}>
+                  {fill.note.trim()}
+                </Text>
+              ) : (
+                <Text style={{ color: colors.textSecondary, lineHeight: 20 }}>
+                  Aucune note de station.
+                </Text>
+              )}
+            </>
           )}
         </Card>
 
@@ -484,12 +531,28 @@ export default function FillUpDetailScreen() {
           </Card>
         )}
 
-        <Button
-          title="Supprimer ce plein"
-          variant="outline"
-          onPress={onDelete}
-          style={{ marginTop: 20, borderColor: colors.danger }}
-        />
+        {!editing && (
+          <View style={styles.bottomActions}>
+            <Pressable
+              onPress={() => setEditing(true)}
+              style={[styles.bottomBtn, { borderColor: colors.accent, backgroundColor: colors.accent + '14' }]}
+              accessibilityRole="button"
+              accessibilityLabel="Modifier le plein"
+            >
+              <Ionicons name="create-outline" size={20} color={colors.accent} />
+              <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 15 }}>Modifier</Text>
+            </Pressable>
+            <Pressable
+              onPress={onDelete}
+              style={[styles.bottomBtn, { borderColor: colors.danger, backgroundColor: colors.danger + '12' }]}
+              accessibilityRole="button"
+              accessibilityLabel="Supprimer le plein"
+            >
+              <Ionicons name="trash-outline" size={20} color={colors.danger} />
+              <Text style={{ color: colors.danger, fontWeight: '800', fontSize: 15 }}>Supprimer</Text>
+            </Pressable>
+          </View>
+        )}
         <View style={{ height: 40 }} />
       </ScrollView>
     </>
@@ -521,8 +584,6 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 8,
   },
-  // StatCard has minWidth 140 — force 2-col feel on phone
-  // (flex:1 on StatCard already)
   sectionHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -551,5 +612,20 @@ const styles = StyleSheet.create({
   prevRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  bottomActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 20,
+  },
+  bottomBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
   },
 });
