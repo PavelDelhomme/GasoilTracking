@@ -15,13 +15,30 @@ interface InputProps extends TextInputProps {
   error?: string;
   /** Affiche une icône œil pour révéler le mot de passe */
   passwordToggle?: boolean;
+  /** Champ verrouillé : non éditable jusqu’au crayon */
+  locked?: boolean;
+  /** Bascule verrou / édition (crayon) */
+  onRequestEdit?: () => void;
+  /** Texte d’aide sous le champ */
+  hint?: string;
 }
 
-export function Input({ label, error, style, passwordToggle, secureTextEntry, ...props }: InputProps) {
+export function Input({
+  label,
+  error,
+  style,
+  passwordToggle,
+  secureTextEntry,
+  locked,
+  onRequestEdit,
+  hint,
+  ...props
+}: InputProps) {
   const { colors } = useTheme();
   const [visible, setVisible] = useState(false);
   const isPassword = Boolean(passwordToggle || secureTextEntry);
   const hide = isPassword && !visible;
+  const showPencil = locked != null && onRequestEdit;
 
   return (
     <View style={styles.container}>
@@ -29,13 +46,15 @@ export function Input({ label, error, style, passwordToggle, secureTextEntry, ..
       <View style={styles.row}>
         <TextInput
           {...props}
+          editable={locked ? false : props.editable !== false}
           style={[
             styles.input,
-            isPassword && styles.inputWithIcon,
+            (isPassword || showPencil) && styles.inputWithIcon,
             {
-              backgroundColor: colors.card,
+              backgroundColor: locked ? colors.border + '55' : colors.card,
               borderColor: error ? colors.danger : colors.border,
               color: colors.text,
+              opacity: locked ? 0.85 : 1,
             },
             style,
           ]}
@@ -58,7 +77,24 @@ export function Input({ label, error, style, passwordToggle, secureTextEntry, ..
             />
           </TouchableOpacity>
         )}
+        {showPencil && (
+          <TouchableOpacity
+            style={styles.eye}
+            onPress={onRequestEdit}
+            accessibilityLabel={locked ? 'Modifier ce champ' : 'Verrouiller ce champ'}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons
+              name={locked ? 'pencil' : 'lock-closed-outline'}
+              size={20}
+              color={locked ? colors.accent : colors.textSecondary}
+            />
+          </TouchableOpacity>
+        )}
       </View>
+      {hint ? (
+        <Text style={[styles.hint, { color: colors.textSecondary }]}>{hint}</Text>
+      ) : null}
       {error && <Text style={[styles.error, { color: colors.danger }]}>{error}</Text>}
     </View>
   );
@@ -96,5 +132,10 @@ const styles = StyleSheet.create({
   error: {
     fontSize: 12,
     marginTop: 4,
+  },
+  hint: {
+    fontSize: 12,
+    marginTop: 4,
+    lineHeight: 16,
   },
 });

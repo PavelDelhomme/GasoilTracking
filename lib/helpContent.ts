@@ -50,7 +50,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: 'menu',
         title: 'Où trouver quoi ?',
         body:
-          'Accueil : résumé et jauge. Garage : véhicules. Pleins : historique carburant. Trajet : démarrer un suivi. Maps : carte + aller quelque part. Budget : enveloppes et prix stations. Menu ☰ : compte, historique des trajets, aide, mises à jour.',
+          'Accueil : résumé et jauge. Garage : véhicules. Pleins : historique carburant. Maps : recherche d’adresse, lieux & récents, suivi libre. Budget : enveloppes et prix stations. Menu ☰ : compte, historique des trajets, aide, mises à jour.',
       },
     ],
   },
@@ -104,26 +104,26 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         title: 'Suivi libre (recommandé au quotidien)',
         body:
           'Pas de destination : l’app enregistre le GPS, la distance, la conso estimée. Sur la carte : panneau de limitation (si connu) + niveau d’essence en direct. Boutons : Plein, Pause, Terminer — puis les stats, et « Suivi en cours » en bas.',
-        link: { label: 'Onglet Trajet', href: '/(tabs)/trip' },
+        link: { label: 'Ouvrir Maps', href: '/(tabs)/maps' },
       },
       {
         id: 'nav',
         title: 'Navigation vers une destination',
         body:
-          'Mode Navigation : indiquez une adresse ou un lieu (Maison / Travail). Choisissez un itinéraire (éco / rapide / alternatif), puis Démarrer. Le guidage (tourner… ) s’affiche en haut à droite à côté du nom du véhicule. Google Maps peut s’ouvrir en secours.',
+          'Depuis Maps : barre « Tapez une adresse… » en haut, ou un lieu / récent. L’app calcule l’itinéraire et démarre le guidage. Le panneau de conduite (vitesse, panneau, essence) reste sur l’écran trajet. Google Maps peut s’ouvrir en secours.',
       },
       {
         id: 'maps-tab',
         title: 'Onglet Maps',
         body:
-          'Carte dédiée : recherche « aller quelque part », démarrage suivi libre, ou passage en navigation. Utile pour voir panneau + vitesse GPS sans préparer tout le formulaire Trajet.',
+          'Entrée principale navigation : recherche d’adresse à côté du menu, lieux Maison/Travail & récents, démarrage suivi libre. L’ancien onglet Trajet n’est plus dans la barre (écran conservé pour le guidage en cours et l’historique).',
         link: { label: 'Maps', href: '/(tabs)/maps' },
       },
       {
         id: 'history',
         title: 'Historique des trajets',
         body:
-          'Menu ☰ → Historique des trajets. Plus d’onglet Historique dans Trajet : l’onglet Trajet reste dédié au trajet en cours.',
+          'Menu ☰ → Historique des trajets, ou bouton Historique sur Maps. Depuis l’accueil, « Depuis le plein » ouvre l’historique filtré depuis le dernier plein.',
         link: { label: 'Ouvrir l’historique', href: '/(tabs)/trip?tab=history' },
       },
       {
@@ -150,7 +150,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: 'add-fill',
         title: 'Enregistrer un plein',
         body:
-          'Onglet Pleins → Nouveau, ou depuis un trajet. Indiquez montant et/ou litres, prix au litre, plein complet ou non. Un plein complet remet la jauge au réservoir.',
+          'Nouveau plein : la station la plus proche est proposée (choix si plusieurs au même endroit). Champs verrouillés + crayon pour éviter les erreurs. Prix au litre en -- auto avec le €/L affiché en dessous. Les litres sont plafonnés à la place libre estimée (+ marge).',
         link: { label: 'Pleins', href: '/(tabs)/fillups' },
       },
       {

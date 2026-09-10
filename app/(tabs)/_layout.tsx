@@ -71,9 +71,8 @@ export default function TabLayout() {
       <Tabs.Screen
         name="trip"
         options={{
+          href: null,
           title: 'Trajet',
-          tabBarLabel: 'Trajet',
-          tabBarIcon: ({ color }) => <Ionicons name="navigate" size={20} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -82,6 +81,7 @@ export default function TabLayout() {
           title: 'Maps',
           tabBarLabel: 'Maps',
           tabBarIcon: ({ color }) => <Ionicons name="map" size={20} color={color} />,
+          headerTitleContainerStyle: { flex: 1, maxWidth: '100%' },
         }}
       />
       <Tabs.Screen

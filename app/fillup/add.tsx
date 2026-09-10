@@ -71,8 +71,12 @@ export default function AddFillUpScreen() {
   const [loading, setLoading] = useState(false);
   const [kmHint, setKmHint] = useState('');
   const [lastFill, setLastFill] = useState<FillUp | null>(null);
+  /** Champs verrouillés par défaut — crayon pour éditer un seul champ */
+  const [unlocked, setUnlocked] = useState<Record<string, boolean>>({});
 
   const hasOdo = activeVehicle?.hasOdometer !== false;
+  const toggleUnlock = (key: string) =>
+    setUnlocked((u) => ({ ...u, [key]: !u[key] }));
 
   useEffect(() => {
     if (!activeVehicle) return;
@@ -139,6 +143,16 @@ export default function AddFillUpScreen() {
     return need > 0.5 ? Math.round(need * 10) / 10 : 0;
   }, [activeVehicle]);
 
+  /** Place libre estimée + marge 12 % (jauge approximative), plafonnée au réservoir. */
+  const maxLitersAllowed = useMemo(() => {
+    if (!activeVehicle) return 999;
+    const tank = activeVehicle.tankCapacity;
+    const rem = activeVehicle.estimatedFuelLiters;
+    if (rem == null || rem < 0) return Math.round(tank * 10) / 10;
+    const room = Math.max(0, tank - rem);
+    return Math.min(tank, Math.round(room * 1.12 * 10) / 10);
+  }, [activeVehicle]);
+
   const priceDelta = useMemo(() => {
     if (!lastFill?.pricePerLiter || lastFill.pricePerLiter <= 0) return null;
     const p = parseNum(pricePerLiter);
@@ -191,9 +205,18 @@ export default function AddFillUpScreen() {
   }, [liters, totalPaid, pricePerLiter, lastEdited]);
 
   const onLiters = (v: string) => {
-    setLiters(v);
+    let L = parseNum(v);
+    if (L > maxLitersAllowed && maxLitersAllowed > 0) {
+      L = maxLitersAllowed;
+      setLiters(String(L));
+      notify(
+        'Réservoir',
+        `Maximum ~${maxLitersAllowed.toFixed(1)} L (place libre estimée + marge).`
+      );
+    } else {
+      setLiters(v);
+    }
     setLastEdited('liters');
-    const L = parseNum(v);
     const T = parseNum(totalPaid);
     if (L > 0 && T > 0) setPricePerLiter((T / L).toFixed(3));
     else if (L > 0 && parseNum(pricePerLiter) > 0) {
@@ -208,7 +231,15 @@ export default function AddFillUpScreen() {
     const L = parseNum(liters);
     if (L > 0 && T > 0) setPricePerLiter((T / L).toFixed(3));
     else if (T > 0 && parseNum(pricePerLiter) > 0) {
-      setLiters((T / parseNum(pricePerLiter)).toFixed(2));
+      let nextL = T / parseNum(pricePerLiter);
+      if (nextL > maxLitersAllowed && maxLitersAllowed > 0) {
+        nextL = maxLitersAllowed;
+        notify(
+          'Réservoir',
+          `Maximum ~${maxLitersAllowed.toFixed(1)} L (place libre estimée + marge).`
+        );
+      }
+      setLiters(nextL.toFixed(2));
     }
   };
 
@@ -220,21 +251,25 @@ export default function AddFillUpScreen() {
     if (L > 0 && P > 0) setTotalPaid((L * P).toFixed(2));
   };
 
-  const findStations = async () => {
+  const findStations = async (opts?: { autoPick?: boolean }) => {
     if (!isFrenchFuelOpenDataAvailable(countryCode)) {
-      notify(
-        'Stations',
-        'Les prix open data ne sont disponibles qu’en France. Saisissez litres et montant manuellement (tous pays Europe OK).'
-      );
+      if (!opts?.autoPick) {
+        notify(
+          'Stations',
+          'Les prix open data ne sont disponibles qu’en France. Saisissez litres et montant manuellement (tous pays Europe OK).'
+        );
+      }
       return;
     }
     setLocating(true);
-    setStation(null);
-    setNearby([]);
+    if (!opts?.autoPick) {
+      setStation(null);
+      setNearby([]);
+    }
     try {
       const loc = await getCurrentLocation();
       if (!loc) {
-        notify('GPS', 'Activez la localisation pour trouver la station.');
+        if (!opts?.autoPick) notify('GPS', 'Activez la localisation pour trouver la station.');
         return;
       }
       const list = await fetchCheapestStations({
@@ -242,18 +277,42 @@ export default function AddFillUpScreen() {
         longitude: loc.coords.longitude,
         radiusKm: 3,
         fuel: activeVehicle?.fuelType || 'diesel',
-        limit: 10,
+        limit: 12,
         countryCode,
       });
       list.sort((a, b) => (a.distanceKm || 99) - (b.distanceKm || 99));
-      setNearby(list);
-      if (!list.length) notify('Stations', 'Aucune station dans un rayon de 3 km.');
+      if (!list.length) {
+        if (!opts?.autoPick) notify('Stations', 'Aucune station dans un rayon de 3 km.');
+        setNearby([]);
+        return;
+      }
+      const closest = list[0].distanceKm ?? 99;
+      // Plusieurs stations « au même endroit » → laisser choisir
+      const cluster = list.filter((s) => (s.distanceKm ?? 99) <= closest + 0.18);
+      if (opts?.autoPick) {
+        if (cluster.length >= 2) {
+          setNearby(cluster.slice(0, 5));
+          setStation(null);
+        } else {
+          pickStation(list[0]);
+          setNearby([]);
+        }
+      } else {
+        setNearby(list);
+      }
     } catch (e) {
-      notify('Erreur', e instanceof Error ? e.message : 'API stations');
+      if (!opts?.autoPick) notify('Erreur', e instanceof Error ? e.message : 'API stations');
     } finally {
       setLocating(false);
     }
   };
+
+  // Par défaut : station la plus proche (pas la dernière utilisée)
+  useEffect(() => {
+    if (!activeVehicle) return;
+    void findStations({ autoPick: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeVehicle?.id, countryCode]);
 
   const pickStation = (s: FuelStationPrice) => {
     // Remplace entièrement la sélection précédente (pas d’empilement)
@@ -294,6 +353,13 @@ export default function AddFillUpScreen() {
     }
     if (derived.liters <= 0) {
       notify('Erreur', 'Indiquez les litres (ou montant + prix/L).');
+      return;
+    }
+    if (derived.liters > maxLitersAllowed + 0.05) {
+      notify(
+        'Trop de litres',
+        `Maximum ~${maxLitersAllowed.toFixed(1)} L pour ce réservoir (niveau actuel estimé).`
+      );
       return;
     }
     if (derived.ppl <= 0 || derived.total <= 0) {
@@ -408,19 +474,16 @@ export default function AddFillUpScreen() {
       />
 
       <Text style={[styles.section, { color: colors.text }]}>Station</Text>
-      {lastStationLabel && !station && (
-        <Pressable
-          onPress={applyLastStation}
-          style={[
-            styles.quickChip,
-            { borderColor: colors.accent, backgroundColor: colors.accent + '18', marginBottom: 10 },
-          ]}
-        >
-          <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }} numberOfLines={1}>
-            Dernière station : {lastStationLabel}
-          </Text>
-        </Pressable>
-      )}
+      {locating && !station && nearby.length === 0 ? (
+        <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 8 }}>
+          Recherche de la station la plus proche…
+        </Text>
+      ) : null}
+      {!station && nearby.length > 1 ? (
+        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, marginBottom: 8 }}>
+          Plusieurs stations proches — choisissez :
+        </Text>
+      ) : null}
       <Button
         title={
           locating
@@ -432,7 +495,7 @@ export default function AddFillUpScreen() {
                 : 'Trouver la station (GPS)'
         }
         variant="secondary"
-        onPress={findStations}
+        onPress={() => void findStations()}
         loading={locating}
       />
       {station && (
@@ -440,6 +503,7 @@ export default function AddFillUpScreen() {
           <Text style={{ color: colors.text, fontWeight: '700' }}>{station.name}</Text>
           <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
             {station.address} {station.city}
+            {station.distanceKm != null ? ` · ${station.distanceKm} km` : ''}
             {station.prices[fuelKey] != null
               ? ` · ${fuelLabel(fuelKey)} ${formatPerLiter(station.prices[fuelKey]!)}`
               : ''}
@@ -475,15 +539,23 @@ export default function AddFillUpScreen() {
             </Text>
           </Pressable>
         ))}
-      {!station && nearby.length > 0 && (
-        <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 6, marginBottom: 4 }}>
-          Tapez une station pour la sélectionner (remplace le choix précédent).
-        </Text>
+      {lastStationLabel && !station && (
+        <Pressable
+          onPress={applyLastStation}
+          style={[
+            styles.quickChip,
+            { borderColor: colors.border, backgroundColor: colors.card, marginTop: 8 },
+          ]}
+        >
+          <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 12 }} numberOfLines={1}>
+            Ou dernière station : {lastStationLabel}
+          </Text>
+        </Pressable>
       )}
 
       <Text style={[styles.section, { color: colors.text }]}>Quantité & montant</Text>
       <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
-        Entrez litres + montant payé → le prix/L se calcule tout seul (ou l’inverse).
+        Champs verrouillés par défaut — touchez le crayon pour modifier. Max ~{maxLitersAllowed.toFixed(1)} L.
       </Text>
       {fillToFullLiters > 0 && (
         <Pressable
@@ -504,6 +576,8 @@ export default function AddFillUpScreen() {
         value={liters}
         onChangeText={onLiters}
         keyboardType="decimal-pad"
+        locked={!unlocked.liters}
+        onRequestEdit={() => toggleUnlock('liters')}
       />
       <Input
         label={`Montant payé (${currency})`}
@@ -511,12 +585,21 @@ export default function AddFillUpScreen() {
         value={totalPaid}
         onChangeText={onTotal}
         keyboardType="decimal-pad"
+        locked={!unlocked.total}
+        onRequestEdit={() => toggleUnlock('total')}
       />
       <Input
-        label={`Prix au litre (${moneySymbol}/L) — auto`}
-        value={pricePerLiter}
+        label="Prix au litre"
+        value={unlocked.ppl ? pricePerLiter : '-- auto'}
         onChangeText={onPpl}
         keyboardType="decimal-pad"
+        locked={!unlocked.ppl}
+        onRequestEdit={() => toggleUnlock('ppl')}
+        hint={
+          derived.ppl > 0
+            ? `${derived.ppl.toFixed(2).replace('.', ',')} €/L`
+            : 'Calculé depuis litres + montant'
+        }
       />
       {priceDelta != null && Math.abs(priceDelta) >= 0.001 && (
         <Text
@@ -547,6 +630,8 @@ export default function AddFillUpScreen() {
           value={odometer}
           onChangeText={setOdometer}
           keyboardType="numeric"
+          locked={!unlocked.odometer}
+          onRequestEdit={() => toggleUnlock('odometer')}
         />
       ) : (
         <Input
@@ -555,13 +640,9 @@ export default function AddFillUpScreen() {
           onChangeText={setDistanceKm}
           keyboardType="decimal-pad"
           placeholder="ex: 420"
+          locked={!unlocked.distance}
+          onRequestEdit={() => toggleUnlock('distance')}
         />
-      )}
-
-      {!!kmHint && (
-        <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: -8, marginBottom: 8 }}>
-          {kmHint}
-        </Text>
       )}
 
       {hasOdo && (
@@ -570,8 +651,24 @@ export default function AddFillUpScreen() {
           value={distanceKm}
           onChangeText={setDistanceKm}
           keyboardType="decimal-pad"
+          locked={!unlocked.distance}
+          onRequestEdit={() => toggleUnlock('distance')}
         />
       )}
+
+      {!hasOdo && !!kmHint && (
+        <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: -8, marginBottom: 8 }}>
+          {kmHint}
+        </Text>
+      )}
+
+      <Input
+        label="Note / nom station (optionnel)"
+        value={note}
+        onChangeText={setNote}
+        locked={!unlocked.note}
+        onRequestEdit={() => toggleUnlock('note')}
+      />
 
       <View style={styles.switchRow}>
         <View style={{ flex: 1, paddingRight: 12 }}>
@@ -605,13 +702,6 @@ export default function AddFillUpScreen() {
           </Text>
         </Card>
       )}
-
-      <Input
-        label="Note / station"
-        placeholder="Rempli auto si station détectée"
-        value={note}
-        onChangeText={setNote}
-      />
 
       {envelopePreview && (
         <Card style={{ marginBottom: 16 }}>

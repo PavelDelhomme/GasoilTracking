@@ -1,8 +1,7 @@
 /**
- * Onglet Maps dédié : suivi libre par défaut + accès navigation / aller quelque part.
- * Réutilise le moteur Trajet (GPS, OSRM, Overpass) via deep-link.
+ * Onglet Maps : recherche adresse en header, lieux & récents, suivi libre / nav.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,8 +11,9 @@ import {
   ActivityIndicator,
   Keyboard,
   Platform,
+  ScrollView,
 } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useNavigation } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,11 +26,18 @@ import { fetchSpeedLimitNear, type SpeedLimitInfo } from '@/lib/roadSpeedLimits'
 import { forwardGeocode } from '@/lib/geocode';
 import { formatSpeedKmh } from '@/lib/calculations';
 import { Button } from '@/components/Button';
+import { getPlaces } from '@/lib/database';
+import {
+  getRecentDestinations,
+  type RecentDestination,
+} from '@/lib/recentDestinations';
+import type { Place } from '@/types';
 
 export default function MapsScreen() {
   const { colors } = useTheme();
   const { activeTrip, activeVehicle } = useApp();
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
   const mapRef = useRef<TripMapRef>(null);
   const [user, setUser] = useState<{ latitude: number; longitude: number } | null>(null);
   const [speedKmh, setSpeedKmh] = useState(0);
@@ -38,6 +45,8 @@ export default function MapsScreen() {
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [places, setPlaces] = useState<Place[]>([]);
+  const [recentDests, setRecentDests] = useState<RecentDestination[]>([]);
 
   const refreshLoc = useCallback(async () => {
     const loc = await getCurrentLocation({ fresh: true });
@@ -48,9 +57,16 @@ export default function MapsScreen() {
     }
   }, []);
 
+  const reloadPlaces = useCallback(async () => {
+    const [p, r] = await Promise.all([getPlaces(), getRecentDestinations(8)]);
+    setPlaces(p);
+    setRecentDests(r);
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       void refreshLoc();
+      void reloadPlaces();
       let nativeSub: Location.LocationSubscription | null = null;
       let webWatch: number | null = null;
       void (async () => {
@@ -89,7 +105,7 @@ export default function MapsScreen() {
           navigator.geolocation.clearWatch(webWatch);
         }
       };
-    }, [refreshLoc])
+    }, [refreshLoc, reloadPlaces])
   );
 
   useEffect(() => {
@@ -107,15 +123,7 @@ export default function MapsScreen() {
     };
   }, [user?.latitude, user?.longitude]);
 
-  const goFreeTrack = () => {
-    router.push({ pathname: '/(tabs)/trip', params: { mode: 'free', autoStart: '1' } });
-  };
-
-  const goNav = () => {
-    router.push({ pathname: '/(tabs)/trip', params: { mode: 'nav' } });
-  };
-
-  const goSearch = async () => {
+  const goSearch = useCallback(async () => {
     const q = query.trim();
     if (q.length < 2) {
       setSearchError('Indiquez une adresse ou un lieu');
@@ -137,6 +145,7 @@ export default function MapsScreen() {
           dest: hit.label || q,
           destLat: String(hit.latitude),
           destLon: String(hit.longitude),
+          autoStart: '1',
         },
       });
     } catch {
@@ -144,7 +153,81 @@ export default function MapsScreen() {
     } finally {
       setSearching(false);
     }
+  }, [query]);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerTitleAlign: 'left',
+      headerTitle: () => (
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            flex: 1,
+            maxWidth: '100%',
+            marginRight: 8,
+            borderWidth: 1,
+            borderColor: colors.border,
+            backgroundColor: colors.card,
+            borderRadius: 10,
+            paddingHorizontal: 10,
+            minHeight: 38,
+          }}
+        >
+          <Ionicons name="search" size={16} color={colors.textSecondary} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Tapez une adresse…"
+            placeholderTextColor={colors.textSecondary}
+            style={{
+              flex: 1,
+              color: colors.text,
+              paddingVertical: Platform.OS === 'ios' ? 8 : 6,
+              paddingHorizontal: 8,
+              fontSize: 14,
+            }}
+            returnKeyType="search"
+            onSubmitEditing={() => void goSearch()}
+          />
+          {searching ? (
+            <ActivityIndicator size="small" color={colors.accent} />
+          ) : query.trim().length >= 2 ? (
+            <Pressable onPress={() => void goSearch()} hitSlop={8}>
+              <Ionicons name="arrow-forward-circle" size={22} color={colors.accent} />
+            </Pressable>
+          ) : null}
+        </View>
+      ),
+    });
+  }, [navigation, colors, query, searching, goSearch]);
+
+  const goFreeTrack = () => {
+    router.push({ pathname: '/(tabs)/trip', params: { mode: 'free', autoStart: '1' } });
   };
+
+  const goToPlace = (label: string, lat?: number | null, lon?: number | null) => {
+    if (lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon)) {
+      router.push({
+        pathname: '/(tabs)/trip',
+        params: {
+          mode: 'nav',
+          dest: label,
+          destLat: String(lat),
+          destLon: String(lon),
+          autoStart: '1',
+        },
+      });
+    } else {
+      router.push({
+        pathname: '/(tabs)/trip',
+        params: { mode: 'nav', dest: label, autoStart: '1' },
+      });
+    }
+  };
+
+  const quickPlaces = places.filter((p) => p.kind === 'home' || p.kind === 'work');
+  const otherPlaces = places.filter((p) => p.kind !== 'home' && p.kind !== 'work').slice(0, 6);
 
   const region = {
     latitude: user?.latitude ?? 48.11,
@@ -164,7 +247,7 @@ export default function MapsScreen() {
           userLocation={user}
           followUser
         />
-        <View style={[styles.hud, { top: 12, justifyContent: 'flex-end' }]} pointerEvents="box-none">
+        <View style={[styles.hud, { top: 12 }]} pointerEvents="box-none">
           <View
             style={[styles.speedChip, { backgroundColor: colors.card + 'EE', borderColor: colors.border }]}
           >
@@ -191,10 +274,9 @@ export default function MapsScreen() {
           },
         ]}
       >
-        <Text style={[styles.title, { color: colors.text }]}>Maps</Text>
-        <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 10 }}>
-          Suivi libre par défaut · navigation in-app (OSRM + panneaux OSM)
-        </Text>
+        {searchError ? (
+          <Text style={{ color: colors.warning, fontSize: 12, marginBottom: 6 }}>{searchError}</Text>
+        ) : null}
 
         {activeTrip ? (
           <Pressable
@@ -212,30 +294,53 @@ export default function MapsScreen() {
           </Pressable>
         ) : null}
 
-        <View
-          style={[styles.searchRow, { borderColor: colors.border, backgroundColor: colors.background }]}
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Lieux & récents</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ gap: 8, paddingBottom: 10 }}
         >
-          <Ionicons name="search" size={18} color={colors.textSecondary} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Aller quelque part…"
-            placeholderTextColor={colors.textSecondary}
-            style={{ flex: 1, color: colors.text, paddingVertical: 8, fontSize: 15 }}
-            returnKeyType="search"
-            onSubmitEditing={() => void goSearch()}
-          />
-          {searching ? (
-            <ActivityIndicator color={colors.accent} />
-          ) : (
-            <Pressable onPress={() => void goSearch()} hitSlop={8}>
-              <Ionicons name="arrow-forward-circle" size={26} color={colors.accent} />
+          {quickPlaces.map((p) => (
+            <Pressable
+              key={p.id}
+              onPress={() => goToPlace(p.name, p.latitude, p.longitude)}
+              style={[styles.chip, { borderColor: colors.accent, backgroundColor: colors.accent + '14' }]}
+            >
+              <Ionicons
+                name={p.kind === 'home' ? 'home' : 'briefcase'}
+                size={14}
+                color={colors.accent}
+              />
+              <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 13 }}>{p.name}</Text>
             </Pressable>
-          )}
-        </View>
-        {searchError ? (
-          <Text style={{ color: colors.warning, fontSize: 12, marginBottom: 8 }}>{searchError}</Text>
-        ) : null}
+          ))}
+          {otherPlaces.map((p) => (
+            <Pressable
+              key={p.id}
+              onPress={() => goToPlace(p.name, p.latitude, p.longitude)}
+              style={[styles.chip, { borderColor: colors.border, backgroundColor: colors.background }]}
+            >
+              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{p.name}</Text>
+            </Pressable>
+          ))}
+          {recentDests.map((r, i) => (
+            <Pressable
+              key={`${r.label}-${i}`}
+              onPress={() => goToPlace(r.label, r.latitude, r.longitude)}
+              style={[styles.chip, { borderColor: colors.border, backgroundColor: colors.background }]}
+            >
+              <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
+              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }} numberOfLines={1}>
+                {r.label}
+              </Text>
+            </Pressable>
+          ))}
+          {!quickPlaces.length && !otherPlaces.length && !recentDests.length ? (
+            <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
+              Aucun lieu — ajoutez Maison / Travail dans Budget, ou cherchez une adresse.
+            </Text>
+          ) : null}
+        </ScrollView>
 
         <View style={styles.actions}>
           <Button
@@ -249,7 +354,14 @@ export default function MapsScreen() {
             }}
             style={{ flex: 1 }}
           />
-          <Button title="Navigation" variant="outline" onPress={goNav} style={{ flex: 1 }} />
+          <Button
+            title="Historique"
+            variant="outline"
+            onPress={() =>
+              router.push({ pathname: '/(tabs)/trip', params: { tab: 'history' } })
+            }
+            style={{ flex: 1 }}
+          />
         </View>
       </View>
     </View>
@@ -289,17 +401,18 @@ const styles = StyleSheet.create({
   sheet: {
     borderTopWidth: 1,
     paddingHorizontal: 16,
-    paddingTop: 14,
+    paddingTop: 12,
   },
-  title: { fontSize: 20, fontWeight: '800', marginBottom: 2 },
-  searchRow: {
+  sectionTitle: { fontSize: 16, fontWeight: '800', marginBottom: 8 },
+  chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 20,
     paddingHorizontal: 12,
-    marginBottom: 8,
+    paddingVertical: 8,
+    maxWidth: 180,
   },
   actions: { flexDirection: 'row', gap: 10, marginTop: 4 },
   activeBanner: {

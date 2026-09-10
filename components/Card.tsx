@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ViewStyle } from 'react-native';
+import { View, Text, StyleSheet, ViewStyle, Pressable } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
 
 interface CardProps {
@@ -25,11 +25,12 @@ interface StatCardProps {
   value: string;
   subtitle?: string;
   color?: string;
+  onPress?: () => void;
 }
 
-export function StatCard({ label, value, subtitle, color }: StatCardProps) {
+export function StatCard({ label, value, subtitle, color, onPress }: StatCardProps) {
   const { colors } = useTheme();
-  return (
+  const inner = (
     <Card
       style={styles.statCard}
       accessibilityLabel={`${label} : ${value}${subtitle ? `, ${subtitle}` : ''}`}
@@ -40,6 +41,16 @@ export function StatCard({ label, value, subtitle, color }: StatCardProps) {
         <Text style={[styles.statSubtitle, { color: colors.textSecondary }]}>{subtitle}</Text>
       )}
     </Card>
+  );
+  if (!onPress) return inner;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={{ flex: 1 }}
+    >
+      {inner}
+    </Pressable>
   );
 }
 

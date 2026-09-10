@@ -255,6 +255,7 @@ export default function TripScreen() {
     purgeSim?: string;
     purgeFirst?: string;
     tab?: string;
+    filter?: string;
     reset?: string;
     /** Nonce pour forcer un reset même si reset=1 inchangé (2ᵉ appui FAB Accueil). */
     r?: string;
@@ -468,6 +469,11 @@ export default function TripScreen() {
       if (params.mode === 'nav') setStartMode('nav');
       if (params.tab === 'live' || params.tab === 'history') {
         setTab(params.tab);
+      }
+      if (params.filter === 'sinceFill') {
+        setHistoryFilter('sinceFill');
+      } else if (params.filter === 'all') {
+        setHistoryFilter('all');
       }
       const resetFlag = Array.isArray(params.reset) ? params.reset[0] : params.reset;
       const resetNonce = Array.isArray(params.r) ? params.r[0] : params.r;

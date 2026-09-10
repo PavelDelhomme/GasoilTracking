@@ -468,19 +468,33 @@ export default function HomeScreen() {
             </View>
 
             {sinceFill?.lastFill && (
-              <Card style={{ marginBottom: 12 }}>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '700' }}>
-                  Depuis le plein · {formatRelativeDay(sinceFill.lastFill.date)}
-                </Text>
-                <Text style={{ color: colors.text, fontWeight: '800', fontSize: 18, marginTop: 4 }}>
-                  {formatDistance(sinceFill.tripKm)}
-                  <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 13 }}>
-                    {' '}
-                    · {sinceFill.tripCount} trajet{sinceFill.tripCount > 1 ? 's' : ''} · ~
-                    {sinceFill.fuelUsedEst.toFixed(1)} L
+              <Pressable
+                onPress={() =>
+                  router.push({
+                    pathname: '/(tabs)/trip',
+                    params: { tab: 'history', filter: 'sinceFill' },
+                  } as never)
+                }
+                accessibilityRole="button"
+                accessibilityLabel="Voir les trajets depuis le dernier plein"
+              >
+                <Card style={{ marginBottom: 12 }}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '700' }}>
+                    Depuis le plein · {formatRelativeDay(sinceFill.lastFill.date)}
                   </Text>
-                </Text>
-              </Card>
+                  <Text style={{ color: colors.text, fontWeight: '800', fontSize: 18, marginTop: 4 }}>
+                    {formatDistance(sinceFill.tripKm)}
+                    <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 13 }}>
+                      {' '}
+                      · {sinceFill.tripCount} trajet{sinceFill.tripCount > 1 ? 's' : ''} · ~
+                      {sinceFill.fuelUsedEst.toFixed(1)} L
+                    </Text>
+                  </Text>
+                  <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 12, marginTop: 6 }}>
+                    Voir l’historique filtré →
+                  </Text>
+                </Card>
+              </Pressable>
             )}
 
             {!sinceFill?.lastFill && (
@@ -513,9 +527,10 @@ export default function HomeScreen() {
 
             <View style={styles.statsRow}>
               <StatCard
-                label="Dépensé"
+                label="Carburant total"
                 value={formatEuro(stats?.totalCost ?? 0)}
                 subtitle={`${stats?.fillUpCount ?? 0} plein(s)`}
+                onPress={() => router.push('/(tabs)/budget' as never)}
               />
               <StatCard
                 label="Distance"
@@ -754,16 +769,13 @@ export default function HomeScreen() {
             : {
                 key: 'trip',
                 label: 'Démarrer trajet',
-                icon: 'navigate',
+                icon: 'map',
                 onPress: () => {
                   if (!activeVehicle) {
                     router.push('/(tabs)/vehicles' as never);
                     return;
                   }
-                  router.push({
-                    pathname: '/(tabs)/trip',
-                    params: { tab: 'live', reset: '1', r: String(Date.now()) },
-                  } as never);
+                  router.push('/(tabs)/maps' as never);
                 },
               },
         ]}
