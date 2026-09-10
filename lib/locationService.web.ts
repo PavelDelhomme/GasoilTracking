@@ -20,6 +20,7 @@ import {
   accelAggressionFactor,
   estimateTripFuelLiters,
   idleRatioFromPoints,
+  idleMinutesFromPoints,
   stopAndGoFactor,
 } from '@/lib/consumptionModel';
 import { buildGoogleMapsDirUrl } from '@/lib/mapsNavigation';
@@ -63,6 +64,12 @@ async function flushPending() {
           timestamp: pos.timestamp || Date.now(),
           accuracy: pos.coords.accuracy ?? undefined,
           speed: pos.coords.speed ?? undefined,
+          altitude:
+            pos.coords.altitude != null &&
+            Number.isFinite(pos.coords.altitude) &&
+            (pos.coords.altitudeAccuracy == null || pos.coords.altitudeAccuracy < 40)
+              ? pos.coords.altitude
+              : undefined,
         });
       }
 
@@ -74,6 +81,7 @@ async function flushPending() {
         points: pts,
         avgSpeedKmh: averageMovingSpeedKmh(distanceKm, pts),
         idleRatio: idleRatioFromPoints(pts),
+        idleMinutes: idleMinutesFromPoints(pts),
         accelFactor: accelAggressionFactor(pts),
         stopGoFactor: stopAndGoFactor(pts),
       });

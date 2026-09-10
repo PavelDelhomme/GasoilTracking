@@ -86,6 +86,7 @@ import {
   fetchElevationProfile,
   averageMovingSpeedKmh,
   idleRatioFromPoints,
+  idleMinutesFromPoints,
   accelAggressionFactor,
   stopAndGoFactor,
 } from '@/lib/consumptionModel';
@@ -1221,6 +1222,7 @@ export default function TripScreen() {
       ascentM = Math.round(ascentM);
       const avgSpeedKmh = averageMovingSpeedKmh(trip.distanceKm, pts);
       const idleRatio = idleRatioFromPoints(pts);
+      const idleMinutes = idleMinutesFromPoints(pts);
       const accelFactor = accelAggressionFactor(pts);
       const stopGoFactor = stopAndGoFactor(pts);
       const fuelUsed = vehicle
@@ -1231,6 +1233,7 @@ export default function TripScreen() {
             learnedFactor: vehicle.consumptionLearnFactor,
             avgSpeedKmh,
             idleRatio,
+            idleMinutes,
             accelFactor,
             stopGoFactor,
           })

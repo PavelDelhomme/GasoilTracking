@@ -16,8 +16,8 @@ import {
   parseRoutePoints,
   type RoutePoint,
 } from '@/lib/calculations';
-import { estimateTripFuelLiters, accelAggressionFactor, stopAndGoFactor, idleRatioFromPoints, averageMovingSpeedKmh } from '@/lib/consumptionModel';
-import { evaluateGpsSample } from '@/lib/gpsTracking';
+import { estimateTripFuelLiters, accelAggressionFactor, stopAndGoFactor, idleRatioFromPoints, idleMinutesFromPoints, averageMovingSpeedKmh } from '@/lib/consumptionModel';
+import { evaluateGpsSample, type GpsSample } from '@/lib/gpsTracking';
 import { buildGoogleMapsDirUrl } from '@/lib/mapsNavigation';
 
 interface LocationTaskData {
@@ -90,7 +90,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
 
       let changed = false;
       for (const loc of batch) {
-        const sample = {
+        const sample: GpsSample = {
           latitude: loc.coords.latitude,
           longitude: loc.coords.longitude,
           timestamp: loc.timestamp || Date.now(),
@@ -108,6 +108,16 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         };
         if (use.speed != null && Number.isFinite(use.speed) && use.speed >= 0) {
           entry.speed = Math.round(use.speed * 10) / 10;
+        }
+        const alt = loc.coords.altitude;
+        const altAcc = loc.coords.altitudeAccuracy;
+        if (
+          alt != null &&
+          Number.isFinite(alt) &&
+          Math.abs(alt) < 9000 &&
+          (altAcc == null || altAcc < 40)
+        ) {
+          entry.altitude = Math.round(alt);
         }
         points.push(entry);
         changed = true;
@@ -127,6 +137,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         points,
         avgSpeedKmh: averageMovingSpeedKmh(distanceKm, points),
         idleRatio: idleRatioFromPoints(points),
+        idleMinutes: idleMinutesFromPoints(points),
         accelFactor: accelAggressionFactor(points),
         stopGoFactor: stopAndGoFactor(points),
       });

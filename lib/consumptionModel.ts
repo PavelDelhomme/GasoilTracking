@@ -7,6 +7,7 @@ import type { Vehicle } from '@/types';
 import {
   AIR_DENSITY,
   GRAVITY,
+  resolveBaseConsumptionPer100,
   resolveVehiclePhysics,
 } from '@/lib/vehiclePhysics';
 
@@ -39,34 +40,67 @@ export function vehicleAgeFactor(year: number, nowYear = new Date().getFullYear(
   return Math.min(1.08, 1.075 + (age - 25) * 0.002);
 }
 
-export function transmissionFactor(gears?: number | null): number {
-  if (gears == null || gears <= 0) return 1;
-  if (gears <= 4) return 1.06;
-  if (gears === 5) return 1.02;
+/**
+ * @deprecated Conservé pour compat tests / scripts.
+ * La boîte n’applique plus de malus L/100 : seuls η_trans (physique) compte.
+ * Modéliser rapports × vitesse limite n’est pas nécessaire sans OBD.
+ */
+export function transmissionFactor(_gears?: number | null): number {
   return 1;
 }
 
+/**
+ * Intensité dénivelé (repli heuristique).
+ * Basé sur m d’ascension / km (pas un forfait « par 10 km ») pour mieux
+ * refléter une côte forte sur 50–100 m.
+ */
 export function elevationFactor(ascentM: number, distanceKm: number): number {
   if (ascentM <= 0 || distanceKm <= 0) return 1;
-  const per10km = (ascentM / Math.max(distanceKm, 1)) * 10;
-  return Math.min(1.45, 1 + (per10km / 100) * 0.08);
+  const mPerKm = ascentM / Math.max(distanceKm, 0.05);
+  return Math.min(1.55, 1 + (mPerKm / 80) * 0.4);
+}
+
+/**
+ * Pics de pente sur fenêtres ~100 m (si profil altitude dispo).
+ * Complète elevationFactor pour les dénivelés très localisés.
+ */
+export function gradeSpikeFactor(
+  points: PointLike[],
+  altitudes?: number[]
+): number {
+  if (points.length < 3) return 1;
+  let maxAbsGrade = 0;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const dM = haversineKm(a.latitude, a.longitude, b.latitude, b.longitude) * 1000;
+    if (dM < 8 || dM > 250) continue;
+    const altA =
+      altitudes?.[i - 1] != null ? altitudes[i - 1] : a.altitude != null ? a.altitude : null;
+    const altB = altitudes?.[i] != null ? altitudes[i] : b.altitude != null ? b.altitude : null;
+    if (altA == null || altB == null) continue;
+    const grade = Math.abs((altB - altA) / dM);
+    if (grade > maxAbsGrade) maxAbsGrade = grade;
+  }
+  if (maxAbsGrade < 0.04) return 1; // < 4 %
+  // 8 % → ~+6 %, 15 % → ~+12 %
+  return Math.min(1.18, 1 + (maxAbsGrade - 0.04) * 0.9);
 }
 
 export const REAL_WORLD_MARGIN = 1.04;
 
 export type ConsumptionContext = {
   ascentM?: number;
-  /** Profil d’altitude (m) aligné sur points. */
   altitudes?: number[];
   gears?: number | null;
   learnedFactor?: number;
   avgSpeedKmh?: number;
   idleRatio?: number;
+  /** Minutes passées quasi à l’arrêt (bouchon) — complète idleRatio. */
+  idleMinutes?: number;
   accelFactor?: number;
   stopGoFactor?: number;
-  /** Tracé GPS → active le modèle physique point à point. */
   points?: PointLike[];
-  /** Forcer l’heuristique même si points fournis. */
   forceHeuristic?: boolean;
 };
 
@@ -82,11 +116,15 @@ export function speedConsumptionFactor(avgKmh: number): number {
   return 1.16;
 }
 
-/** Surconso moteur tournant à l’arrêt / très lent (bouchons). */
-export function trafficIdleFactor(idleRatio: number): number {
-  if (!Number.isFinite(idleRatio) || idleRatio <= 0) return 1;
-  const r = Math.max(0, Math.min(0.85, idleRatio));
-  return 1 + r * 0.12;
+/** Surconso bouchon : ratio d’arrêt + durée absolue (long bouchon même à ratio moyen). */
+export function trafficIdleFactor(idleRatio: number, idleMinutes = 0): number {
+  if ((!Number.isFinite(idleRatio) || idleRatio <= 0) && idleMinutes <= 0) return 1;
+  const r = Math.max(0, Math.min(0.85, idleRatio || 0));
+  const mins = Math.max(0, idleMinutes);
+  const fromRatio = r * 0.1;
+  // +~1,5 % par 5 min d’arrêt cumulé, plafonné
+  const fromTime = Math.min(0.22, (mins / 5) * 0.015);
+  return 1 + fromRatio + fromTime;
 }
 
 export function accelAggressionFactor(points: PointLike[]): number {
@@ -133,11 +171,13 @@ export function stopAndGoFactor(points: PointLike[]): number {
   return 1 + ratio * 0.2;
 }
 
-const IDLE_POWER_W = 1750;
+const IDLE_POWER_W_FALLBACK = 1750;
 
 /**
  * Modèle physique : somme des débits L/s sur chaque segment GPS.
  * F = Fair + Froll + Fgrade + Finertia ; P_moteur = P_roues / η_trans (0 si frein moteur).
+ * Ralenti : puissance × durée réelle (bouchons longs bien comptés).
+ * Boîte : uniquement via η_trans (pas de carte rapports×vitesse).
  */
 export function estimateTripFuelPhysics(
   vehicle: Vehicle,
@@ -154,6 +194,7 @@ export function estimateTripFuelPhysics(
         : 1;
 
   const alts = opts?.altitudes;
+  const idleW = phys.idlePowerW || IDLE_POWER_W_FALLBACK;
   let liters = 0;
   let prevV = 0;
 
@@ -196,7 +237,8 @@ export function estimateTripFuelPhysics(
 
     let pMotor = 0;
     if (vAir < 2 / 3.6) {
-      pMotor = IDLE_POWER_W;
+      // Temps réel au ralenti (bouchon) — pas un simple ratio
+      pMotor = idleW;
     } else if (fTotal > 0) {
       pMotor = (fTotal * vAir) / phys.etaTrans;
     }
@@ -216,22 +258,25 @@ function estimateTripFuelHeuristic(
   ctx: ConsumptionContext = {}
 ): number {
   if (distanceKm <= 0) return 0;
-  const base = vehicle.consumptionPer100 > 0 ? vehicle.consumptionPer100 : 7.5;
+  const base = resolveBaseConsumptionPer100(vehicle);
   const age = vehicleAgeFactor(vehicle.year);
-  const gear = transmissionFactor(ctx.gears ?? vehicle.transmissionGears);
+  // Boîte : plus de malus L/100 (η_trans seulement en mode physique)
   const learned =
     ctx.learnedFactor && ctx.learnedFactor > 0.5
       ? ctx.learnedFactor
       : vehicle.consumptionLearnFactor && vehicle.consumptionLearnFactor > 0.5
         ? vehicle.consumptionLearnFactor
         : 1;
-  const elev = elevationFactor(ctx.ascentM ?? 0, distanceKm);
+  let elev = elevationFactor(ctx.ascentM ?? 0, distanceKm);
+  if (ctx.points && ctx.points.length >= 3) {
+    elev = Math.max(elev, gradeSpikeFactor(ctx.points, ctx.altitudes));
+  }
   const speed = speedConsumptionFactor(ctx.avgSpeedKmh ?? 0);
-  const traffic = trafficIdleFactor(ctx.idleRatio ?? 0);
+  const traffic = trafficIdleFactor(ctx.idleRatio ?? 0, ctx.idleMinutes ?? 0);
   const accel = ctx.accelFactor && ctx.accelFactor > 0.9 ? ctx.accelFactor : 1;
   const stopGo = ctx.stopGoFactor && ctx.stopGoFactor > 0.9 ? ctx.stopGoFactor : 1;
-  const situational = Math.min(1.1, speed * traffic * accel * stopGo);
-  const l100 = base * age * gear * REAL_WORLD_MARGIN * learned * elev * situational;
+  const situational = Math.min(1.15, speed * traffic * accel * stopGo);
+  const l100 = base * age * REAL_WORLD_MARGIN * learned * elev * situational;
   return Math.round(((distanceKm * l100) / 100) * 100) / 100;
 }
 
@@ -295,6 +340,22 @@ export function idleRatioFromPoints(points: PointLike[]): number {
   return Math.min(0.9, idleMs / totalMs);
 }
 
+/** Minutes cumulées quasi à l’arrêt (v < 5 km/h) — pour bouchons longs. */
+export function idleMinutesFromPoints(points: PointLike[]): number {
+  if (points.length < 2) return 0;
+  let idleMs = 0;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const dt = b.timestamp - a.timestamp;
+    if (!Number.isFinite(dt) || dt <= 0 || dt > 180_000) continue;
+    const dKm = haversineKm(a.latitude, a.longitude, b.latitude, b.longitude);
+    const speedKmh = dKm / (dt / 3600000);
+    if (speedKmh < 5) idleMs += dt;
+  }
+  return idleMs / 60000;
+}
+
 export type RouteSpeedStats = {
   avgKmh: number;
   maxKmh: number;
@@ -352,19 +413,39 @@ export async function fetchElevationAscentM(points: PointLike[]): Promise<number
   return Math.round(ascent);
 }
 
-/** Profil d’altitude (m) le long du tracé (Open-Meteo), interpolé. */
+/** Profil d’altitude (m) le long du tracé — densifié (~80–100 m), Open-Meteo. */
 export async function fetchElevationProfile(points: PointLike[]): Promise<number[]> {
   if (points.length < 2) return [];
-  const step = Math.max(1, Math.ceil(points.length / 40));
-  const sampleIdx: number[] = [];
-  for (let i = 0; i < points.length; i++) {
-    if (i % step === 0 || i === points.length - 1) sampleIdx.push(i);
+
+  // Échantillonnage par distance (~90 m) pour capter les côtes courtes, max ~90 points API
+  const sampleIdx: number[] = [0];
+  let accM = 0;
+  const TARGET_STEP_M = 90;
+  const MAX_SAMPLES = 90;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    accM += haversineKm(a.latitude, a.longitude, b.latitude, b.longitude) * 1000;
+    if (accM >= TARGET_STEP_M) {
+      sampleIdx.push(i);
+      accM = 0;
+    }
   }
-  const sample = sampleIdx.map((i) => points[i]);
+  if (sampleIdx[sampleIdx.length - 1] !== points.length - 1) {
+    sampleIdx.push(points.length - 1);
+  }
+  // Si trop de points : sous-échantillonner régulièrement
+  let idxs = sampleIdx;
+  if (idxs.length > MAX_SAMPLES) {
+    const step = Math.ceil(idxs.length / MAX_SAMPLES);
+    idxs = idxs.filter((_, i) => i % step === 0 || i === idxs.length - 1);
+  }
+
+  const sample = idxs.map((i) => points[i]);
   const lats = sample.map((p) => p.latitude.toFixed(5)).join(',');
   const lons = sample.map((p) => p.longitude.toFixed(5)).join(',');
   const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timer = setTimeout(() => ctrl?.abort(), 4000);
+  const timer = setTimeout(() => ctrl?.abort(), 5000);
   try {
     const url = `https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lons}`;
     const res = await fetch(url, {
@@ -376,10 +457,10 @@ export async function fetchElevationProfile(points: PointLike[]): Promise<number
     const elev = data.elevation;
     if (!Array.isArray(elev) || elev.length !== sample.length) return [];
     const out = new Array(points.length).fill(elev[0]);
-    for (let s = 0; s < sampleIdx.length; s++) out[sampleIdx[s]] = elev[s];
-    for (let s = 0; s < sampleIdx.length - 1; s++) {
-      const i0 = sampleIdx[s];
-      const i1 = sampleIdx[s + 1];
+    for (let s = 0; s < idxs.length; s++) out[idxs[s]] = elev[s];
+    for (let s = 0; s < idxs.length - 1; s++) {
+      const i0 = idxs[s];
+      const i1 = idxs[s + 1];
       const e0 = elev[s];
       const e1 = elev[s + 1];
       const span = i1 - i0;
@@ -409,7 +490,7 @@ export function learnFactorFromFullFillUps(
   fillUps: Array<{ liters: number; distanceSinceLastKm: number | null; isFull: boolean }>,
   catalogueL100: number
 ): number | null {
-  const base = catalogueL100 > 0 ? catalogueL100 : 7.5;
+  const base = catalogueL100 > 0 ? catalogueL100 : 6.5;
   const ratios: number[] = [];
   for (const f of fillUps) {
     if (!f.isFull) continue;

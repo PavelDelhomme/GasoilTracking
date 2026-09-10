@@ -27,6 +27,7 @@ import {
   accelAggressionFactor,
   estimateTripFuelLiters,
   idleRatioFromPoints,
+  idleMinutesFromPoints,
   movingDurationMinutes,
   stopAndGoFactor,
 } from '@/lib/consumptionModel';
@@ -521,6 +522,7 @@ export function calculateTripStats(
     points: points.length >= 2 ? points : undefined,
     avgSpeedKmh: points.length >= 2 ? averageMovingSpeedKmh(distanceKm, points) : undefined,
     idleRatio: idleRatioFromPoints(points),
+    idleMinutes: idleMinutesFromPoints(points),
     accelFactor: accelAggressionFactor(points),
     stopGoFactor: stopAndGoFactor(points),
   });
@@ -636,6 +638,8 @@ export interface RoutePoint {
   accuracy?: number;
   /** Vitesse device m/s (optionnel) */
   speed?: number;
+  /** Altitude GPS (m) si fiable — pente live sans attendre Open-Meteo */
+  altitude?: number;
 }
 
 export function parseRoutePoints(routePoints: string): RoutePoint[] {
@@ -649,7 +653,11 @@ export function parseRoutePoints(routePoints: string): RoutePoint[] {
 
 export function appendRoutePoint(
   routePoints: string,
-  point: RoutePoint & { accuracy?: number | null; speed?: number | null }
+  point: RoutePoint & {
+    accuracy?: number | null;
+    speed?: number | null;
+    altitude?: number | null;
+  }
 ): string {
   const points = parseRoutePoints(routePoints);
   const prev = points.length > 0 ? points[points.length - 1] : null;
@@ -666,6 +674,13 @@ export function appendRoutePoint(
   };
   if (use.speed != null && Number.isFinite(use.speed) && use.speed >= 0) {
     entry.speed = Math.round(use.speed * 10) / 10;
+  }
+  const alt =
+    'altitude' in use && typeof (use as { altitude?: number }).altitude === 'number'
+      ? (use as { altitude?: number }).altitude
+      : (point as { altitude?: number | null }).altitude;
+  if (alt != null && Number.isFinite(alt) && Math.abs(alt) < 9000) {
+    entry.altitude = Math.round(alt);
   }
   points.push(entry);
   return JSON.stringify(points);

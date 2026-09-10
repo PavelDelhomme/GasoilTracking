@@ -47,12 +47,17 @@ export default function AddVehicleScreen() {
   const results = useMemo(() => searchVehicles(search), [search]);
 
   const applyPhysicsSuggest = (b: string, m: string, g?: number | null) => {
-    const s = suggestPhysicsFields(b, m, g);
+    const s = suggestPhysicsFields(b, m, g, {
+      year: parseInt(year, 10) || undefined,
+      fuel: fuelType,
+    });
     setSegment(s.vehicleSegment);
     setCurbWeight(String(s.curbWeightKg));
     setDragScx(String(s.dragAreaScx));
     setGears(String(s.transmissionGears));
     setPayload(String(s.payloadKg));
+    if (s.consumptionPer100 > 0) setConsumption(String(s.consumptionPer100));
+    if (s.tankCapacity) setTankCapacity(String(s.tankCapacity));
   };
 
   const saveVehicle = async (payloadIn: {
@@ -198,7 +203,12 @@ export default function AddVehicleScreen() {
       model: model.trim(),
       year: parseInt(year, 10) || new Date().getFullYear(),
       fuelType,
-      consumptionPer100: parseFloat(consumption.replace(',', '.')) || 6,
+      consumptionPer100:
+        parseFloat(consumption.replace(',', '.')) ||
+        suggestPhysicsFields(brand.trim(), model.trim(), null, {
+          year: parseInt(year, 10),
+          fuel: fuelType,
+        }).consumptionPer100,
       tankCapacity: parseFloat(tankCapacity.replace(',', '.')) || 50,
       defaultFuelPrice: parseFloat(fuelPrice.replace(',', '.')) || country.defaultFuelPrice,
       currentOdometer: parseFloat(odometer.replace(',', '.')) || 0,
