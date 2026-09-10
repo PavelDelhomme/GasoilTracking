@@ -77,6 +77,7 @@ async function load(): Promise<Store> {
         maintenanceUpToDate: v.maintenanceUpToDate ?? null,
         maintenanceChecklist: v.maintenanceChecklist,
         plateNumber: v.plateNumber ?? null,
+        vin: v.vin ?? null,
         registrationPhotoUri: v.registrationPhotoUri ?? null,
       }));
       cache = parsed;

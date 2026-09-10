@@ -7,6 +7,7 @@
  */
 import type { FuelType, Vehicle, VehicleSegment } from '@/types';
 import { VEHICLE_CATALOG, type VehiclePreset } from '@/constants/vehicles';
+import { lookupScxCache, resolveScxFromEntry } from '@/lib/scxCache';
 
 export type { VehicleSegment };
 
@@ -227,6 +228,17 @@ function knownPhysicsFor(brand: string, model: string) {
   const hay = `${brand} ${model}`;
   for (const k of KNOWN_PHYSICS) {
     if (k.re.test(hay)) return k;
+  }
+  const cache = lookupScxCache(brand, model);
+  if (cache) {
+    const scx = resolveScxFromEntry(cache);
+    if (cache.curbWeightKg || scx) {
+      return {
+        re: /.*/,
+        curbWeightKg: cache.curbWeightKg ?? 1200,
+        dragAreaScx: scx ?? 0.7,
+      };
+    }
   }
   return null;
 }

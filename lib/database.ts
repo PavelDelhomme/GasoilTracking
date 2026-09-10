@@ -169,6 +169,7 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
   await alterSafe('ALTER TABLE vehicles ADD COLUMN maintenance_up_to_date INTEGER');
   await alterSafe('ALTER TABLE vehicles ADD COLUMN maintenance_checklist TEXT');
   await alterSafe('ALTER TABLE vehicles ADD COLUMN plate_number TEXT');
+  await alterSafe('ALTER TABLE vehicles ADD COLUMN vin TEXT');
   await alterSafe('ALTER TABLE vehicles ADD COLUMN registration_photo_uri TEXT');
   await alterSafe('ALTER TABLE vehicle_maintenances ADD COLUMN photo_uri TEXT');
   await alterSafe('ALTER TABLE vehicle_maintenances ADD COLUMN due_odometer REAL');
@@ -247,6 +248,7 @@ function mapVehicle(row: unknown): Vehicle {
       r.plate_number === null || r.plate_number === undefined
         ? null
         : String(r.plate_number),
+    vin: r.vin === null || r.vin === undefined ? null : String(r.vin),
     registrationPhotoUri:
       r.registration_photo_uri === null || r.registration_photo_uri === undefined
         ? null
@@ -506,8 +508,8 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
       await database.runAsync('UPDATE vehicles SET is_active = 0');
     }
     const result = await database.runAsync(
-      `INSERT INTO vehicles (name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, consumption_learn_factor, transmission_gears, curb_weight_kg, drag_area_scx, vehicle_segment, payload_kg, is_active, plate_number, registration_photo_uri)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO vehicles (name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, consumption_learn_factor, transmission_gears, curb_weight_kg, drag_area_scx, vehicle_segment, payload_kg, is_active, plate_number, vin, registration_photo_uri)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         vehicle.name,
         vehicle.brand,
@@ -533,6 +535,7 @@ export async function createVehicle(vehicle: Omit<Vehicle, 'id' | 'createdAt'>):
         vehicle.payloadKg ?? null,
         vehicle.isActive ? 1 : 0,
         vehicle.plateNumber ?? null,
+        vehicle.vin ?? null,
         vehicle.registrationPhotoUri ?? null,
       ]
     );
@@ -628,6 +631,10 @@ export async function updateVehicle(id: number, vehicle: Partial<Vehicle>): Prom
   if (vehicle.plateNumber !== undefined) {
     fields.push('plate_number = ?');
     values.push(vehicle.plateNumber);
+  }
+  if (vehicle.vin !== undefined) {
+    fields.push('vin = ?');
+    values.push(vehicle.vin);
   }
   if (vehicle.registrationPhotoUri !== undefined) {
     fields.push('registration_photo_uri = ?');
@@ -1318,8 +1325,8 @@ export async function replaceAllData(data: {
 
       for (const v of data.vehicles || []) {
         await database.runAsync(
-          `INSERT INTO vehicles (id, name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, consumption_learn_factor, transmission_gears, curb_weight_kg, drag_area_scx, vehicle_segment, payload_kg, is_active, created_at, plate_number, registration_photo_uri)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO vehicles (id, name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, consumption_learn_factor, transmission_gears, curb_weight_kg, drag_area_scx, vehicle_segment, payload_kg, is_active, created_at, plate_number, vin, registration_photo_uri)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             v.id,
             v.name,
@@ -1347,6 +1354,7 @@ export async function replaceAllData(data: {
             v.isActive ? 1 : 0,
             v.createdAt || new Date().toISOString(),
             v.plateNumber ?? null,
+            v.vin ?? null,
             v.registrationPhotoUri ?? null,
           ]
         );

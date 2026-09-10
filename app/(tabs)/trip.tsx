@@ -123,13 +123,13 @@ import type { SinceLastFillStats } from '@/types';
 import type { RoutePoint } from '@/lib/calculations';
 import {
   fetchCheapestStations,
-  fuelPriceKey,
   isFrenchFuelOpenDataAvailable,
 } from '@/lib/fuelPrices';
+import { rankStationsForDetour } from '@/lib/stationDetour';
 import { useLocale } from '@/context/LocaleContext';
 import type { Vehicle } from '@/types';
 
-/** Propose stations pas chères si le niveau est critique / bas. */
+/** Propose stations intéressantes (prix + détour + conso) si niveau bas — refus possible. */
 async function offerDetourStations(opts: {
   vehicle: Vehicle;
   liters: number;
@@ -154,27 +154,53 @@ async function offerDetourStations(opts: {
       );
     });
   }
+
+  // Étape 1 : pouvoir refuser clairement (sans être coincé dans la liste stations)
+  const wantStations = await new Promise<'stations' | 'continue' | 'abort'>((resolve) => {
+    Alert.alert(
+      'Essence basse',
+      `Il reste ~${opts.liters.toFixed(1)} L. Voir des stations (prix + détour + conso), ou démarrer sans détour ?`,
+      [
+        {
+          text: 'Démarrer sans station',
+          onPress: () => resolve('continue'),
+        },
+        {
+          text: 'Voir 3 stations',
+          onPress: () => resolve('stations'),
+        },
+        { text: 'Annuler', style: 'cancel', onPress: () => resolve('abort') },
+      ]
+    );
+  });
+  if (wantStations !== 'stations') return wantStations;
+
   try {
     const stations = await fetchCheapestStations({
       latitude: opts.origin.latitude,
       longitude: opts.origin.longitude,
-      radiusKm: 18,
+      radiusKm: 22,
       fuel: opts.vehicle.fuelType,
-      limit: 4,
+      limit: 20,
       countryCode: opts.countryCode,
     });
-    const key = fuelPriceKey(opts.vehicle.fuelType);
-    const top = stations.filter((s) => s.prices[key] != null).slice(0, 3);
-    if (!top.length) return 'continue';
+    const top = rankStationsForDetour({
+      stations,
+      vehicle: opts.vehicle,
+      litersRemaining: opts.liters,
+      limit: 3,
+    });
+    if (!top.length) {
+      notify('Stations', 'Aucune station intéressante à portée — démarrage sans détour.');
+      return 'continue';
+    }
     return await new Promise<'continue' | 'abort'>((resolve) => {
       Alert.alert(
-        'Essence basse — stations proches',
-        `Il reste ~${opts.liters.toFixed(1)} L. Ajouter un détour vers une station pas chère ?`,
+        'Meilleures stations',
+        'Classées par intérêt (économie nette après détour + litres pour y aller).',
         [
           ...top.map((s) => ({
-            text: `${s.name} · ${s.prices[key]!.toFixed(3)} €/L${
-              s.distanceKm != null ? ` · ${s.distanceKm.toFixed(1)} km` : ''
-            }`,
+            text: s.label.length > 48 ? `${s.name} · ${s.pricePerL.toFixed(3)}€ · ${s.detourKm.toFixed(1)}km` : s.label,
             onPress: () => {
               opts.onPickVia({
                 latitude: s.latitude,
@@ -184,7 +210,10 @@ async function offerDetourStations(opts: {
               resolve('continue');
             },
           })),
-          { text: 'Démarrer sans détour', onPress: () => resolve('continue') },
+          {
+            text: 'Sans détour',
+            onPress: () => resolve('continue'),
+          },
           { text: 'Annuler', style: 'cancel' as const, onPress: () => resolve('abort') },
         ]
       );
@@ -1062,8 +1091,10 @@ export default function TripScreen() {
     }
   };
 
-  // Prépare destination + itinéraires (depuis Accueil / suggestions) — ne démarre PAS.
+  // Prépare destination + itinéraires (Accueil / suggestions) — ne démarre PAS.
+  // Exception : autoStart=1 + mode=free → démarrage réel (effet suivant).
   useEffect(() => {
+    if (params.autoStart === '1' && params.mode === 'free') return;
     const wantPrepare =
       params.prepare === '1' || params.autoStart === '1' || params.autoStart === 'prepare';
     if (!wantPrepare || autoStartDone.current) return;
@@ -1095,6 +1126,7 @@ export default function TripScreen() {
   }, [
     params.prepare,
     params.autoStart,
+    params.mode,
     params.destLat,
     params.destLon,
     destination,
@@ -1106,6 +1138,21 @@ export default function TripScreen() {
     persistStartMode,
     showToast,
   ]);
+
+  // Maps : démarrer vraiment le suivi libre (GPS + trajet actif)
+  useEffect(() => {
+    if (params.autoStart !== '1' || params.mode !== 'free') return;
+    if (autoStartDone.current) return;
+    if (!activeVehicle || activeTrip) return;
+    autoStartDone.current = true;
+    persistStartMode('free');
+    setTab('live');
+    const t = setTimeout(() => {
+      void handleStartTrip({ mode: 'free' });
+    }, 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleStartTrip recreates each render
+  }, [params.autoStart, params.mode, activeVehicle?.id, activeTrip?.id, persistStartMode]);
 
   const simAutoKey = useRef<string | null>(null);
   useEffect(() => {
@@ -2127,11 +2174,6 @@ export default function TripScreen() {
           >
             {activeTrip && navGuidance ? (
               <View style={{ flexDirection: 'row', alignItems: 'stretch', gap: 8, marginBottom: 12 }}>
-                {liveSpeedLimit ? (
-                  <View style={styles.speedLimitSign} accessibilityLabel={`Limitation ${liveSpeedLimit.limitKmh}`}>
-                    <Text style={styles.speedLimitValue}>{liveSpeedLimit.limitKmh}</Text>
-                  </View>
-                ) : null}
                 <Pressable
                   onPress={() => {
                     if (activeTrip.destinationName) {
@@ -2182,6 +2224,14 @@ export default function TripScreen() {
                     {navGuidance.distanceLabel}
                   </Text>
                 </Pressable>
+                {liveSpeedLimit ? (
+                  <View
+                    style={styles.speedLimitSign}
+                    accessibilityLabel={`Limitation ${liveSpeedLimit.limitKmh} km/h`}
+                  >
+                    <Text style={styles.speedLimitValue}>{liveSpeedLimit.limitKmh}</Text>
+                  </View>
+                ) : null}
               </View>
             ) : null}
 

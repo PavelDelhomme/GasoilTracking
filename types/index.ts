@@ -58,6 +58,8 @@ export interface Vehicle {
   maintenanceChecklist?: Record<string, boolean>;
   /** Immatriculation (carte grise). */
   plateNumber?: string | null;
+  /** VIN / n° de série (17 car.) — optionnel, fiche technique Autoref etc. */
+  vin?: string | null;
   /** URI locale photo carte grise / CT. */
   registrationPhotoUri?: string | null;
   isActive: boolean;

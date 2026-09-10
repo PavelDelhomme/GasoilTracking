@@ -24,6 +24,7 @@ import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
 import { refreshVehicleReminders } from '@/lib/reminders';
 import type { FuelType, Vehicle, VehicleSegment } from '@/types';
 import { SEGMENT_DEFAULTS, suggestPhysicsFields, resolveVehiclePhysics } from '@/lib/vehiclePhysics';
+import { enrichVehicleSpecs } from '@/lib/vehicleSpecsLookup';
 
 /**
  * Modifier un véhicule existant.
@@ -56,6 +57,7 @@ export default function EditVehicleScreen() {
   const [payload, setPayload] = useState('150');
   const [segment, setSegment] = useState<VehicleSegment>('sedan');
   const [plate, setPlate] = useState('');
+  const [vin, setVin] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
@@ -99,6 +101,7 @@ export default function EditVehicleScreen() {
       setPayload(String(phys.payloadKg));
       if (v.transmissionGears == null) setGears(String(phys.gears ?? ''));
       setPlate(v.plateNumber || '');
+      setVin(v.vin || '');
       setSearch('');
       setVehicle(v);
       setReady(true);
@@ -166,6 +169,7 @@ export default function EditVehicleScreen() {
         vehicleSegment: segment,
         payloadKg: payload.trim() ? parseFloat(payload.replace(',', '.')) || null : null,
         plateNumber: plate.trim() || null,
+        vin: vin.trim().toUpperCase().replace(/\s/g, '') || null,
       });
       await refresh();
       void refreshVehicleReminders();
@@ -242,6 +246,37 @@ export default function EditVehicleScreen() {
         onChangeText={setPlate}
         autoCapitalize="characters"
         placeholder="AA-123-BB"
+      />
+      <Input
+        label="VIN (optionnel, 17 car.)"
+        value={vin}
+        onChangeText={setVin}
+        autoCapitalize="characters"
+        placeholder="VF3XXXXXXXXXXXXXX"
+      />
+      <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8, marginTop: -4 }}>
+        Le VIN permet d’enrichir la fiche (Autoref.eu si clé API, sinon catalogue / cache SCx).
+      </Text>
+      <Button
+        title="Enrichir masse / SCx (VIN + cache)"
+        variant="outline"
+        onPress={async () => {
+          const r = await enrichVehicleSpecs({
+            brand,
+            model,
+            year: parseInt(year, 10) || undefined,
+            vin,
+          });
+          if (r.curbWeightKg) setCurbWeight(String(r.curbWeightKg));
+          if (r.dragAreaScx) setDragScx(String(r.dragAreaScx));
+          notify(
+            'Fiche technique',
+            r.dragAreaScx || r.curbWeightKg
+              ? `Source : ${r.source}${r.notes ? ` — ${r.notes}` : ''}`
+              : r.notes || 'Rien de nouveau trouvé'
+          );
+        }}
+        style={{ marginBottom: 12 }}
       />
       <Input label="Année" value={year} onChangeText={setYear} keyboardType="numeric" />
 

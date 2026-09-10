@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/useTheme';
 import { fuelRemainingTone, fuelToneColor } from '@/lib/fuelLevel';
 
-const POS_KEY = 'gasoil_fuel_badge_pos_v2';
+const POS_KEY = 'gasoil_fuel_badge_pos_v3';
 const BADGE_W = 88;
 const BADGE_H = 52;
 
@@ -72,7 +72,7 @@ export function FloatingFuelBadge({
     [rangeX, rangeY, topMin]
   );
 
-  const [frac, setFrac] = useState<FracPos>({ fx: 0.02, fy: 0.12 });
+  const [frac, setFrac] = useState<FracPos>({ fx: 0.9, fy: 0.08 });
   const fracRef = useRef(frac);
   fracRef.current = frac;
   const dragOrigin = useRef({ x: 0, y: 0 });

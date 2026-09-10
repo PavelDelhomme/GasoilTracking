@@ -1,13 +1,11 @@
 /**
  * Limites de vitesse (panneaux) via OpenStreetMap / Overpass.
  * Gratuit, open data — pas une API commerciale.
- * (évite d’importer calculations → database pour rester testable)
  */
+import { haversineDistance } from '@/lib/geoMath';
 
 export type SpeedLimitInfo = {
-  /** km/h numérique (ex. 50, 80, 90, 110, 130) */
   limitKmh: number;
-  /** Tag OSM brut (ex. "50", "FR:urban") */
   raw: string;
   source: 'overpass';
   at: { latitude: number; longitude: number };
@@ -22,18 +20,6 @@ const FR_IMPLIED: Record<string, number> = {
   'FR:trunk': 110,
   'FR:living_street': 20,
 };
-
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
 
 /** Parse un tag maxspeed OSM → km/h. */
 export function parseOsmMaxspeed(raw: string | undefined | null): number | null {
@@ -56,14 +42,19 @@ export function parseOsmMaxspeed(raw: string | undefined | null): number | null 
 }
 
 function cacheKey(lat: number, lon: number): string {
-  return `${lat.toFixed(4)},${lon.toFixed(4)}`;
+  // ~55 m de cellule — assez fin pour suivre les changements de panneau
+  return `${lat.toFixed(3)},${lon.toFixed(3)}`;
 }
 
-const cache = new Map<string, SpeedLimitInfo | null>();
-let lastFetchAt = 0;
+const hitCache = new Map<string, SpeedLimitInfo>();
+/** Misses : TTL court pour réessayer (Overpass rate-limit / zone sans tag). */
+const missUntil = new Map<string, number>();
+let lastNetworkAt = 0;
+let lastGood: SpeedLimitInfo | null = null;
 
 /**
- * Limite près d’un point (rayon ~45 m). Cache ~cellule 11 m + throttle réseau.
+ * Limite près d’un point. Conserve la dernière valeur connue si Overpass rate-limite
+ * ou si la cellule n’a pas de maxspeed (évite le panneau qui disparaît).
  */
 export async function fetchSpeedLimitNear(
   latitude: number,
@@ -71,40 +62,60 @@ export async function fetchSpeedLimitNear(
   opts?: { force?: boolean }
 ): Promise<SpeedLimitInfo | null> {
   const key = cacheKey(latitude, longitude);
-  if (!opts?.force && cache.has(key)) return cache.get(key) ?? null;
   const now = Date.now();
-  if (!opts?.force && now - lastFetchAt < 12_000) {
-    for (const [k, v] of cache) {
-      const [la, lo] = k.split(',').map(Number);
-      if (haversineKm(latitude, longitude, la, lo) < 0.08 && v && now - v.fetchedAt < 120_000) {
-        return v;
-      }
-    }
+
+  const cached = hitCache.get(key);
+  if (!opts?.force && cached && now - cached.fetchedAt < 180_000) {
+    lastGood = cached;
+    return cached;
   }
-  lastFetchAt = now;
+
+  // Dernière bonne limite proche (< 250 m) encore fraîche
+  if (
+    !opts?.force &&
+    lastGood &&
+    now - lastGood.fetchedAt < 90_000 &&
+    haversineDistance(latitude, longitude, lastGood.at.latitude, lastGood.at.longitude) < 0.25
+  ) {
+    return lastGood;
+  }
+
+  const missTs = missUntil.get(key);
+  if (!opts?.force && missTs && now < missTs) {
+    return lastGood;
+  }
+
+  // Throttle réseau Overpass (~1 req / 8 s)
+  if (!opts?.force && now - lastNetworkAt < 8000) {
+    return lastGood;
+  }
+  lastNetworkAt = now;
 
   const query = `
-[out:json][timeout:8];
-way(around:45,${latitude.toFixed(5)},${longitude.toFixed(5)})[highway][maxspeed];
-out tags 8;
+[out:json][timeout:10];
+(
+  way(around:80,${latitude.toFixed(5)},${longitude.toFixed(5)})[highway][maxspeed];
+  node(around:80,${latitude.toFixed(5)},${longitude.toFixed(5)})[highway=speed_camera][maxspeed];
+);
+out tags 12;
 `.trim();
 
   const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timer = setTimeout(() => ctrl?.abort(), 9000);
+  const timer = setTimeout(() => ctrl?.abort(), 11_000);
   try {
     const res = await fetch('https://overpass-api.de/api/interpreter', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
         Accept: 'application/json',
-        'User-Agent': 'GasoilTracking/1.4',
+        'User-Agent': 'GasoilTracking/1.4 (personal fuel app)',
       },
       body: `data=${encodeURIComponent(query)}`,
       signal: ctrl?.signal,
     });
     if (!res.ok) {
-      cache.set(key, null);
-      return null;
+      missUntil.set(key, now + 25_000);
+      return lastGood;
     }
     const data = (await res.json()) as {
       elements?: Array<{ tags?: Record<string, string> }>;
@@ -125,17 +136,23 @@ out tags 8;
         };
       }
     }
-    cache.set(key, best);
-    return best;
+    if (best) {
+      hitCache.set(key, best);
+      missUntil.delete(key);
+      lastGood = best;
+      return best;
+    }
+    // Pas de tag : miss court, garder l’ancien panneau
+    missUntil.set(key, now + 40_000);
+    return lastGood;
   } catch {
-    cache.set(key, null);
-    return null;
+    missUntil.set(key, now + 20_000);
+    return lastGood;
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** Échantillonne quelques points du tracé pour une limite « moyenne » de corridor. */
 export async function fetchSpeedLimitAlongRoute(
   points: Array<{ latitude: number; longitude: number }>
 ): Promise<SpeedLimitInfo | null> {

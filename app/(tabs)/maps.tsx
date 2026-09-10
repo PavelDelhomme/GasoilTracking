@@ -164,12 +164,7 @@ export default function MapsScreen() {
           userLocation={user}
           followUser
         />
-        <View style={[styles.hud, { top: 12 }]} pointerEvents="box-none">
-          {limit ? (
-            <View style={styles.limitSign}>
-              <Text style={styles.limitValue}>{limit.limitKmh}</Text>
-            </View>
-          ) : null}
+        <View style={[styles.hud, { top: 12, justifyContent: 'flex-end' }]} pointerEvents="box-none">
           <View
             style={[styles.speedChip, { backgroundColor: colors.card + 'EE', borderColor: colors.border }]}
           >
@@ -178,6 +173,11 @@ export default function MapsScreen() {
             </Text>
             <Text style={{ color: colors.textSecondary, fontSize: 11 }}>GPS</Text>
           </View>
+          {limit ? (
+            <View style={styles.limitSign} accessibilityLabel={`Limitation ${limit.limitKmh} km/h`}>
+              <Text style={styles.limitValue}>{limit.limitKmh}</Text>
+            </View>
+          ) : null}
         </View>
       </View>
 
@@ -265,6 +265,7 @@ const styles = StyleSheet.create({
     right: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: 10,
   },
   limitSign: {
