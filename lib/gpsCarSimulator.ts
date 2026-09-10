@@ -190,15 +190,26 @@ export type CarSimProgress = {
 };
 
 /**
- * Joue les points avec un délai accéléré (tests : 1 s réel ≈ N s trajet).
+ * Joue les points avec un délai accéléré (tests).
  * `timeScale` 20 = 20× plus rapide que le réel.
+ * `maxWaitMs` : plafond par étape (défaut 400). Pour batterie « vraie durée »,
+ * passer maxWaitMs très haut (ex. 120000) et timeScale 1–3.
  */
 export async function playCarSimulation(
   points: RoutePoint[],
   onPoint: (p: CarSimProgress) => Promise<void> | void,
-  opts?: { timeScale?: number; signal?: { aborted: boolean } }
+  opts?: {
+    timeScale?: number;
+    signal?: { aborted: boolean };
+    /** Plafond ms d’attente entre 2 points. Infinity = durée réelle / timeScale. */
+    maxWaitMs?: number;
+  }
 ): Promise<void> {
   const scale = Math.max(1, opts?.timeScale ?? 25);
+  const maxWait =
+    opts?.maxWaitMs == null || !Number.isFinite(opts.maxWaitMs)
+      ? Number.POSITIVE_INFINITY
+      : Math.max(40, opts.maxWaitMs);
   for (let i = 0; i < points.length; i++) {
     if (opts?.signal?.aborted) return;
     await onPoint({
@@ -208,8 +219,8 @@ export async function playCarSimulation(
       done: i === points.length - 1,
     });
     if (i >= points.length - 1) break;
-    const dt = points[i + 1].timestamp - points[i].timestamp;
-    const wait = Math.max(40, Math.min(400, dt / scale));
+    const dt = Math.max(0, points[i + 1].timestamp - points[i].timestamp);
+    const wait = Math.min(maxWait, Math.max(16, dt / scale));
     await new Promise((r) => setTimeout(r, wait));
   }
 }

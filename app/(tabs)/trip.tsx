@@ -70,9 +70,11 @@ import {
 } from '@/lib/calculations';
 import {
   buildWorkCommuteRoundTrip,
+  playCarSimulation,
   SIM_HOME,
   SIM_WORK,
 } from '@/lib/gpsCarSimulator';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { applyTripFuelBurn, fuelRemainingTone, fuelToneColor, setFuelLiters } from '@/lib/fuelLevel';
 import { askFuelGaugeApprox } from '@/lib/fuelGaugePrompt';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
@@ -252,6 +254,10 @@ export default function TripScreen() {
     prepare?: string;
     runSim?: string;
     runSimNonce?: string;
+    /** live = rythme trajet (musique / PLM) ; fast = injection rapide (défaut historique) */
+    simPace?: string;
+    /** Accélération pour simPace=live (1 = temps réel, 2 = 2× plus vite). Défaut 2. */
+    timeScale?: string;
     purgeSim?: string;
     purgeFirst?: string;
     tab?: string;
@@ -1636,25 +1642,46 @@ export default function TripScreen() {
     }
   };
 
-  /** Simulateur voiture (tests) — aller/retour domicile↔travail + feux + pause.
-   * Injection synchrone (rapide) : évite les trajets zombies si Samsung Freecess
-   * gèle le JS en arrière-plan pendant une sim lente. */
-  const handleRunCarSimulator = async () => {
+  /** Simulateur voiture (tests).
+   * - fast (défaut) : injection synchrone — évite Freecess Samsung
+   * - live : rythme trajet (timeScale 1–3) pour cohabitation PLM / musique */
+  const handleRunCarSimulator = async (opts?: { pace?: 'fast' | 'live'; timeScale?: number }) => {
     if (!activeVehicle || simRunning) return;
+    const pace =
+      opts?.pace ??
+      (String(params.simPace || '').toLowerCase() === 'live' ? 'live' : 'fast');
+    const timeScale = Math.max(
+      1,
+      opts?.timeScale ??
+        (Number(params.timeScale) > 0 ? Number(params.timeScale) : pace === 'live' ? 2 : 25)
+    );
     simAbort.current.aborted = false;
     setSimRunning(true);
-    setSimProgress('Démarrage sim commute…');
+    setSimProgress(
+      pace === 'live'
+        ? `Sim live ×${timeScale} — laissez PLM jouer…`
+        : 'Démarrage sim commute (rapide)…'
+    );
     let tripId: number | null = null;
+    const keepTag = 'gasoil-sim-live';
     try {
+      if (pace === 'live') {
+        await activateKeepAwakeAsync(keepTag).catch(() => undefined);
+      }
       await stopBackgroundTracking();
       await purgeSimulatorTrips(activeVehicle.id);
       await stopActiveTrips();
 
       const points = buildWorkCommuteRoundTrip({
-        stepMeters: 120,
+        stepMeters: pace === 'live' ? 180 : 120,
         trafficLightsEveryKm: 6.5,
-        workPauseMs: 6 * 60 * 1000,
+        workPauseMs: pace === 'live' ? 3 * 60 * 1000 : 6 * 60 * 1000,
       });
+      const simMs = Math.max(
+        0,
+        (points[points.length - 1]?.timestamp ?? 0) - (points[0]?.timestamp ?? 0)
+      );
+      const wallMin = Math.round(simMs / timeScale / 60000);
       setDestCoords(SIM_WORK);
       setDestination('Travail puis retour domicile (sim)');
       setPlannedRoute(
@@ -1692,7 +1719,10 @@ export default function TripScreen() {
         status: 'confirmed',
         source: 'gps',
         fillUpId: null,
-        note: 'SIMULATEUR — ne pas compter comme trajet réel',
+        note:
+          pace === 'live'
+            ? `SIMULATEUR LIVE ×${timeScale} (~${wallMin} min mur) — cohabitation PLM`
+            : 'SIMULATEUR — ne pas compter comme trajet réel',
       });
       await refresh();
 
@@ -1703,7 +1733,6 @@ export default function TripScreen() {
           timestamp: first.timestamp,
         },
       ]);
-      setSimProgress(`Injection GPS 0/${points.length}…`);
 
       const persistPartial = async (idx: number) => {
         const dist = calculateRouteDistance(routeJson);
@@ -1722,24 +1751,55 @@ export default function TripScreen() {
           latitude: points[idx].latitude,
           longitude: points[idx].longitude,
         });
-        setSimProgress(`Sim ${idx + 1}/${points.length} · ${formatDistance(dist)}`);
+        setSimProgress(
+          pace === 'live'
+            ? `Live ${idx + 1}/${points.length} · ${formatDistance(dist)} · ~${wallMin} min`
+            : `Sim ${idx + 1}/${points.length} · ${formatDistance(dist)}`
+        );
         await refresh();
       };
 
-      for (let i = 1; i < points.length; i++) {
-        if (simAbort.current.aborted) break;
-        const point = points[i];
-        routeJson = appendRoutePoint(routeJson, {
-          latitude: point.latitude,
-          longitude: point.longitude,
-          timestamp: point.timestamp,
-          accuracy: point.accuracy ?? 8,
-          speed: point.speed ?? 20,
-        });
-        // Yield UI régulièrement sans ralentir au point de se faire freezer
-        if (i % 80 === 0 || i === points.length - 1) {
-          await persistPartial(i);
-          await new Promise((r) => setTimeout(r, 16));
+      if (pace === 'live') {
+        showToast(`Sim live démarrée (~${wallMin} min) — musique PLM OK en fond`);
+        await playCarSimulation(
+          points,
+          async ({ index, point }) => {
+            if (index === 0) return;
+            routeJson = appendRoutePoint(routeJson, {
+              latitude: point.latitude,
+              longitude: point.longitude,
+              timestamp: point.timestamp,
+              accuracy: point.accuracy ?? 8,
+              speed: point.speed ?? 20,
+            });
+            if (index % 8 === 0 || index === points.length - 1) {
+              await persistPartial(index);
+            } else {
+              setUserLocation({ latitude: point.latitude, longitude: point.longitude });
+            }
+          },
+          {
+            timeScale,
+            signal: simAbort.current,
+            maxWaitMs: Number.POSITIVE_INFINITY,
+          }
+        );
+      } else {
+        setSimProgress(`Injection GPS 0/${points.length}…`);
+        for (let i = 1; i < points.length; i++) {
+          if (simAbort.current.aborted) break;
+          const point = points[i];
+          routeJson = appendRoutePoint(routeJson, {
+            latitude: point.latitude,
+            longitude: point.longitude,
+            timestamp: point.timestamp,
+            accuracy: point.accuracy ?? 8,
+            speed: point.speed ?? 20,
+          });
+          if (i % 80 === 0 || i === points.length - 1) {
+            await persistPartial(i);
+            await new Promise((r) => setTimeout(r, 16));
+          }
         }
       }
 
@@ -1768,7 +1828,6 @@ export default function TripScreen() {
         routeJson
       );
 
-      // Toujours finaliser (même si abort partiel) — jamais de zombie 0 L
       await updateTrip(tripId, {
         routePoints: routeJson,
         distanceKm,
@@ -1781,7 +1840,7 @@ export default function TripScreen() {
         destinationName: 'Travail A/R (sim)',
         note: simAbort.current.aborted
           ? `SIMULATEUR (interrompu) · ${formatDistance(distanceKm)} · ~${fuelUsed.toFixed(1)} L`
-          : `SIMULATEUR commute · ${formatDistance(distanceKm)} · ${formatSpeedKmh(stats.movingSpeedKmh)} moy. · idle ${(idleRatio * 100).toFixed(0)}% · ~${fuelUsed.toFixed(1)} L`,
+          : `SIMULATEUR ${pace === 'live' ? `LIVE×${timeScale}` : 'commute'} · ${formatDistance(distanceKm)} · ${formatSpeedKmh(stats.movingSpeedKmh)} moy. · idle ${(idleRatio * 100).toFixed(0)}% · ~${fuelUsed.toFixed(1)} L`,
       });
       setUserLocation({
         latitude: points[points.length - 1].latitude,
@@ -1815,6 +1874,9 @@ export default function TripScreen() {
       }
       showToast(e instanceof Error ? e.message : 'Échec simulateur');
     } finally {
+      if (pace === 'live') {
+        deactivateKeepAwake(keepTag);
+      }
       setSimRunning(false);
       setSimProgress('');
     }
@@ -2828,18 +2890,34 @@ export default function TripScreen() {
                 )}
 
                 {gpsSimEnabled && (
-                  <Button
-                    title={
-                      simRunning
-                        ? simProgress || 'Simulation en cours…'
-                        : 'Simuler trajet voiture (test)'
-                    }
-                    variant="outline"
-                    onPress={handleRunCarSimulator}
-                    loading={simRunning}
-                    disabled={simRunning || isStarting}
-                    style={{ marginTop: 12 }}
-                  />
+                  <>
+                    <Button
+                      title={
+                        simRunning
+                          ? simProgress || 'Simulation en cours…'
+                          : 'Sim live trajet + musique (×1 réel)'
+                      }
+                      variant="outline"
+                      onPress={() => void handleRunCarSimulator({ pace: 'live', timeScale: 1 })}
+                      loading={simRunning}
+                      disabled={simRunning || isStarting}
+                      style={{ marginTop: 12 }}
+                    />
+                    <Button
+                      title="Sim live ×2 (~45 min)"
+                      variant="outline"
+                      onPress={() => void handleRunCarSimulator({ pace: 'live', timeScale: 2 })}
+                      disabled={simRunning || isStarting}
+                      style={{ marginTop: 8 }}
+                    />
+                    <Button
+                      title="Sim rapide (injection)"
+                      variant="outline"
+                      onPress={() => void handleRunCarSimulator({ pace: 'fast' })}
+                      disabled={simRunning || isStarting}
+                      style={{ marginTop: 8 }}
+                    />
+                  </>
                 )}
               </>
             )}
