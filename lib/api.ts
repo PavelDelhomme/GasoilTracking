@@ -224,6 +224,11 @@ export async function startQrLogin(): Promise<QrLoginStart> {
   return data as QrLoginStart;
 }
 
+/** Compte connecté : QR pour connecter un autre appareil (session pré-approuvée). */
+export async function startQrPair(): Promise<QrLoginStart> {
+  return request('/api/auth/qr/pair', { method: 'POST' }) as Promise<QrLoginStart>;
+}
+
 export async function pollQrLogin(challengeId: string): Promise<{
   status: string;
   token?: string;
@@ -241,6 +246,22 @@ export async function pollQrLogin(challengeId: string): Promise<{
   if (!res.ok && res.status !== 410) {
     throw new Error(data.error || 'Erreur QR');
   }
+  return data;
+}
+
+/** Suivi QR sans consommer la session (appareil qui affiche le QR pair). */
+export async function statusQrLogin(challengeId: string): Promise<{
+  status: string;
+  expiresAt?: string;
+  error?: string;
+}> {
+  const res = await fetch(
+    `${API_URL}/api/auth/qr/status?challengeId=${encodeURIComponent(challengeId)}`
+  );
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 404) return { status: 'missing', error: data.error };
+  if (res.status === 429) return { status: 'rate_limited', error: data.error };
+  if (!res.ok) throw new Error(data.error || 'Erreur statut QR');
   return data;
 }
 

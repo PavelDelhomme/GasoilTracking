@@ -25,6 +25,7 @@ import {
   getPreferredMapsApp,
   type MapsAppChoice,
 } from '@/lib/mapsNavigation';
+import { QrPairDevicePanel } from '@/components/QrPairDevicePanel';
 
 export default function AccountScreen() {
   const { colors } = useTheme();
@@ -171,14 +172,40 @@ export default function AccountScreen() {
 
       <Card style={{ marginBottom: 12 }}>
         <Text style={[styles.section, { color: colors.text }]}>Connexion web (QR)</Text>
-        <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 10 }}>
-          Sur le site, ouvrez Connexion : un QR s’affiche. Scannez-le ici pour connecter le
-          navigateur sans retaper le mot de passe.
-        </Text>
-        <Button
-          title="Scanner le QR du site"
-          onPress={() => router.push('/qr-login?scan=1' as never)}
-        />
+        {Platform.OS === 'web' ? (
+          <>
+            <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 4 }}>
+              Affichez un QR pour connecter rapidement un téléphone ou un autre navigateur à ce
+              compte — sans retaper le mot de passe.
+            </Text>
+            <QrPairDevicePanel />
+            <Text
+              style={{
+                color: colors.textSecondary,
+                fontSize: 12,
+                lineHeight: 17,
+                marginTop: 12,
+              }}
+            >
+              Sens inverse : sur un navigateur non connecté, la page Connexion affiche aussi un QR
+              que votre téléphone déjà connecté peut scanner pour autoriser ce navigateur.
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text
+              style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 10 }}
+            >
+              Sur le site (page Connexion), un QR s’affiche : scannez-le ici pour connecter le
+              navigateur. Ou scannez le QR « autre appareil » depuis Mon compte web pour connecter
+              ce téléphone.
+            </Text>
+            <Button
+              title="Scanner un QR de connexion"
+              onPress={() => router.push('/qr-login?scan=1' as never)}
+            />
+          </>
+        )}
       </Card>
 
       <Card style={{ marginBottom: 12 }}>

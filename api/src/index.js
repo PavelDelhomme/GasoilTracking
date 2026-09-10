@@ -1067,6 +1067,82 @@ app.get('/api/auth/qr/poll', qrPollLimiter, (req, res) => {
   res.json({ status: 'approved', ...session });
 });
 
+/** Statut QR sans consommer la session (suivi côté appareil qui affiche le QR pair). */
+app.get('/api/auth/qr/status', qrPollLimiter, (req, res) => {
+  const challengeId = String(req.query?.challengeId || '').trim();
+  if (!challengeId) {
+    return res.status(400).json({ error: 'challengeId requis' });
+  }
+  const row = db.prepare('SELECT * FROM qr_login_challenges WHERE id = ?').get(challengeId);
+  if (!row) {
+    return res.status(404).json({ status: 'missing', error: 'Challenge introuvable' });
+  }
+  if (row.status === 'expired' || new Date(row.expires_at).getTime() < Date.now()) {
+    if (row.status === 'pending' || row.status === 'approved') {
+      db.prepare(`UPDATE qr_login_challenges SET status = 'expired' WHERE id = ?`).run(row.id);
+    }
+    return res.json({ status: 'expired', expiresAt: row.expires_at });
+  }
+  return res.json({
+    status: row.status,
+    expiresAt: row.expires_at,
+    mode: row.status === 'approved' && row.user_id ? 'pair_or_approved' : undefined,
+  });
+});
+
+/**
+ * Compte déjà connecté (web) : crée un QR pour connecter un *autre* appareil.
+ * Le challenge est pré-approuvé pour l’utilisateur courant ; l’autre device poll et récupère la session.
+ */
+app.post('/api/auth/qr/pair', auth, authLimiter, async (req, res) => {
+  try {
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.sub);
+    if (!user || user.email_verified === 0) {
+      return res.status(403).json({ error: 'Compte non autorisé' });
+    }
+    const id = uuid();
+    const raw = crypto.randomBytes(32).toString('base64url');
+    const now = new Date();
+    const expires = new Date(now.getTime() + QR_LOGIN_TTL_MS);
+    const meta = sessionMeta(req);
+    db.prepare(
+      `INSERT INTO qr_login_challenges
+       (id, challenge_hash, status, user_id, approved_at, expires_at, created_at, ip, user_agent)
+       VALUES (?, ?, 'approved', ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      hashToken(raw),
+      user.id,
+      now.toISOString(),
+      expires.toISOString(),
+      now.toISOString(),
+      meta.ip,
+      meta.userAgent
+    );
+
+    const payload = `${PUBLIC_URL}/qr-login?claim=${encodeURIComponent(id)}`;
+    const qrDataUrl = await QRCode.toDataURL(payload, {
+      width: 280,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#1a1a2e', light: '#ffffff' },
+    });
+
+    res.json({
+      challengeId: id,
+      expiresAt: expires.toISOString(),
+      ttlSeconds: Math.round(QR_LOGIN_TTL_MS / 1000),
+      qrPayload: payload,
+      qrDataUrl,
+      deepLink: `${APP_SCHEME}://qr-login?claim=${encodeURIComponent(id)}`,
+      mode: 'pair',
+    });
+  } catch (e) {
+    console.error('qr-pair', e);
+    res.status(500).json({ error: 'Impossible de créer le QR d’appareil' });
+  }
+});
+
 /** Rotation du refresh token → nouvel access + nouveau refresh */
 app.post('/api/auth/refresh', authLimiter, (req, res) => {
   const raw = String(req.body?.refreshToken || '');

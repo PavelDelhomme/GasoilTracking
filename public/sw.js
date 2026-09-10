@@ -1,5 +1,5 @@
 /** Service worker — shell offline. Le nom de cache est stampé à chaque build Docker. */
-const CACHE = 'gasoil-shell-v1.4.88';
+const CACHE = 'gasoil-shell-v1.4.89';
 const PRECACHE = ['/manifest.webmanifest', '/icon.png'];
 
 self.addEventListener('install', (event) => {

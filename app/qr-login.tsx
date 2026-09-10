@@ -1,30 +1,89 @@
 /**
- * Scan / deep-link QR pour autoriser la connexion web.
- * Route : /qr-login?c=… ou scanner caméra.
+ * Scan / deep-link QR :
+ * - ?c=… → téléphone connecté approuve la connexion d’un navigateur (/auth)
+ * - ?claim=… → cet appareil récupère la session (QR pair depuis Mon compte web)
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Platform, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Platform, Pressable, ActivityIndicator } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Button } from '@/components/Button';
 import { InlineBackBar } from '@/components/HeaderBackButton';
-import { approveQrLogin, parseQrLoginChallenge } from '@/lib/api';
+import { approveQrLogin, parseQrLoginChallenge, pollQrLogin } from '@/lib/api';
 import { notify } from '@/lib/notify';
+
+function parseClaimId(raw: string): string | null {
+  const s = raw.trim();
+  if (!s) return null;
+  try {
+    if (s.includes('claim=')) {
+      const u = s.includes('://') ? new URL(s) : new URL(s, 'https://x.local');
+      const c = u.searchParams.get('claim');
+      if (c && c.length >= 8) return c;
+    }
+  } catch {
+    /* ignore */
+  }
+  const m = /(?:^|[?&#])claim=([^&#]+)/i.exec(s);
+  if (m?.[1]) return decodeURIComponent(m[1]);
+  // UUID challengeId brut
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return s;
+  return null;
+}
 
 export default function QrLoginScreen() {
   const { colors } = useTheme();
-  const { user } = useAuth();
-  const params = useLocalSearchParams<{ c?: string; challenge?: string; scan?: string }>();
+  const { user, applySession } = useAuth();
+  const params = useLocalSearchParams<{
+    c?: string;
+    challenge?: string;
+    scan?: string;
+    claim?: string;
+  }>();
   const [permission, requestPermission] = useCameraPermissions();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const [scanning, setScanning] = useState(Platform.OS !== 'web');
+  const [scanning, setScanning] = useState(Platform.OS !== 'web' && !params.claim);
   const handled = React.useRef(false);
+
+  const claimSession = useCallback(
+    async (challengeId: string) => {
+      if (busy) return;
+      setBusy(true);
+      setMsg('Connexion de cet appareil…');
+      setScanning(false);
+      try {
+        const res = await pollQrLogin(challengeId);
+        if (res.status === 'approved' && res.token && res.user) {
+          await applySession(res.token, res.user, res.refreshToken);
+          notify('Connecté', res.user.email || 'Session importée');
+          setMsg('OK — cet appareil est connecté.');
+          setTimeout(() => router.replace('/' as never), 700);
+          return;
+        }
+        if (res.status === 'expired' || res.status === 'consumed') {
+          setMsg('QR déjà utilisé ou expiré — régénérez-le sur Mon compte (web).');
+          return;
+        }
+        setMsg(res.error || 'En attente… réessayez.');
+      } catch (e) {
+        setMsg(e instanceof Error ? e.message : 'Échec');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applySession, busy]
+  );
 
   const approve = useCallback(
     async (raw: string) => {
+      const claimId = parseClaimId(raw);
+      if (claimId) {
+        await claimSession(claimId);
+        return;
+      }
       const challenge = parseQrLoginChallenge(raw);
       if (!challenge) {
         setMsg('QR non reconnu. Scannez le code affiché sur le site.');
@@ -48,16 +107,55 @@ export default function QrLoginScreen() {
         setBusy(false);
       }
     },
-    [busy, user]
+    [busy, claimSession, user]
   );
 
   useEffect(() => {
+    if (handled.current) return;
+    if (params.claim) {
+      handled.current = true;
+      void claimSession(String(params.claim));
+      return;
+    }
     const fromParams = params.c || params.challenge;
-    if (!fromParams || handled.current) return;
+    if (!fromParams) return;
     handled.current = true;
     setScanning(false);
     void approve(String(fromParams));
-  }, [params.c, params.challenge, approve]);
+  }, [params.c, params.challenge, params.claim, approve, claimSession]);
+
+  // Web + claim : récupérer la session directement
+  if (Platform.OS === 'web' && params.claim) {
+    return (
+      <View style={[styles.wrap, { backgroundColor: colors.background }]}>
+        <InlineBackBar />
+        <Text style={[styles.title, { color: colors.text }]}>Connexion appareil</Text>
+        {busy ? <ActivityIndicator color={colors.accent} style={{ marginTop: 20 }} /> : null}
+        {!!msg && (
+          <Text
+            style={{
+              color: /OK|connecté/i.test(msg) ? colors.success : colors.textSecondary,
+              marginTop: 14,
+              fontWeight: '700',
+              lineHeight: 20,
+            }}
+          >
+            {msg}
+          </Text>
+        )}
+        {!busy && !/OK/i.test(msg) && (
+          <Button
+            title="Réessayer"
+            onPress={() => {
+              handled.current = false;
+              void claimSession(String(params.claim));
+            }}
+            style={{ marginTop: 16 }}
+          />
+        )}
+      </View>
+    );
+  }
 
   if (Platform.OS === 'web') {
     return (
@@ -65,10 +163,14 @@ export default function QrLoginScreen() {
         <InlineBackBar />
         <Text style={[styles.title, { color: colors.text }]}>Connexion QR</Text>
         <Text style={{ color: colors.textSecondary, lineHeight: 20 }}>
-          Le scan se fait depuis l’application mobile. Sur ce navigateur, affichez le QR dans
-          Connexion, puis scannez-le avec votre téléphone.
+          Pour connecter ce navigateur : ouvrez Connexion (QR à scanner avec le téléphone déjà
+          connecté). Pour connecter un autre appareil depuis un compte web : Mon compte → QR.
         </Text>
-        <Button title="Aller à la connexion" onPress={() => router.replace('/auth' as never)} style={{ marginTop: 16 }} />
+        <Button
+          title="Aller à la connexion"
+          onPress={() => router.replace('/auth' as never)}
+          style={{ marginTop: 16 }}
+        />
       </View>
     );
   }
@@ -76,18 +178,22 @@ export default function QrLoginScreen() {
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]}>
       <InlineBackBar />
-      <Text style={[styles.title, { color: colors.text }]}>Scanner le QR du site</Text>
+      <Text style={[styles.title, { color: colors.text }]}>
+        {params.claim ? 'Connexion appareil' : 'Scanner le QR du site'}
+      </Text>
       <Text style={{ color: colors.textSecondary, marginBottom: 12, lineHeight: 18 }}>
-        {user
-          ? `Connecté en tant que ${user.email}. Pointez la caméra vers le QR du site web.`
-          : 'Vous devez être connecté dans l’app pour autoriser le site.'}
+        {params.claim
+          ? 'Récupération de la session depuis Mon compte (web)…'
+          : user
+            ? `Connecté en tant que ${user.email}. Pointez la caméra vers le QR du site, ou vers un QR « autre appareil ».`
+            : 'Sans session : scannez un QR « Connecter un autre appareil » (Mon compte web). Avec session : autorisez la connexion d’un navigateur.'}
       </Text>
 
-      {!user ? (
+      {!user && !params.claim ? (
         <Button title="Se connecter" onPress={() => router.push('/auth' as never)} />
       ) : null}
 
-      {user && scanning ? (
+      {scanning ? (
         !permission?.granted ? (
           <View>
             <Text style={{ color: colors.textSecondary, marginBottom: 12 }}>
@@ -118,7 +224,7 @@ export default function QrLoginScreen() {
       {!!msg && (
         <Text
           style={{
-            color: /OK|autoris/i.test(msg) ? colors.success : colors.danger,
+            color: /OK|autoris|connecté/i.test(msg) ? colors.success : colors.danger,
             marginTop: 14,
             fontWeight: '700',
           }}
@@ -127,7 +233,7 @@ export default function QrLoginScreen() {
         </Text>
       )}
 
-      {user && !scanning && (
+      {!scanning && (
         <Button
           title="Scanner à nouveau"
           onPress={() => {
