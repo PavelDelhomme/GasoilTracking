@@ -74,7 +74,11 @@ import {
 import { applyTripFuelBurn, fuelRemainingTone, fuelToneColor, setFuelLiters } from '@/lib/fuelLevel';
 import { askFuelGaugeApprox } from '@/lib/fuelGaugePrompt';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
+import { FloatingFuelBadge } from '@/components/FloatingFuelBadge';
+import { SpeedDialFab } from '@/components/SpeedDialFab';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { shouldDeleteShortTrip } from '@/lib/shortTrip';
 import {
   estimateTripFuelLiters,
   fetchElevationAscentM,
@@ -120,7 +124,6 @@ type StartMode = 'free' | 'nav';
 
 const START_MODE_KEY = 'gasoil_trip_start_mode';
 const SMART_DISMISS_KEY = 'gasoil_smart_dismiss_window';
-
 function smartWindowKey(): string {
   const d = new Date();
   const h = d.getHours();
@@ -130,10 +133,10 @@ function smartWindowKey(): string {
 
 type GeoCoords = { latitude: number; longitude: number };
 
-/** Via OSRM explicite, sinon échantillon géométrie — biaise Google Maps sur le trajet choisi. */
+/** Via OSRM explicite / géométrie — seulement éco & alternatif (écart significatif). */
 function mapsWaypointsForRoute(route: DrivingRoute | null | undefined): GeoCoords[] {
   if (!route) return [];
-  return buildViaWaypoints(route.coordinates, route.via);
+  return buildViaWaypoints(route.coordinates, route.via, { kind: route.kind });
 }
 
 export default function TripScreen() {
@@ -148,12 +151,16 @@ export default function TripScreen() {
     runSimNonce?: string;
     purgeSim?: string;
     purgeFirst?: string;
+    tab?: string;
+    reset?: string;
   }>();
-  const { activeVehicle, activeTrip, refresh } = useApp();
+  const { activeVehicle, activeTrip, refresh, vehicles, selectVehicle } = useApp();
   const { colors } = useTheme();
   const { showToast } = useToast();
+  const insets = useSafeAreaInsets();
   const mapRef = useRef<TripMapRef>(null);
   const autoStartDone = useRef(false);
+  const resetHandledRef = useRef<string | null>(null);
   const [tab, setTab] = useState<TripTab>('live');
   const [startMode, setStartMode] = useState<StartMode>('nav');
   const [destination, setDestination] = useState('');
@@ -173,6 +180,7 @@ export default function TripScreen() {
   const [liveMapTail, setLiveMapTail] = useState<RoutePoint[]>([]);
   const [isStopping, setIsStopping] = useState(false);
   const [stopConfirm, setStopConfirm] = useState(false);
+  const [shortTripPrompt, setShortTripPrompt] = useState(false);
   const [tripStartFuelLiters, setTripStartFuelLiters] = useState<number | null>(null);
   const [simRunning, setSimRunning] = useState(false);
   const [simProgress, setSimProgress] = useState('');
@@ -189,6 +197,8 @@ export default function TripScreen() {
   const [pending, setPending] = useState<Trip[]>([]);
   const [sinceFill, setSinceFill] = useState<SinceLastFillStats | null>(null);
   const [historyFilter, setHistoryFilter] = useState<'all' | 'sinceFill'>('all');
+  /** null = Toutes ; sinon filtre véhicule (aligné selectVehicle pour un id précis) */
+  const [historyAllVehicles, setHistoryAllVehicles] = useState(false);
   const [recentDests, setRecentDests] = useState<RecentDestination[]>([]);
   const [mapVisibleIds, setMapVisibleIds] = useState<Set<number>>(() => new Set());
   const onHistoryViewable = useRef(
@@ -226,7 +236,7 @@ export default function TripScreen() {
   const isWeb = Platform.OS === 'web';
 
   const loadLists = useCallback(async () => {
-    if (!activeVehicle) {
+    if (!activeVehicle && !historyAllVehicles) {
       setHistory([]);
       setPending([]);
       setSinceFill(null);
@@ -235,10 +245,11 @@ export default function TripScreen() {
     }
     setHistoryLoading(true);
     try {
+    const vehicleId = historyAllVehicles ? undefined : activeVehicle?.id;
     const [trips, pend, since, pl] = await Promise.all([
-      getTrips(activeVehicle.id, { omitRoutePoints: true }),
-      getPendingTrips(activeVehicle.id),
-      getSinceLastFillStats(activeVehicle.id),
+      getTrips(vehicleId, { omitRoutePoints: true }),
+      getPendingTrips(vehicleId),
+      activeVehicle ? getSinceLastFillStats(activeVehicle.id) : Promise.resolve(null),
       getPlaces(),
     ]);
     const hist = trips.filter((t) => !t.isActive).slice(0, 80);
@@ -271,7 +282,11 @@ export default function TripScreen() {
     } finally {
       setHistoryLoading(false);
     }
-  }, [activeVehicle, colors.accent]);
+  }, [activeVehicle, colors.accent, historyAllVehicles]);
+
+  useEffect(() => {
+    void loadLists();
+  }, [historyAllVehicles, activeVehicle?.id, loadLists]);
 
   useEffect(() => {
     void (async () => {
@@ -322,7 +337,37 @@ export default function TripScreen() {
         }
       }
       if (params.mode === 'nav') setStartMode('nav');
-    }, [loadLists, activeTrip?.id, activeTrip?.isPaused, params.dest, params.mode, params.destLat, params.destLon])
+      if (params.tab === 'live' || params.tab === 'history') {
+        setTab(params.tab);
+      }
+      const resetFlag = Array.isArray(params.reset) ? params.reset[0] : params.reset;
+      if (resetFlag === '1') {
+        const key = `${params.tab || ''}|${resetFlag}|${params.dest || ''}`;
+        if (resetHandledRef.current !== key) {
+          resetHandledRef.current = key;
+          setTab('live');
+          setDestination('');
+          setDestCoords(null);
+          setPlannedRoute([]);
+          setRouteOptions([]);
+          setSelectedRouteId(null);
+          setNearDestination(false);
+          setStopConfirm(false);
+          setShortTripPrompt(false);
+          setStartMode('nav');
+        }
+      }
+    }, [
+      loadLists,
+      activeTrip?.id,
+      activeTrip?.isPaused,
+      params.dest,
+      params.mode,
+      params.destLat,
+      params.destLon,
+      params.tab,
+      params.reset,
+    ])
   );
 
   useEffect(() => {
@@ -558,6 +603,10 @@ export default function TripScreen() {
         return;
       }
       setPlannedRoute(valid);
+      mapRef.current?.fitToCoordinates(
+        valid.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
+        { edgePadding: { top: 56, right: 40, bottom: 72, left: 40 }, animated: true }
+      );
       const lats = valid.map((p) => p.latitude);
       const lons = valid.map((p) => p.longitude);
       const latMin = Math.min(...lats);
@@ -576,9 +625,42 @@ export default function TripScreen() {
     }
   }, []);
 
+  const fitOriginAndDest = useCallback((from: GeoCoords | null, to: GeoCoords) => {
+    const pts = from
+      ? [
+          { latitude: from.latitude, longitude: from.longitude },
+          { latitude: to.latitude, longitude: to.longitude },
+        ]
+      : [{ latitude: to.latitude, longitude: to.longitude }];
+    mapRef.current?.fitToCoordinates(pts, {
+      edgePadding: { top: 56, right: 40, bottom: 72, left: 40 },
+      animated: true,
+    });
+    if (from) {
+      const latMin = Math.min(from.latitude, to.latitude);
+      const latMax = Math.max(from.latitude, to.latitude);
+      const lonMin = Math.min(from.longitude, to.longitude);
+      const lonMax = Math.max(from.longitude, to.longitude);
+      setCurrentRegion({
+        latitude: (latMin + latMax) / 2,
+        longitude: (lonMin + lonMax) / 2,
+        latitudeDelta: Math.max((latMax - latMin) * 1.6, 0.05),
+        longitudeDelta: Math.max((lonMax - lonMin) * 1.6, 0.05),
+      });
+    } else {
+      setCurrentRegion({
+        latitude: to.latitude,
+        longitude: to.longitude,
+        latitudeDelta: 0.08,
+        longitudeDelta: 0.08,
+      });
+    }
+  }, []);
+
   const loadRouteAlternatives = useCallback(
     async (from: GeoCoords, to: GeoCoords) => {
       setRoutesLoading(true);
+      fitOriginAndDest(from, to);
       try {
         const alts = await fetchDrivingRouteAlternatives(from, to);
         setRouteOptions(alts);
@@ -605,7 +687,7 @@ export default function TripScreen() {
         setRoutesLoading(false);
       }
     },
-    [applyRouteSelection]
+    [applyRouteSelection, fitOriginAndDest]
   );
 
   const handleStartTrip = async (override?: {
@@ -971,7 +1053,12 @@ export default function TripScreen() {
   };
 
   const finishTripCore = useCallback(
-    async (opts?: { openRecap?: boolean; skipGauge?: boolean }) => {
+    async (opts?: {
+      openRecap?: boolean;
+      skipGauge?: boolean;
+      /** Après prompt trajet court : conserver malgré &lt; 0.5 km */
+      keepShort?: boolean;
+    }) => {
       if (!activeTrip) return;
       const finishedId = activeTrip.id;
       const vehicleSnapshot = activeVehicle;
@@ -990,6 +1077,13 @@ export default function TripScreen() {
       // Toujours lire la DB après drain GPS — le state React peut être en retard.
       const fresh = await getTripById(finishedId).catch(() => null);
       const trip = fresh || activeTrip;
+
+      if (shouldDeleteShortTrip(trip.distanceKm) && !opts?.keepShort) {
+        setShortTripPrompt(true);
+        setStopConfirm(false);
+        return;
+      }
+      setShortTripPrompt(false);
 
       const pts = parseRoutePoints(compactRoutePointsJson(trip.routePoints || '[]'));
       const last = pts.length > 0 ? pts[pts.length - 1] : userLocation;
@@ -1157,6 +1251,57 @@ export default function TripScreen() {
     setStopConfirm(false);
     try {
       await finishTripCore({ openRecap: true, skipGauge: true });
+    } catch (e) {
+      notify('Erreur', e instanceof Error ? e.message : 'Impossible de terminer le trajet.');
+    } finally {
+      setIsStopping(false);
+    }
+  };
+
+  const deleteShortTrip = async () => {
+    if (!activeTrip || isStopping) return;
+    setIsStopping(true);
+    setShortTripPrompt(false);
+    const id = activeTrip.id;
+    try {
+      try {
+        await stopBackgroundTracking();
+      } catch {
+        /* ignore */
+      }
+      try {
+        await flushTripUpdates();
+      } catch {
+        /* ignore */
+      }
+      await deleteTrip(id);
+      setLiveOriginLabel('');
+      setLiveDestLabel('');
+      setDestination('');
+      setDestCoords(null);
+      setPlannedRoute([]);
+      setRouteOptions([]);
+      setSelectedRouteId(null);
+      setTripStartFuelLiters(null);
+      setNearDestination(false);
+      setStopConfirm(false);
+      arrivalPromptedRef.current = false;
+      await refresh();
+      await loadLists();
+      showToast('Trajet court supprimé');
+    } catch (e) {
+      notify('Erreur', e instanceof Error ? e.message : 'Impossible de supprimer le trajet.');
+    } finally {
+      setIsStopping(false);
+    }
+  };
+
+  const keepShortTrip = async () => {
+    if (!activeTrip || isStopping) return;
+    setIsStopping(true);
+    setShortTripPrompt(false);
+    try {
+      await finishTripCore({ openRecap: true, skipGauge: true, keepShort: true });
     } catch (e) {
       notify('Erreur', e instanceof Error ? e.message : 'Impossible de terminer le trajet.');
     } finally {
@@ -1556,6 +1701,14 @@ export default function TripScreen() {
         ? activeTrip.estimatedCost
         : estimateCost(liveActiveFuel, activeVehicle.defaultFuelPrice)
       : 0;
+  const liveFuelRemaining =
+    activeTrip && activeVehicle
+      ? Math.max(
+          0,
+          (tripStartFuelLiters ?? activeVehicle.estimatedFuelLiters ?? activeVehicle.tankCapacity) -
+            liveActiveFuel
+        )
+      : null;
 
   const routePoints = liveMapTail;
   const paused = Boolean(activeTrip?.isPaused);
@@ -1605,6 +1758,7 @@ export default function TripScreen() {
       if (lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon)) {
         const coords = { latitude: lat, longitude: lon };
         setDestCoords(coords);
+        fitOriginAndDest(userLocation, coords);
         if (userLocation) {
           void loadRouteAlternatives(userLocation, coords);
         } else {
@@ -1618,11 +1772,12 @@ export default function TripScreen() {
           if (!g) return;
           const coords = { latitude: g.latitude, longitude: g.longitude };
           setDestCoords(coords);
+          fitOriginAndDest(userLocation, coords);
           if (userLocation) void loadRouteAlternatives(userLocation, coords);
         });
       }
     },
-    [userLocation, loadRouteAlternatives, persistStartMode]
+    [userLocation, loadRouteAlternatives, persistStartMode, fitOriginAndDest]
   );
 
   const destinationHabit = useMemo((): SimilarTripStats | null => {
@@ -1718,6 +1873,14 @@ export default function TripScreen() {
 
       {tab === 'live' ? (
         <>
+          {activeTrip && liveFuelRemaining != null ? (
+            <FloatingFuelBadge
+              liters={liveFuelRemaining}
+              tankCapacity={activeVehicle?.tankCapacity || 50}
+              bottomInset={120 + insets.bottom}
+              topInset={100}
+            />
+          ) : null}
           <View style={styles.map}>
             <TripMap
               ref={mapRef}
@@ -1732,6 +1895,13 @@ export default function TripScreen() {
               }
               destination={destCoords}
             />
+            {activeVehicle ? (
+              <View style={styles.vehicleFloat} pointerEvents="none">
+                <Text style={styles.vehicleFloatText} numberOfLines={1}>
+                  {activeVehicle.name}
+                </Text>
+              </View>
+            ) : null}
             {!userLocation && (
               <View style={styles.mapHint} pointerEvents="none">
                 <Text style={styles.mapHintText}>Localisation…</Text>
@@ -1796,7 +1966,10 @@ export default function TripScreen() {
 
           <ScrollView
             style={styles.panel}
-            contentContainerStyle={styles.panelContent}
+            contentContainerStyle={[
+              styles.panelContent,
+              !activeTrip && activeVehicle ? { paddingBottom: 120 + insets.bottom } : null,
+            ]}
             {...tabSwipe.panHandlers}
           >
             {activeTrip && navGuidance ? (
@@ -1848,22 +2021,7 @@ export default function TripScreen() {
                   {navGuidance.distanceLabel}
                 </Text>
               </Pressable>
-            ) : (
-              <View style={styles.toolbar}>
-                <Button
-                  title="Saisie manuelle"
-                  variant="outline"
-                  onPress={() => router.push('/trip/add' as never)}
-                  style={{ flex: 1 }}
-                />
-                <Button
-                  title="Importer"
-                  variant="secondary"
-                  onPress={() => router.push('/trip/import' as never)}
-                  style={{ flex: 1 }}
-                />
-              </View>
-            )}
+            ) : null}
 
             {activeTrip && nearDestination && (
               <Pressable
@@ -1947,38 +2105,35 @@ export default function TripScreen() {
                   Durée : {Math.floor(tripStats?.durationMinutes ?? 0)} min
                 </Text>
 
-                {paused ? (
-                  <>
-                    <Button title="Reprendre" onPress={handleResume} style={{ marginBottom: 8 }} />
+                {shortTripPrompt ? (
+                  <Card
+                    style={{
+                      marginBottom: 8,
+                      borderColor: colors.warning,
+                      borderWidth: 1,
+                    }}
+                  >
+                    <Text style={{ color: colors.text, fontWeight: '800', marginBottom: 6 }}>
+                      Peu ou pas d’avancée
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 12 }}>
+                      Moins de 500 m enregistrés. Supprimer ce trajet ou le conserver ?
+                    </Text>
                     <Button
-                      title="Faire un plein"
-                      variant="secondary"
-                      onPress={() =>
-                        router.push({
-                          pathname: '/fillup/add' as never,
-                          params: { tripId: String(activeTrip.id), fromTrip: '1' },
-                        })
-                      }
+                      title={isStopping ? '…' : 'Supprimer'}
+                      variant="danger"
+                      onPress={() => void deleteShortTrip()}
+                      disabled={isStopping}
                       style={{ marginBottom: 8 }}
                     />
-                  </>
-                ) : (
-                  <>
                     <Button
-                      title="Pause + plein"
-                      variant="secondary"
-                      onPress={() => handlePause(true)}
-                      style={{ marginBottom: 8 }}
-                    />
-                    <Button
-                      title="Pause (sans plein)"
+                      title="Conserver"
                       variant="outline"
-                      onPress={() => handlePause(false)}
-                      style={{ marginBottom: 8 }}
+                      onPress={() => void keepShortTrip()}
+                      disabled={isStopping}
                     />
-                  </>
-                )}
-                {stopConfirm ? (
+                  </Card>
+                ) : stopConfirm ? (
                   <Card
                     style={{
                       marginBottom: 8,
@@ -2007,12 +2162,70 @@ export default function TripScreen() {
                     />
                   </Card>
                 ) : (
-                  <Button
-                    title="Terminer le trajet"
-                    variant="danger"
-                    onPress={() => void handleStopTrip()}
-                    disabled={isStopping}
-                  />
+                  <View style={styles.activeBtnRow}>
+                    <Pressable
+                      onPress={() => {
+                        if (paused) {
+                          router.push({
+                            pathname: '/fillup/add' as never,
+                            params: { tripId: String(activeTrip.id), fromTrip: '1' },
+                          });
+                        } else {
+                          void handlePause(true);
+                        }
+                      }}
+                      style={[
+                        styles.activeBtn,
+                        { borderColor: colors.border, backgroundColor: colors.card },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Plein"
+                    >
+                      <Text style={{ color: colors.text, fontWeight: '800', fontSize: 13 }}>
+                        Plein
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => void (paused ? handleResume() : handlePause(false))}
+                      style={[
+                        styles.activeBtn,
+                        {
+                          borderColor: paused ? colors.accent : colors.border,
+                          backgroundColor: paused ? colors.accent + '22' : colors.card,
+                        },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={paused ? 'Reprendre' : 'Pause'}
+                    >
+                      <Text
+                        style={{
+                          color: paused ? colors.accent : colors.text,
+                          fontWeight: '800',
+                          fontSize: 13,
+                        }}
+                      >
+                        {paused ? 'Reprendre' : 'Pause'}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => void handleStopTrip()}
+                      disabled={isStopping}
+                      style={[
+                        styles.activeBtn,
+                        {
+                          borderColor: colors.danger,
+                          backgroundColor: colors.danger + '18',
+                          opacity: isStopping ? 0.5 : 1,
+                        },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Terminer trajet"
+                    >
+                      <Text style={{ color: colors.danger, fontWeight: '800', fontSize: 13 }}>
+                        Terminer trajet
+                      </Text>
+                    </Pressable>
+                  </View>
                 )}
               </>
             ) : (
@@ -2101,11 +2314,8 @@ export default function TripScreen() {
                 )}
 
                 <Card>
-                  <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                    Mode de démarrage
-                  </Text>
                   <Text style={[styles.description, { color: colors.textSecondary }]}>
-                    Véhicule : {activeVehicle.name}. Le suivi GPS continue en arrière-plan (notification).
+                    Le suivi GPS continue en arrière-plan (notification).
                   </Text>
 
                   <Pressable
@@ -2162,34 +2372,31 @@ export default function TripScreen() {
                         places={places}
                         onPickPlace={(p) => {
                           if (p.latitude != null && p.longitude != null) {
-                            setDestCoords({ latitude: p.latitude, longitude: p.longitude });
+                            const coords = { latitude: p.latitude, longitude: p.longitude };
+                            setDestCoords(coords);
+                            fitOriginAndDest(userLocation, coords);
                             if (userLocation) {
-                              void loadRouteAlternatives(userLocation, {
-                                latitude: p.latitude,
-                                longitude: p.longitude,
-                              });
+                              void loadRouteAlternatives(userLocation, coords);
                             }
                           }
                         }}
                         onPickCoords={(c) => {
                           if (Number.isFinite(c.latitude) && Number.isFinite(c.longitude)) {
-                            setDestCoords({ latitude: c.latitude, longitude: c.longitude });
+                            const coords = { latitude: c.latitude, longitude: c.longitude };
+                            setDestCoords(coords);
+                            fitOriginAndDest(userLocation, coords);
                             if (userLocation) {
-                              void loadRouteAlternatives(userLocation, {
-                                latitude: c.latitude,
-                                longitude: c.longitude,
-                              });
+                              void loadRouteAlternatives(userLocation, coords);
                             }
                           } else if (c.label) {
                             setDestination(c.label);
                             void forwardGeocode(c.label).then((g) => {
                               if (!g) return;
-                              setDestCoords({ latitude: g.latitude, longitude: g.longitude });
+                              const coords = { latitude: g.latitude, longitude: g.longitude };
+                              setDestCoords(coords);
+                              fitOriginAndDest(userLocation, coords);
                               if (userLocation) {
-                                void loadRouteAlternatives(userLocation, {
-                                  latitude: g.latitude,
-                                  longitude: g.longitude,
-                                });
+                                void loadRouteAlternatives(userLocation, coords);
                               }
                             });
                           }
@@ -2198,78 +2405,6 @@ export default function TripScreen() {
                     </View>
                   )}
                 </Card>
-
-                {startMode === 'nav' && routeOptions.length > 0 && (
-                  <Card style={{ marginBottom: 10 }}>
-                    <Text
-                      style={{
-                        color: colors.textSecondary,
-                        fontSize: 11,
-                        fontWeight: '700',
-                        marginBottom: 8,
-                      }}
-                    >
-                      ITINÉRAIRE
-                      {selectedRoute ? ` · ${selectedRoute.label}` : ''}
-                    </Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                      {routeOptions.map((r) => {
-                        const selected = r.id === selectedRoute?.id;
-                        return (
-                          <Pressable
-                            key={`panel-${r.id}`}
-                            onPress={() => applyRouteSelection(r)}
-                            style={{
-                              marginRight: 8,
-                              paddingHorizontal: 12,
-                              paddingVertical: 8,
-                              borderRadius: 10,
-                              borderWidth: 1,
-                              borderColor: selected ? colors.accent : colors.border,
-                              backgroundColor: selected ? colors.accent + '22' : colors.card,
-                            }}
-                          >
-                            <Text
-                              style={{
-                                color: selected ? colors.accent : colors.text,
-                                fontWeight: '800',
-                                fontSize: 12,
-                              }}
-                            >
-                              {r.label}
-                            </Text>
-                            <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
-                              {r.distanceKm.toFixed(1)} km
-                              {r.durationMinutes != null ? ` · ${r.durationMinutes} min` : ''}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </ScrollView>
-                  </Card>
-                )}
-
-                <Button
-                  title={
-                    startMode === 'free'
-                      ? 'Démarrer le suivi GPS libre'
-                      : routesLoading
-                        ? 'Calcul des itinéraires…'
-                        : selectedRoute
-                          ? `Démarrer · ${selectedRoute.label} + Maps`
-                          : destination.trim()
-                            ? 'Choisissez un itinéraire ci-dessus'
-                            : 'Démarrer + navigation Maps'
-                  }
-                  onPress={handleStartTrip}
-                  loading={isStarting}
-                  disabled={
-                    startMode === 'nav' &&
-                    (!!destination.trim() || !!destCoords) &&
-                    (routesLoading || (routeOptions.length > 1 && !selectedRouteId))
-                  }
-                  style={{ marginBottom: 8 }}
-                />
 
                 {startMode === 'nav' && destinationHabit && destinationHabit.count >= 1 && (
                   <Card style={{ marginBottom: 10 }}>
@@ -2397,13 +2532,6 @@ export default function TripScreen() {
                   </Card>
                 )}
 
-                {startMode === 'nav' && (
-                  <Button
-                    title="Ouvrir Google Maps seulement"
-                    variant="outline"
-                    onPress={handleOpenGoogleMaps}
-                  />
-                )}
                 {gpsSimEnabled && (
                   <Button
                     title={
@@ -2421,8 +2549,69 @@ export default function TripScreen() {
               </>
             )}
           </ScrollView>
+
+          {!activeTrip && activeVehicle ? (
+            <View
+              style={[
+                styles.stickyStart,
+                {
+                  paddingBottom: Math.max(12, insets.bottom + 8),
+                  backgroundColor: colors.background,
+                  borderTopColor: colors.border,
+                },
+              ]}
+            >
+              <Button
+                title={
+                  startMode === 'free'
+                    ? 'Démarrer le suivi GPS libre'
+                    : routesLoading
+                      ? 'Calcul des itinéraires…'
+                      : selectedRoute
+                        ? `Démarrer · ${selectedRoute.label} + Maps`
+                        : destination.trim()
+                          ? 'Choisissez un itinéraire sur la carte'
+                          : 'Démarrer + navigation Maps'
+                }
+                onPress={handleStartTrip}
+                loading={isStarting}
+                disabled={
+                  startMode === 'nav' &&
+                  (!!destination.trim() || !!destCoords) &&
+                  (routesLoading || (routeOptions.length > 1 && !selectedRouteId))
+                }
+              />
+            </View>
+          ) : null}
+
+          {!activeTrip ? (
+            <SpeedDialFab
+              fan
+              extraBottom={!activeTrip && activeVehicle ? 64 : 0}
+              actions={[
+                {
+                  key: 'maps',
+                  label: 'Ouvrir Maps',
+                  icon: 'map',
+                  onPress: () => void handleOpenGoogleMaps(),
+                },
+                {
+                  key: 'manual',
+                  label: 'Saisie manuelle',
+                  icon: 'create-outline',
+                  onPress: () => router.push('/trip/add' as never),
+                },
+                {
+                  key: 'import',
+                  label: 'Importer',
+                  icon: 'download-outline',
+                  onPress: () => router.push('/trip/import' as never),
+                },
+              ]}
+            />
+          ) : null}
         </>
-      ) : !activeVehicle ? (
+      ) : !activeVehicle && !historyAllVehicles ? (
         <View style={[styles.panel, styles.panelContent]}>
           <Card>
             <Text style={[styles.warning, { color: colors.warning }]}>
@@ -2466,6 +2655,70 @@ export default function TripScreen() {
           }
           ListHeaderComponent={
             <>
+              {vehicles.length > 0 && (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 8, marginBottom: 12, paddingRight: 8 }}
+                >
+                  <Pressable
+                    onPress={() => {
+                      setHistoryAllVehicles(true);
+                    }}
+                    style={[
+                      styles.filterChip,
+                      {
+                        borderColor: historyAllVehicles ? colors.accent : colors.border,
+                        backgroundColor: historyAllVehicles
+                          ? colors.accent + '22'
+                          : colors.card,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={{
+                        color: historyAllVehicles ? colors.accent : colors.text,
+                        fontWeight: '700',
+                        fontSize: 13,
+                      }}
+                    >
+                      Toutes
+                    </Text>
+                  </Pressable>
+                  {vehicles.map((v) => {
+                    const selected = !historyAllVehicles && activeVehicle?.id === v.id;
+                    return (
+                      <Pressable
+                        key={v.id}
+                        onPress={() => {
+                          setHistoryAllVehicles(false);
+                          void selectVehicle(v.id);
+                        }}
+                        style={[
+                          styles.filterChip,
+                          {
+                            borderColor: selected ? colors.accent : colors.border,
+                            backgroundColor: selected ? colors.accent + '22' : colors.card,
+                            maxWidth: 140,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={{
+                            color: selected ? colors.accent : colors.text,
+                            fontWeight: '700',
+                            fontSize: 13,
+                          }}
+                          numberOfLines={1}
+                        >
+                          {v.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              )}
+
               {pending.length > 0 && (
                 <View style={{ marginBottom: 16 }}>
                   <Text style={[styles.sectionTitle, { color: colors.text }]}>
@@ -2524,7 +2777,7 @@ export default function TripScreen() {
                 </View>
               )}
 
-              {sinceFill?.lastFill && (
+              {sinceFill?.lastFill && activeVehicle && !historyAllVehicles && (
                 <Card
                   style={{
                     marginBottom: 14,
@@ -2555,10 +2808,6 @@ export default function TripScreen() {
                     const toneColor = fuelToneColor(tone, colors);
                     return (
                       <View style={{ marginBottom: 10 }}>
-                        <Text style={{ color: toneColor, fontWeight: '800', fontSize: 18, marginBottom: 6 }}>
-                          ~{rem.toFixed(1)} L restants
-                          {sinceFill.rangeKm > 0 ? ` · ~${Math.round(sinceFill.rangeKm)} km` : ''}
-                        </Text>
                         <FuelGaugeSlider
                           compact
                           requireConfirm
@@ -2760,6 +3009,48 @@ const styles = StyleSheet.create({
   },
   panel: { flex: 1 },
   panelContent: { padding: 16, paddingBottom: 40 },
+  stickyStart: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    zIndex: 30,
+  },
+  vehicleFloat: {
+    position: 'absolute',
+    top: 10,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(15,23,42,0.82)',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    maxWidth: '70%',
+    zIndex: 20,
+  },
+  vehicleFloatText: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  activeBtnRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  activeBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    minHeight: 46,
+  },
   toolbar: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   navBar: {
     flexDirection: 'row',

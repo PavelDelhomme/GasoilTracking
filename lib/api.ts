@@ -237,6 +237,7 @@ export async function pollQrLogin(challengeId: string): Promise<{
   );
   const data = await res.json().catch(() => ({}));
   if (res.status === 404) return { status: 'missing', error: data.error };
+  if (res.status === 429) return { status: 'rate_limited', error: data.error };
   if (!res.ok && res.status !== 410) {
     throw new Error(data.error || 'Erreur QR');
   }

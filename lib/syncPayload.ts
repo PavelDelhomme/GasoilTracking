@@ -6,6 +6,8 @@ import { compactRoutePoints, parseRoutePoints, type RoutePoint } from '@/lib/cal
 import type { AppDataSnapshot } from '@/lib/dataSnapshot';
 import type { Trip } from '@/types';
 
+export { snapshotContentHash } from '@/lib/snapshotHash';
+
 const SYNC_SOFT_MAX_BYTES = 900_000;
 const SYNC_HARD_MAX_BYTES = 1_600_000;
 

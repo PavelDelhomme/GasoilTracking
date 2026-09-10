@@ -13,8 +13,15 @@ import {
   calculateRouteDistance,
   compactRoutePointsJson,
   estimateCost,
+  parseRoutePoints,
 } from '@/lib/calculations';
-import { estimateTripFuelLiters } from '@/lib/consumptionModel';
+import {
+  averageMovingSpeedKmh,
+  accelAggressionFactor,
+  estimateTripFuelLiters,
+  idleRatioFromPoints,
+  stopAndGoFactor,
+} from '@/lib/consumptionModel';
 import { buildGoogleMapsDirUrl } from '@/lib/mapsNavigation';
 
 let watchId: number | null = null;
@@ -61,8 +68,13 @@ async function flushPending() {
 
       routePoints = compactRoutePointsJson(routePoints);
       const distanceKm = calculateRouteDistance(routePoints);
+      const pts = parseRoutePoints(routePoints);
       const fuelUsed = estimateTripFuelLiters(vehicle, distanceKm, {
         learnedFactor: vehicle.consumptionLearnFactor,
+        avgSpeedKmh: averageMovingSpeedKmh(distanceKm, pts),
+        idleRatio: idleRatioFromPoints(pts),
+        accelFactor: accelAggressionFactor(pts),
+        stopGoFactor: stopAndGoFactor(pts),
       });
       const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
 

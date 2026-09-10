@@ -16,6 +16,10 @@ type Props = {
   disabled?: boolean;
   /** Mode Accueil : 2 FAB visibles (plein + trajet) sans menu « + » */
   dual?: boolean;
+  /** Éventail (arc) au lieu d’une pile verticale */
+  fan?: boolean;
+  /** Décalage bas supplémentaire (ex. bouton sticky) */
+  extraBottom?: number;
 };
 
 function ActionIcon({
@@ -34,13 +38,13 @@ function ActionIcon({
 }
 
 /**
- * FAB actions — dual (plein + trajet) ou speed-dial « + ».
+ * FAB actions — dual (plein + trajet), éventail, ou speed-dial « + ».
  */
-export function SpeedDialFab({ actions, disabled, dual }: Props) {
+export function SpeedDialFab({ actions, disabled, dual, fan, extraBottom = 0 }: Props) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
-  const bottom = Math.max(16, insets.bottom + 8) + 56;
+  const bottom = Math.max(16, insets.bottom + 8) + 56 + extraBottom;
 
   if (dual && actions.length >= 1) {
     const primary = actions[0];
@@ -95,30 +99,63 @@ export function SpeedDialFab({ actions, disabled, dual }: Props) {
     fn();
   };
 
+  /** Positions éventail : arc haut-gauche depuis le FAB (bas-droite). */
+  const fanSlot = (i: number, n: number) => {
+    const radius = 78;
+    const start = Math.PI / 2 + 0.15; // un peu à gauche du haut
+    const end = Math.PI - 0.12; // presque horizontal gauche
+    const t = n <= 1 ? 0.5 : i / (n - 1);
+    const angle = start + t * (end - start);
+    return {
+      right: Math.max(0, -Math.cos(angle) * radius),
+      bottom: Math.max(0, Math.sin(angle) * radius),
+    };
+  };
+
   return (
     <View pointerEvents="box-none" style={[styles.wrap, { bottom }]}>
       {open && <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />}
 
       {open &&
-        actions.map((a, i) => (
-          <Pressable
-            key={a.key}
-            onPress={() => run(a.onPress)}
-            style={[
-              styles.actionRow,
-              {
-                bottom: 72 + i * 58,
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Text style={[styles.actionLabel, { color: colors.text }]}>{a.label}</Text>
-            <View style={[styles.miniFab, { backgroundColor: colors.accent }]}>
-              <ActionIcon name={a.icon} color="#fff" />
-            </View>
-          </Pressable>
-        ))}
+        actions.map((a, i) => {
+          const slot = fan ? fanSlot(i, actions.length) : null;
+          return (
+            <Pressable
+              key={a.key}
+              onPress={() => run(a.onPress)}
+              style={[
+                fan ? styles.fanItem : styles.actionRow,
+                fan
+                  ? {
+                      right: slot!.right,
+                      bottom: 58 + slot!.bottom,
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    }
+                  : {
+                      bottom: 72 + i * 58,
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+              ]}
+            >
+              {!fan && (
+                <Text style={[styles.actionLabel, { color: colors.text }]}>{a.label}</Text>
+              )}
+              <View style={[styles.miniFab, { backgroundColor: colors.accent }]}>
+                <ActionIcon name={a.icon} color="#fff" />
+              </View>
+              {fan && (
+                <Text
+                  style={[styles.fanLabel, { color: colors.text, backgroundColor: colors.card }]}
+                  numberOfLines={1}
+                >
+                  {a.label}
+                </Text>
+              )}
+            </Pressable>
+          );
+        })}
 
       <Pressable
         disabled={disabled}
@@ -271,6 +308,21 @@ const styles = StyleSheet.create({
     paddingRight: 6,
     borderRadius: 28,
     borderWidth: 1,
+  },
+  fanItem: {
+    position: 'absolute',
+    alignItems: 'center',
+    gap: 4,
+    maxWidth: 110,
+  },
+  fanLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    overflow: 'hidden',
+    textAlign: 'center',
   },
   actionLabel: { fontSize: 14, fontWeight: '700' },
   miniFab: {

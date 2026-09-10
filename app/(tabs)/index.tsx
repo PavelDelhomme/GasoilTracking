@@ -339,10 +339,33 @@ export default function HomeScreen() {
                     notify('Réservoir', `${L.toFixed(1)} L`);
                   }}
                 />
+                {(() => {
+                  const rem =
+                    homeFuelDraft ??
+                    activeVehicle.estimatedFuelLiters ??
+                    sinceFill?.fuelRemainingEst ??
+                    null;
+                  const rangeKm = sinceFill?.rangeKm ?? 0;
+                  if (rem == null) return null;
+                  return (
+                    <Text
+                      style={{
+                        color: fuelColor,
+                        fontWeight: '800',
+                        fontSize: 15,
+                        textAlign: 'center',
+                        marginTop: 6,
+                      }}
+                    >
+                      ~{rem.toFixed(1)} L
+                      {rangeKm > 0 ? ` · ~${Math.round(rangeKm)} km` : ''}
+                    </Text>
+                  );
+                })()}
               </View>
               {vehicles.length > 1 && (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                  {vehicles.map((v) => {
+                <View style={styles.vehChipRow}>
+                  {(vehicles.length > 3 ? vehicles.slice(0, 3) : vehicles).map((v) => {
                     const selected = v.id === activeVehicle.id;
                     return (
                       <Pressable
@@ -356,6 +379,7 @@ export default function HomeScreen() {
                           {
                             borderColor: selected ? colors.accent : colors.border,
                             backgroundColor: selected ? colors.accent + '22' : colors.background,
+                            flexShrink: 1,
                           },
                         ]}
                       >
@@ -372,6 +396,32 @@ export default function HomeScreen() {
                       </Pressable>
                     );
                   })}
+                  {vehicles.length > 3 && (
+                    <Pressable
+                      onPress={() => router.push('/(tabs)/vehicles' as never)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Voir tous les véhicules"
+                      style={[
+                        styles.vehChip,
+                        {
+                          borderColor: colors.border,
+                          backgroundColor: colors.background,
+                          flexShrink: 0,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          color: colors.accent,
+                          fontWeight: '700',
+                          fontSize: 12,
+                        }}
+                        numberOfLines={1}
+                      >
+                        Voir tous
+                      </Text>
+                    </Pressable>
+                  )}
                 </View>
               )}
             </Card>
@@ -747,7 +797,10 @@ export default function HomeScreen() {
                     router.push('/(tabs)/vehicles' as never);
                     return;
                   }
-                  router.push('/(tabs)/trip');
+                  router.push({
+                    pathname: '/(tabs)/trip',
+                    params: { tab: 'live', reset: '1' },
+                  } as never);
                 },
               },
         ]}
@@ -781,7 +834,15 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 10,
     borderWidth: 1,
-    maxWidth: '48%',
+    maxWidth: 120,
+    flexShrink: 1,
+  },
+  vehChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    gap: 6,
+    marginTop: 8,
+    alignItems: 'center',
   },
   tripBanner: { marginBottom: 16, borderWidth: 2 },
   tripHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },

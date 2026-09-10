@@ -228,6 +228,18 @@ export function FuelGaugeSlider({
           },
         ]}
       >
+        {requireConfirm && locked ? (
+          <Pressable
+            onPress={startEdit}
+            hitSlop={10}
+            style={styles.editIconBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Modifier le niveau de carburant"
+          >
+            <Ionicons name="pencil" size={16} color={colors.accent} />
+          </Pressable>
+        ) : null}
+
         <View
           ref={dialRef}
           collapsable={false}
@@ -377,66 +389,48 @@ export function FuelGaugeSlider({
       </View>
 
       {requireConfirm ? (
-        <View style={styles.confirmRow}>
-          {locked ? (
+        editing ? (
+          <View style={styles.confirmRow}>
             <Pressable
-              onPress={startEdit}
-              style={[
-                styles.confirmBtn,
-                styles.confirmBtnWide,
-                { borderColor: colors.border, backgroundColor: colors.background },
-              ]}
+              onPress={cancelEdit}
+              style={[styles.confirmBtn, { borderColor: colors.border }]}
               accessibilityRole="button"
-              accessibilityLabel="Modifier le niveau de carburant"
+              accessibilityLabel="Annuler la modification du niveau"
             >
-              <Ionicons name="create-outline" size={15} color={colors.accent} />
-              <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }}>
-                Modifier
+              <Text
+                style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 13 }}
+                numberOfLines={1}
+              >
+                Annuler
               </Text>
             </Pressable>
-          ) : (
-            <>
-              <Pressable
-                onPress={cancelEdit}
-                style={[styles.confirmBtn, { borderColor: colors.border }]}
-                accessibilityRole="button"
-                accessibilityLabel="Annuler la modification du niveau"
+            <Pressable
+              onPress={confirmEdit}
+              disabled={needsGesture && !gestured}
+              style={[
+                styles.confirmBtn,
+                {
+                  borderColor: fillColor,
+                  backgroundColor: needsGesture && !gestured ? colors.border : fillColor,
+                  opacity: needsGesture && !gestured ? 0.5 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={
+                needsGesture && !gestured
+                  ? 'Réglez d’abord le niveau'
+                  : `Valider le niveau à ${pct} pour cent`
+              }
+            >
+              <Text
+                style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}
+                numberOfLines={1}
               >
-                <Text
-                  style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 13 }}
-                  numberOfLines={1}
-                >
-                  Annuler
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={confirmEdit}
-                disabled={needsGesture && !gestured}
-                style={[
-                  styles.confirmBtn,
-                  {
-                    borderColor: fillColor,
-                    backgroundColor: needsGesture && !gestured ? colors.border : fillColor,
-                    opacity: needsGesture && !gestured ? 0.5 : 1,
-                  },
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  needsGesture && !gestured
-                    ? 'Réglez d’abord le niveau'
-                    : `Valider le niveau à ${pct} pour cent`
-                }
-              >
-                <Text
-                  style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}
-                  numberOfLines={1}
-                >
-                  {needsGesture && !gestured ? 'Régler' : 'OK'}
-                </Text>
-              </Pressable>
-            </>
-          )}
-        </View>
+                {needsGesture && !gestured ? 'Régler' : 'OK'}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null
       ) : (
         <Text
           style={{
@@ -461,6 +455,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: 8,
     alignItems: 'center',
+    position: 'relative',
+  },
+  editIconBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 2,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   dial: {
     alignSelf: 'center',
@@ -507,11 +513,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 5,
-  },
-  confirmBtnWide: {
-    flexGrow: 1,
-    flexBasis: 'auto',
-    width: '100%',
-    marginHorizontal: 0,
   },
 });

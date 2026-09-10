@@ -294,6 +294,19 @@ const authLimiter = rateLimit({
   message: { error: 'Trop de tentatives. Réessayez dans 15 minutes.' },
 });
 
+/** Poll QR web (~1,5 s) : large, séparé du login pour ne pas saturer authLimiter. */
+const qrPollLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const cid = String(req.query?.challengeId || '').trim();
+    return cid ? `qr-poll:${cid}` : `qr-poll-ip:${clientIp(req)}`;
+  },
+  message: { error: 'Trop de requêtes QR. Réessayez dans un instant.' },
+});
+
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
@@ -1019,7 +1032,7 @@ app.post('/api/auth/qr/approve', auth, authLimiter, (req, res) => {
 });
 
 /** Web : poll jusqu’à obtenir la session. */
-app.get('/api/auth/qr/poll', authLimiter, (req, res) => {
+app.get('/api/auth/qr/poll', qrPollLimiter, (req, res) => {
   const challengeId = String(req.query?.challengeId || '').trim();
   if (!challengeId) {
     return res.status(400).json({ error: 'challengeId requis' });

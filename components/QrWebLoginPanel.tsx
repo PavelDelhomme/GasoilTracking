@@ -27,11 +27,14 @@ export function QrWebLoginPanel({ onLoggedIn }: Props) {
   const [status, setStatus] = useState<'idle' | 'pending' | 'done' | 'expired' | 'error'>('idle');
   const [error, setError] = useState('');
   const [secondsLeft, setSecondsLeft] = useState(0);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const delayRef = useRef(1500);
+  const stoppedRef = useRef(false);
 
   const stop = useCallback(() => {
-    if (pollRef.current) clearInterval(pollRef.current);
+    stoppedRef.current = true;
+    if (pollRef.current) clearTimeout(pollRef.current);
     if (tickRef.current) clearInterval(tickRef.current);
     pollRef.current = null;
     tickRef.current = null;
@@ -39,6 +42,8 @@ export function QrWebLoginPanel({ onLoggedIn }: Props) {
 
   const begin = useCallback(async () => {
     stop();
+    stoppedRef.current = false;
+    delayRef.current = 1500;
     setError('');
     setStatus('pending');
     try {
@@ -56,29 +61,46 @@ export function QrWebLoginPanel({ onLoggedIn }: Props) {
         }
       }, 1000);
 
-      pollRef.current = setInterval(() => {
-        void (async () => {
-          try {
-            const res = await pollQrLogin(started.challengeId);
-            if (res.status === 'pending') return;
-            if (res.status === 'expired') {
-              setStatus('expired');
+      const schedulePoll = () => {
+        if (stoppedRef.current) return;
+        pollRef.current = setTimeout(() => {
+          void (async () => {
+            if (stoppedRef.current) return;
+            try {
+              const res = await pollQrLogin(started.challengeId);
+              if (stoppedRef.current) return;
+              if (res.status === 'rate_limited') {
+                delayRef.current = Math.min(delayRef.current * 2, 12_000);
+                schedulePoll();
+                return;
+              }
+              delayRef.current = 1500;
+              if (res.status === 'pending') {
+                schedulePoll();
+                return;
+              }
+              if (res.status === 'expired') {
+                setStatus('expired');
+                stop();
+                return;
+              }
+              if (res.status === 'approved' && res.token && res.user) {
+                stop();
+                setStatus('done');
+                await applySession(res.token, res.user, res.refreshToken);
+                await onLoggedIn();
+                return;
+              }
+              schedulePoll();
+            } catch (e) {
+              setError(e instanceof Error ? e.message : 'Erreur de suivi QR');
+              setStatus('error');
               stop();
-              return;
             }
-            if (res.status === 'approved' && res.token && res.user) {
-              stop();
-              setStatus('done');
-              await applySession(res.token, res.user, res.refreshToken);
-              await onLoggedIn();
-            }
-          } catch (e) {
-            setError(e instanceof Error ? e.message : 'Erreur de suivi QR');
-            setStatus('error');
-            stop();
-          }
-        })();
-      }, 1500);
+          })();
+        }, delayRef.current);
+      };
+      schedulePoll();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Impossible de générer le QR');
       setStatus('error');

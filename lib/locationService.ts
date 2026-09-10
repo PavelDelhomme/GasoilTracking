@@ -16,7 +16,7 @@ import {
   parseRoutePoints,
   type RoutePoint,
 } from '@/lib/calculations';
-import { estimateTripFuelLiters } from '@/lib/consumptionModel';
+import { estimateTripFuelLiters, accelAggressionFactor, stopAndGoFactor, idleRatioFromPoints, averageMovingSpeedKmh } from '@/lib/consumptionModel';
 import { evaluateGpsSample } from '@/lib/gpsTracking';
 import { buildGoogleMapsDirUrl } from '@/lib/mapsNavigation';
 
@@ -124,6 +124,10 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
       const distanceKm = calculateRouteDistance(routePoints);
       const fuelUsed = estimateTripFuelLiters(vehicle, distanceKm, {
         learnedFactor: vehicle.consumptionLearnFactor,
+        avgSpeedKmh: averageMovingSpeedKmh(distanceKm, points),
+        idleRatio: idleRatioFromPoints(points),
+        accelFactor: accelAggressionFactor(points),
+        stopGoFactor: stopAndGoFactor(points),
       });
       const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
 

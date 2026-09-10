@@ -1,5 +1,6 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
+import * as Network from 'expo-network';
 import {
   clearSession,
   fetchMe,
@@ -49,6 +50,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [pendingRegistrations, setPendingRegistrations] = useState<PendingRegistrationSummary[]>(
     []
   );
+  const wasOnlineRef = useRef<boolean | null>(null);
+  const syncDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshMe = useCallback(async () => {
     const token = await getToken();
@@ -75,6 +78,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  /** Sync seulement si connecté + pas de trajet actif (hash égal → skipped dans backup). */
+  const syncIfLoggedInIdle = useCallback(async () => {
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const live = await getActiveTripLite();
+      if (live?.isActive) return;
+      await syncPreferNewer();
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       const token = await getToken();
@@ -95,32 +111,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         void refreshMe();
-        void (async () => {
-          try {
-            const live = await getActiveTripLite();
-            // Ne pas sync pendant un trajet (y compris en pause / plein en cours)
-            if (live?.isActive) return;
-            await syncPreferNewer();
-          } catch {
-            /* ignore */
-          }
-        })();
+        void syncIfLoggedInIdle();
       }
     });
     return () => sub.remove();
-  }, [refreshMe]);
+  }, [refreshMe, syncIfLoggedInIdle]);
 
-  // Web : resync au chargement (IndexedDB souvent en retard vs téléphone) + quand online
+  // Reconnect réseau (natif + web) : sync si session + idle.
   useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-    const run = () => {
-      void refreshMe();
-      void syncPreferNewer().catch(() => {});
+    const onNetwork = (state: { isConnected?: boolean | null; isInternetReachable?: boolean | null }) => {
+      const online = !!(state.isConnected && state.isInternetReachable !== false);
+      if (online && wasOnlineRef.current === false) {
+        if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
+        syncDebounceRef.current = setTimeout(() => {
+          void refreshMe();
+          void syncIfLoggedInIdle();
+        }, 800);
+      }
+      wasOnlineRef.current = online;
     };
-    run();
-    window.addEventListener('online', run);
-    return () => window.removeEventListener('online', run);
-  }, [refreshMe]);
+
+    const sub = Network.addNetworkStateListener(onNetwork);
+    void Network.getNetworkStateAsync()
+      .then(onNetwork)
+      .catch(() => {
+        /* ignore */
+      });
+
+    return () => {
+      sub.remove();
+      if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
+    };
+  }, [refreshMe, syncIfLoggedInIdle]);
+
+  // Web : resync au chargement (IndexedDB souvent en retard vs téléphone)
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    void syncIfLoggedInIdle();
+  }, [syncIfLoggedInIdle]);
 
   const syncNow = useCallback(async () => {
     const token = await getToken();

@@ -71,7 +71,7 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 export default function BudgetScreen() {
-  const { budgetStatuses, activeVehicle, vehicles, refresh } = useApp();
+  const { budgetStatuses, activeVehicle, vehicles, refresh, selectVehicle } = useApp();
   const { colors } = useTheme();
   const { showToast } = useToast();
   const { countryCode, formatPerLiter, locale } = useLocale();
@@ -94,6 +94,8 @@ export default function BudgetScreen() {
   const [zoneHint, setZoneHint] = useState('Autour de votre position GPS');
   const [fuelOpen, setFuelOpen] = useState(true);
   const [budgetsOpen, setBudgetsOpen] = useState(true);
+  /** null = Toutes ; sinon véhicule filtré (selectVehicle si ≠ actif) */
+  const [budgetAllVehicles, setBudgetAllVehicles] = useState(false);
 
   const persistFuelZone = async (z: FuelZone) => {
     setFuelZone(z);
@@ -101,21 +103,28 @@ export default function BudgetScreen() {
   };
 
   const loadExtra = useCallback(async () => {
+    const scopeId = budgetAllVehicles ? undefined : activeVehicle?.id;
     const [p, r, allFills] = await Promise.all([
       getPlaces(),
-      getRecurringRoutes(activeVehicle?.id),
+      getRecurringRoutes(scopeId),
       getFillUps(),
     ]);
     setPlaces(p);
     setRoutes(r);
     setAllFillsForCompare(allFills);
 
+    const fillsForBars = budgetAllVehicles
+      ? allFills
+      : allFills.filter((f) => !activeVehicle || f.vehicleId === activeVehicle.id);
+
     const monthMap = new Map<string, number>();
-    const byVehicle: { month: string; vehicleId: number; spent: number }[] = [];
+    for (const f of fillsForBars) {
+      const month = monthKeyFromDate(f.date);
+      monthMap.set(month, (monthMap.get(month) || 0) + f.totalCost);
+    }
     const vehMap = new Map<string, number>();
     for (const f of allFills) {
       const month = monthKeyFromDate(f.date);
-      monthMap.set(month, (monthMap.get(month) || 0) + f.totalCost);
       const vk = `${month}:${f.vehicleId}`;
       vehMap.set(vk, (vehMap.get(vk) || 0) + f.totalCost);
     }
@@ -144,13 +153,14 @@ export default function BudgetScreen() {
       pick = m[m.length - 1]?.month || current;
       return pick;
     });
-    const fills = await getFillUps(activeVehicle?.id);
-    setMonthFillUps(fills.filter((f) => monthKeyFromDate(f.date) === pick));
-  }, [activeVehicle?.id]);
+    setMonthFillUps(fillsForBars.filter((f) => monthKeyFromDate(f.date) === pick));
+  }, [activeVehicle?.id, budgetAllVehicles]);
 
   const selectMonth = async (month: string) => {
     setSelectedMonth(month);
-    const fills = await getFillUps(activeVehicle?.id);
+    const fills = budgetAllVehicles
+      ? await getFillUps()
+      : await getFillUps(activeVehicle?.id);
     setMonthFillUps(fills.filter((f) => monthKeyFromDate(f.date) === month));
   };
 
@@ -183,6 +193,11 @@ export default function BudgetScreen() {
       })();
     }, [loadExtra])
   );
+
+  // Chips véhicule / Toutes : recharger hors focus effect
+  React.useEffect(() => {
+    void loadExtra();
+  }, [budgetAllVehicles, activeVehicle?.id, loadExtra]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -396,7 +411,11 @@ export default function BudgetScreen() {
     : currentMonthSpent > monthlyAllocation * 0.8 && monthlyAllocation > 0
       ? colors.warning
       : colors.success;
-  const outlookVehicles = activeVehicle ? [activeVehicle] : vehicles;
+  const outlookVehicles = budgetAllVehicles
+    ? vehicles
+    : activeVehicle
+      ? [activeVehicle]
+      : vehicles;
   const outlook = computeBudgetOutlook({
     allocation: monthlyAllocation,
     spent: currentMonthSpent,
@@ -430,13 +449,82 @@ export default function BudgetScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         keyboardShouldPersistTaps="handled"
       >
-        <Card style={styles.infoCard}>
-          <Text style={[styles.infoTitle, { color: colors.text }]}>Budget & planification</Text>
-          <Text style={[styles.infoText, { color: colors.textSecondary }]}>
-            Budgets, lieux, trajets réguliers et stations à proximité.
-            {activeVehicle ? ` Véhicule : ${activeVehicle.name}` : ''}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+          <Pressable
+            onPress={() => setBudgetAllVehicles(true)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: budgetAllVehicles }}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: 18,
+              borderWidth: 1,
+              borderColor: budgetAllVehicles ? colors.accent : colors.border,
+              backgroundColor: budgetAllVehicles ? colors.accent + '22' : colors.card,
+            }}
+          >
+            <Text
+              style={{
+                color: budgetAllVehicles ? colors.accent : colors.text,
+                fontWeight: '700',
+                fontSize: 13,
+              }}
+            >
+              Toutes
+            </Text>
+          </Pressable>
+          {vehicles.map((v) => {
+            const selected = !budgetAllVehicles && activeVehicle?.id === v.id;
+            return (
+              <Pressable
+                key={v.id}
+                onPress={() => {
+                  setBudgetAllVehicles(false);
+                  if (activeVehicle?.id !== v.id) void selectVehicle(v.id);
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                accessibilityLabel={`Véhicule ${v.name}`}
+                style={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                  borderRadius: 18,
+                  borderWidth: 1,
+                  borderColor: selected ? colors.accent : colors.border,
+                  backgroundColor: selected ? colors.accent + '22' : colors.card,
+                  maxWidth: 140,
+                }}
+              >
+                <Text
+                  style={{
+                    color: selected ? colors.accent : colors.text,
+                    fontWeight: '700',
+                    fontSize: 13,
+                  }}
+                  numberOfLines={1}
+                >
+                  {v.name}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        {!budgetAllVehicles && activeVehicle ? (
+          <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 10 }}>
+            Budgets, lieux et stations — {activeVehicle.name}
           </Text>
-        </Card>
+        ) : budgetAllVehicles && activeVehicle ? (
+          <Pressable
+            onPress={() => setBudgetAllVehicles(false)}
+            style={{ marginBottom: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Revenir à ${activeVehicle.name}`}
+          >
+            <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }}>
+              ← Revenir à {activeVehicle.name}
+            </Text>
+          </Pressable>
+        ) : null}
 
         {/* Visu mensuelle */}
         <Text style={[styles.section, { color: colors.text }]}>Dépenses par mois</Text>

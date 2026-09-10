@@ -59,11 +59,30 @@ export function samplePassThroughViasFromRoute(
   return picked.sort((x, y) => x.idx - y.idx).map((x) => x.p).slice(0, max);
 }
 
-/** Waypoints Maps : vias explicites, sinon échantillon géométrie. */
+export type RouteViaKind = 'fastest' | 'eco' | 'alternate';
+
+/**
+ * Vias géométrie uniquement pour éco / alternatif (écart significatif).
+ * « Plus rapide » quasi droit → aucun via (évite de tromper Google Maps).
+ */
+export function shouldSampleGeometryVias(kind?: RouteViaKind | null): boolean {
+  return kind === 'eco' || kind === 'alternate';
+}
+
+/** Waypoints Maps : vias explicites (éco/alt), sinon échantillon géométrie. */
 export function buildViaWaypoints(
   routeCoords: ViaLatLng[] | undefined,
-  explicitVia?: ViaLatLng[]
+  explicitVia?: ViaLatLng[],
+  opts?: { kind?: RouteViaKind | null }
 ): ViaLatLng[] {
+  const kind = opts?.kind;
+  // Plus rapide : aucun via (évite de tromper Google sur la destination).
+  if (kind === 'fastest') return [];
+  // Legacy sans kind : vias OSRM explicites seulement, pas d’échantillon.
+  if (kind == null) {
+    return explicitVia?.length ? explicitVia.slice(0, 2) : [];
+  }
+  if (!shouldSampleGeometryVias(kind)) return [];
   if (explicitVia?.length) return explicitVia.slice(0, 2);
   return samplePassThroughViasFromRoute(routeCoords, 2);
 }

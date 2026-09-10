@@ -8,7 +8,7 @@ import {
   type AppDataSnapshot,
 } from '@/lib/dataSnapshot';
 import { repairFillUpVehiclesAndBudgets } from '@/lib/repairFillUpVehicles';
-import { prepareSnapshotForPush, slimSnapshotAggressive } from '@/lib/syncPayload';
+import { prepareSnapshotForPush, slimSnapshotAggressive, snapshotContentHash } from '@/lib/syncPayload';
 import { getActiveTripLite } from '@/lib/database';
 
 const BACKUP_KEY = 'gasoil_local_backup_v1';
@@ -250,6 +250,14 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
   const remote = await fetchSync();
   const remoteSnap = normalizeSnapshot(remote?.data);
   const local = await collectSnapshot();
+  // Identiques (hors exportedAt / tracés GPS) → pas de push cosmétique.
+  {
+    const localHash = snapshotContentHash(local);
+    const remoteHash = snapshotContentHash(remoteSnap);
+    if (remoteSnap && localHash && localHash === remoteHash) {
+      return 'skipped';
+    }
+  }
   // collectSnapshot() tamponne exportedAt=now → ne pas s’en servir pour décider push/pull
   // (sinon un vieux IndexedDB web écrase toujours le cloud du téléphone).
   const localAt = snapshotActivityAt(local);

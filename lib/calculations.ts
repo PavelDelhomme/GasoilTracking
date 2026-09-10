@@ -24,8 +24,11 @@ import {
 } from '@/lib/gpsTracking';
 import {
   averageMovingSpeedKmh,
+  accelAggressionFactor,
   estimateTripFuelLiters,
+  idleRatioFromPoints,
   movingDurationMinutes,
+  stopAndGoFactor,
 } from '@/lib/consumptionModel';
 import { resolveFillUpDistanceKm } from '@/lib/fillUpDistance';
 
@@ -512,13 +515,17 @@ export function calculateTripStats(
   endTime?: string | null,
   routePointsJson?: string
 ): { fuelUsed: number; cost: number; durationMinutes: number; movingSpeedKmh: number } {
+  const points = routePointsJson ? parseRoutePoints(routePointsJson) : [];
   const fuelUsed = estimateTripFuelLiters(vehicle, distanceKm, {
     learnedFactor: vehicle.consumptionLearnFactor,
+    avgSpeedKmh: points.length >= 2 ? averageMovingSpeedKmh(distanceKm, points) : undefined,
+    idleRatio: idleRatioFromPoints(points),
+    accelFactor: accelAggressionFactor(points),
+    stopGoFactor: stopAndGoFactor(points),
   });
   const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
   const endMs = endTime ? new Date(endTime).getTime() : Date.now();
   const wallMinutes = Math.max(0, (endMs - new Date(startTime).getTime()) / (1000 * 60));
-  const points = routePointsJson ? parseRoutePoints(routePointsJson) : [];
   const movingMins = movingDurationMinutes(points);
   const durationMinutes = movingMins > 0.5 ? movingMins : wallMinutes;
   const movingSpeedKmh =

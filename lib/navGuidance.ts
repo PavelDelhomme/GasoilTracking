@@ -14,6 +14,9 @@ export type NavGuidance = {
   remainingKm: number;
 };
 
+/** Écart max au corridor prévu avant de considérer un autre itinéraire volontaire. */
+export const OFF_CORRIDOR_KM = 0.18;
+
 /** Cap géodésique from→to en degrés [0, 360). */
 export function bearingDeg(from: Geo, to: Geo): number {
   const φ1 = (from.latitude * Math.PI) / 180;
@@ -38,11 +41,13 @@ function formatRemainingKm(km: number): string {
   return `${km.toFixed(1)} km`;
 }
 
-function turnHint(rel: number): string {
+function turnHint(rel: number, offCorridor: boolean): string {
   const a = Math.abs(rel);
   if (a < 25) return 'Tout droit';
   if (a < 65) return rel > 0 ? 'Légèrement à droite' : 'Légèrement à gauche';
   if (a < 120) return rel > 0 ? 'Tournez à droite' : 'Tournez à gauche';
+  // Hors corridor volontaire : ne pas crier « Demi-tour »
+  if (offCorridor) return 'Vers la destination';
   return 'Demi-tour';
 }
 
@@ -70,6 +75,7 @@ export function computeNavGuidance(opts: {
 
   // Point cible : prochain point du tracé prévu à > 40 m, sinon destination
   let target: Geo | null = null;
+  let nearestDistKm = Infinity;
   if (route.length >= 2) {
     let nearest = 0;
     let best = Infinity;
@@ -85,6 +91,7 @@ export function computeNavGuidance(opts: {
         nearest = i;
       }
     }
+    nearestDistKm = best;
     for (let i = nearest; i < route.length; i++) {
       const d = haversineDistance(
         user.latitude,
@@ -98,6 +105,11 @@ export function computeNavGuidance(opts: {
       }
     }
     if (!target) target = route[route.length - 1];
+  }
+  const offCorridor = route.length >= 2 && nearestDistKm > OFF_CORRIDOR_KM;
+  // Autre itinéraire volontaire → viser la destination, pas le corridor abandonné
+  if (offCorridor && destination) {
+    target = destination;
   }
   if (!target && destination) target = destination;
   if (!target) {
@@ -122,8 +134,8 @@ export function computeNavGuidance(opts: {
 
   return {
     arrowRotateDeg: rel,
-    title: turnHint(rel),
-    subtitle: destinationLabel?.trim() || 'Destination',
+    title: turnHint(rel, offCorridor),
+    subtitle: destinationLabel?.trim() || (offCorridor ? 'Itinéraire libre' : 'Destination'),
     distanceLabel: formatRemainingKm(remainingKm),
     remainingKm,
   };
