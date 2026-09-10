@@ -63,6 +63,7 @@ import {
   estimateCost,
   formatEuro,
   formatDistance,
+  formatSpeedKmh,
   getSinceLastFillStats,
   haversineDistance,
   parseRoutePoints,
@@ -1268,7 +1269,7 @@ export default function TripScreen() {
 
       const noteParts = [
         trip.note,
-        speed > 0 ? `Vitesse moy. ${speed.toFixed(0)} km/h` : null,
+        speed > 0 ? `Vitesse moy. ${formatSpeedKmh(speed)}` : null,
         ascentM > 20 ? `D+ ${ascentM} m` : null,
         priceAtTrip > 0
           ? `${
@@ -1699,7 +1700,7 @@ export default function TripScreen() {
         destinationName: 'Travail A/R (sim)',
         note: simAbort.current.aborted
           ? `SIMULATEUR (interrompu) · ${formatDistance(distanceKm)} · ~${fuelUsed.toFixed(1)} L`
-          : `SIMULATEUR commute · ${formatDistance(distanceKm)} · ${stats.movingSpeedKmh.toFixed(0)} km/h moy. · idle ${(idleRatio * 100).toFixed(0)}% · ~${fuelUsed.toFixed(1)} L`,
+          : `SIMULATEUR commute · ${formatDistance(distanceKm)} · ${formatSpeedKmh(stats.movingSpeedKmh)} moy. · idle ${(idleRatio * 100).toFixed(0)}% · ~${fuelUsed.toFixed(1)} L`,
       });
       setUserLocation({
         latitude: points[points.length - 1].latitude,
@@ -2212,7 +2213,7 @@ export default function TripScreen() {
                   <StatCard label="Distance" value={formatDistance(activeTrip.distanceKm)} />
                   <StatCard
                     label="Vitesse moy."
-                    value={avgSpeed > 0 ? `${avgSpeed.toFixed(0)} km/h` : '—'}
+                    value={avgSpeed > 0 ? formatSpeedKmh(avgSpeed) : '—'}
                   />
                 </View>
                 <View style={styles.statsRow}>

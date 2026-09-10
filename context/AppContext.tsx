@@ -10,7 +10,7 @@ import {
   updateTrip,
   addTrackedKm,
 } from '@/lib/database';
-import { parseRoutePoints, ensureDefaultBudgets, refreshAllBudgets, calculateTripStats } from '@/lib/calculations';
+import { parseRoutePoints, ensureDefaultBudgets, refreshAllBudgets, calculateTripStats, formatSpeedKmh } from '@/lib/calculations';
 import { recoverDataAfterUpdateIfNeeded, getUpdatePending } from '@/lib/backup';
 import { confirm, notify } from '@/lib/notify';
 import { flushTripUpdates, stopBackgroundTracking } from '@/lib/locationService';
@@ -166,7 +166,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                       : (fresh.distanceKm / Math.max(live.durationMinutes, 0.01)) * 60;
                   const noteParts = [
                     fresh.note,
-                    speed > 0 ? `Vitesse moy. ${speed.toFixed(0)} km/h` : null,
+                    speed > 0 ? `Vitesse moy. ${formatSpeedKmh(speed)}` : null,
                   ].filter(Boolean);
 
                   await updateTrip(fresh.id, {

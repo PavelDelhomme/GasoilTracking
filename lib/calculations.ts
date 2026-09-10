@@ -578,6 +578,12 @@ export function formatDistance(km: number): string {
   return km < 1 ? `${(km * 1000).toFixed(0)} m` : `${km.toFixed(1)} km`;
 }
 
+/** Affichage vitesse km/h — max 2 décimales (calculs restent précis). */
+export function formatSpeedKmh(kmh: number): string {
+  if (!Number.isFinite(kmh) || kmh <= 0) return '—';
+  return `${kmh.toFixed(2)} km/h`;
+}
+
 /**
  * Compteur affiché = kilométrage de base (saisi) + km des trajets suivis.
  * Multi-voitures : indiquer le compteur à la prise en main, puis le GPS s’ajoute.

@@ -11,6 +11,7 @@ import {
   calculateTripStats,
   formatDistance,
   formatEuro,
+  formatSpeedKmh,
   parseRoutePoints,
 } from '@/lib/calculations';
 import {
@@ -198,7 +199,7 @@ export default function TripDetailScreen() {
     speedStats.avgKmh > 0
       ? speedStats.avgKmh
       : stats?.movingSpeedKmh
-        ? Math.round(stats.movingSpeedKmh * 10) / 10
+        ? stats.movingSpeedKmh
         : 0;
 
   return (
@@ -330,16 +331,19 @@ export default function TripDetailScreen() {
                 Tracé coloré : vert = plus lent → rouge = plus rapide
               </Text>
               <View style={styles.statsRow}>
-                <StatCard label="Vitesse moy." value={avgShown > 0 ? `${avgShown} km/h` : '—'} />
+                <StatCard
+                  label="Vitesse moy."
+                  value={avgShown > 0 ? formatSpeedKmh(avgShown) : '—'}
+                />
                 <StatCard
                   label="Vitesse max"
-                  value={speedStats.maxKmh > 0 ? `${speedStats.maxKmh} km/h` : '—'}
+                  value={speedStats.maxKmh > 0 ? formatSpeedKmh(speedStats.maxKmh) : '—'}
                 />
               </View>
               <View style={styles.statsRow}>
                 <StatCard
                   label="Vitesse min"
-                  value={speedStats.minKmh > 0 ? `${speedStats.minKmh} km/h` : '—'}
+                  value={speedStats.minKmh > 0 ? formatSpeedKmh(speedStats.minKmh) : '—'}
                 />
                 <StatCard label="Points GPS" value={`${rawPts.length || points.length}`} />
               </View>
