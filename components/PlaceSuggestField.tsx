@@ -29,9 +29,10 @@ function matchesQuery(p: Place, q: string): boolean {
     .toLowerCase()
     .normalize('NFD')
     .replace(/\p{M}/gu, '');
-  if (/domicil|maison|home|appart/.test(n) && p.kind === 'home') return true;
-  if (/travail|bureau|boulot|work|office|inter/.test(n) && p.kind === 'work') return true;
-  if (/station|essence|carburant/.test(n) && p.kind === 'station') return true;
+  if (/\b(domicil\w*|maison|home|appart)\b/.test(n) && p.kind === 'home') return true;
+  // Ne PAS matcher « inter » / Intermarché → Travail (faux positif fréquent)
+  if (/\b(travail|bureau|boulot|work|office)\b/.test(n) && p.kind === 'work') return true;
+  if (/\b(station|essence|carburant)\b/.test(n) && p.kind === 'station') return true;
   return hay.includes(n) || n.split(/\s+/).every((w) => !w || hay.includes(w));
 }
 
@@ -55,7 +56,7 @@ function expandAlias(text: string, places: Place[]): string {
     const home = places.find((p) => p.kind === 'home');
     if (home) return placeLabel(home);
   }
-  if (n === 'travail' || n === 'bureau' || n === 'work' || n === 'intermarche' || n === 'intermarché') {
+  if (n === 'travail' || n === 'bureau' || n === 'work' || n === 'boulot') {
     const work = places.find((p) => p.kind === 'work');
     if (work) return placeLabel(work);
   }

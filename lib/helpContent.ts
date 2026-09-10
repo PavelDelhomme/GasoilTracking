@@ -110,7 +110,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: 'nav',
         title: 'Navigation vers une destination',
         body:
-          'Depuis Maps : barre « Tapez une adresse… » en haut, ou un lieu / récent. L’app calcule l’itinéraire et démarre le guidage. Le panneau de conduite (vitesse, panneau, essence) reste sur l’écran trajet. Google Maps peut s’ouvrir en secours.',
+          'Depuis Maps : barre « Tapez une adresse… » en haut, ou un lieu / récent. L’itinéraire proposé par défaut est l’éco (conso). Le guidage reste sur l’écran trajet. Astuce : « Intermarché » n’est plus confondu avec le lieu Travail.',
       },
       {
         id: 'maps-tab',

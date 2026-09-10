@@ -802,11 +802,11 @@ export default function TripScreen() {
       try {
         const alts = await fetchDrivingRouteAlternatives(from, to);
         setRouteOptions(alts);
+        // Défaut = éco (conso Gasoil) ; l’utilisateur peut encore choisir rapide / alt.
         const prefer =
-          alts.find((a) => a.kind === 'fastest') ||
           alts.find((a) => a.kind === 'eco') ||
+          alts.find((a) => a.kind === 'fastest') ||
           alts[0];
-        // Ne force plus l’éco : laisse l’utilisateur choisir ; fastest = défaut neutre.
         if (prefer) applyRouteSelection(prefer);
         else {
           setSelectedRouteId(null);
@@ -963,6 +963,7 @@ export default function TripScreen() {
               } else {
                 const preferred =
                   alts.find((a) => a.id === selectedRouteId) ||
+                  alts.find((a) => a.kind === 'eco') ||
                   alts.find((a) => a.kind === 'fastest') ||
                   alts[0];
                 if (preferred) {
@@ -1987,6 +1988,28 @@ export default function TripScreen() {
     [userLocation, loadRouteAlternatives, persistStartMode, fitOriginAndDest]
   );
 
+  const isActiveDestChip = useCallback(
+    (label: string, lat?: number | null, lon?: number | null) => {
+      if (
+        destCoords &&
+        lat != null &&
+        lon != null &&
+        Number.isFinite(lat) &&
+        Number.isFinite(lon)
+      ) {
+        return (
+          Math.abs(destCoords.latitude - lat) < 0.00035 &&
+          Math.abs(destCoords.longitude - lon) < 0.00035
+        );
+      }
+      const a = destination.trim().toLowerCase();
+      const b = label.trim().toLowerCase();
+      if (!a || !b) return false;
+      return a === b || a.includes(b) || b.includes(a);
+    },
+    [destination, destCoords]
+  );
+
   const destinationHabit = useMemo((): SimilarTripStats | null => {
     if (!destination.trim() || history.length < 1) return null;
     return computeDestinationHabitStats(history, destination.trim(), destCoords);
@@ -2627,12 +2650,15 @@ export default function TripScreen() {
                             Lieux & récents
                           </Text>
                           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                            {quickPlaces.map((p) => (
+                            {quickPlaces.map((p) => {
+                              const chipLabel = p.address?.trim() || p.name;
+                              const active = isActiveDestChip(chipLabel, p.latitude, p.longitude);
+                              return (
                               <Pressable
                                 key={`place-${p.id}`}
                                 onPress={() =>
                                   applyDestination(
-                                    p.address?.trim() || p.name,
+                                    chipLabel,
                                     p.latitude,
                                     p.longitude
                                   )
@@ -2640,18 +2666,24 @@ export default function TripScreen() {
                                 style={[
                                   styles.destChip,
                                   {
-                                    borderColor: colors.accent,
-                                    backgroundColor: colors.accent + '18',
+                                    borderColor: active ? colors.accent : colors.border,
+                                    backgroundColor: active
+                                      ? colors.accent + '18'
+                                      : colors.background,
                                   },
                                 ]}
                               >
                                 <Ionicons
                                   name={p.kind === 'home' ? 'home' : 'briefcase'}
                                   size={14}
-                                  color={colors.accent}
+                                  color={active ? colors.accent : colors.textSecondary}
                                 />
                                 <Text
-                                  style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }}
+                                  style={{
+                                    color: active ? colors.accent : colors.text,
+                                    fontWeight: '700',
+                                    fontSize: 13,
+                                  }}
                                 >
                                   {p.kind === 'home'
                                     ? 'Domicile'
@@ -2660,28 +2692,33 @@ export default function TripScreen() {
                                       : p.name}
                                 </Text>
                               </Pressable>
-                            ))}
-                            {recentDests.map((r) => (
+                              );
+                            })}
+                            {recentDests.map((r) => {
+                              const active = isActiveDestChip(r.label, r.latitude, r.longitude);
+                              return (
                               <Pressable
                                 key={`recent-${r.label}-${r.at}`}
                                 onPress={() => applyDestination(r.label, r.latitude, r.longitude)}
                                 style={[
                                   styles.destChip,
                                   {
-                                    borderColor: colors.border,
-                                    backgroundColor: colors.background,
+                                    borderColor: active ? colors.accent : colors.border,
+                                    backgroundColor: active
+                                      ? colors.accent + '18'
+                                      : colors.background,
                                   },
                                 ]}
                               >
                                 <Ionicons
                                   name="time-outline"
                                   size={14}
-                                  color={colors.textSecondary}
+                                  color={active ? colors.accent : colors.textSecondary}
                                 />
                                 <Text
                                   style={{
-                                    color: colors.text,
-                                    fontWeight: '600',
+                                    color: active ? colors.accent : colors.text,
+                                    fontWeight: active ? '700' : '600',
                                     fontSize: 13,
                                     maxWidth: 160,
                                   }}
@@ -2690,7 +2727,8 @@ export default function TripScreen() {
                                   {r.label}
                                 </Text>
                               </Pressable>
-                            ))}
+                              );
+                            })}
                           </View>
                         </View>
                       )}
