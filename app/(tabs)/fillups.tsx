@@ -46,7 +46,8 @@ export default function FillUpsScreen() {
   const { formatPerLiter, locale } = useLocale();
   const [allFillUps, setAllFillUps] = useState<FillUp[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState<string | 'all'>('all');
+  /** Par défaut : mois calendaire courant (pas « Tout », pas le mois du dernier plein). */
+  const [selectedMonth, setSelectedMonth] = useState<string | 'all'>(() => currentMonthKey());
   const [filterVehicleId, setFilterVehicleId] = useState<number | 'all' | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE);
   const [initialized, setInitialized] = useState(false);
@@ -75,13 +76,10 @@ export default function FillUpsScreen() {
     void (async () => {
       setLoadingList(true);
       try {
-        const data = await loadFillUps();
+        await loadFillUps();
         setVisibleCount(PAGE);
-        if (!initialized && data.length > 0) {
-          setSelectedMonth(monthKeyFromDate(data[0].date));
-          setInitialized(true);
-        } else if (!initialized) {
-          setSelectedMonth('all');
+        if (!initialized) {
+          setSelectedMonth(currentMonthKey());
           setInitialized(true);
         }
       } finally {
@@ -98,6 +96,7 @@ export default function FillUpsScreen() {
 
   const monthKeys = useMemo(() => {
     const keys = new Set<string>();
+    keys.add(currentMonthKey());
     for (const f of allFillUps) keys.add(monthKeyFromDate(f.date));
     return [...keys].sort((a, b) => b.localeCompare(a));
   }, [allFillUps]);
@@ -203,6 +202,7 @@ export default function FillUpsScreen() {
           <Pressable
             onPress={() => {
               setFilterVehicleId('all');
+              setSelectedMonth(currentMonthKey());
               setVisibleCount(PAGE);
             }}
             accessibilityRole="button"
