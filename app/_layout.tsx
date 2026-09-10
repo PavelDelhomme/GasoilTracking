@@ -80,6 +80,13 @@ function RootNavigation() {
           }}
         />
         <Stack.Screen
+          name="help"
+          options={{
+            title: 'Aide',
+            headerLeft: () => <HeaderBackButton />,
+          }}
+        />
+        <Stack.Screen
           name="qa/lab"
           options={{
             title: 'Labo QA',

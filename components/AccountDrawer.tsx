@@ -208,6 +208,12 @@ export function AccountDrawer() {
 
             <Text style={[styles.section, { color: colors.textSecondary }]}>Application</Text>
             <DrawerRow
+              icon="help-circle-outline"
+              label="Aide"
+              subtitle="Guide, catégories, problèmes connus"
+              onPress={() => go('/help')}
+            />
+            <DrawerRow
               icon="time-outline"
               label="Historique des trajets"
               subtitle="Trajets passés, validation, cartes"
