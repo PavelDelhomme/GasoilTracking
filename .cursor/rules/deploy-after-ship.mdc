@@ -1,0 +1,18 @@
+---
+description: Toujours déployer en prod (web + OTA) après une livraison app
+alwaysApply: true
+---
+
+# Déploiement après livraison
+
+Dès qu’une feature / fix est **terminée** et destinée aux appareils / au site :
+
+1. **Commit** sur `prod` (message clair, bump `app.json` version + versionCode).
+2. Aligner `APP_VERSION` (`.env`), tags `docker-compose.yml`, cache `public/sw.js`.
+3. **Push** + `make deploy` (Portainer / web + API).
+4. **Build APK prod** : `./scripts/build-flavor-apk.sh prod`
+5. **Upload OTA** : `./scripts/upload-release-apk.sh` avec `FORCE_UPDATE=1` et notes de release.
+6. Vérifier `GET https://gasoil-tracking.delhomme.ovh/api/version` (version + versionCode).
+7. Si le Nothing est en ADB : `adb install -r dist/gasoil-tracking-<version>.apk` pour un test immédiat.
+
+Ne pas laisser une version « faite » uniquement en local. Exception : l’utilisateur demande explicitement de **ne pas** déployer.
