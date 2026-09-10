@@ -208,6 +208,12 @@ export function AccountDrawer() {
 
             <Text style={[styles.section, { color: colors.textSecondary }]}>Application</Text>
             <DrawerRow
+              icon="time-outline"
+              label="Historique des trajets"
+              subtitle="Trajets passés, validation, cartes"
+              onPress={() => go('/(tabs)/trip?tab=history')}
+            />
+            <DrawerRow
               icon="download-outline"
               label={
                 updateAvailable

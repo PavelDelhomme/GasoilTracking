@@ -76,7 +76,6 @@ import {
 import { applyTripFuelBurn, fuelRemainingTone, fuelToneColor, setFuelLiters } from '@/lib/fuelLevel';
 import { askFuelGaugeApprox } from '@/lib/fuelGaugePrompt';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
-import { FloatingFuelBadge } from '@/components/FloatingFuelBadge';
 import { SpeedDialFab } from '@/components/SpeedDialFab';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1901,6 +1900,16 @@ export default function TripScreen() {
 
   const routePoints = liveMapTail;
   const paused = Boolean(activeTrip?.isPaused);
+  const isFreeDrive = Boolean(activeTrip && !activeTrip.destinationName);
+  const liveFuelTone =
+    liveFuelRemaining != null && activeVehicle
+      ? fuelRemainingTone({
+          litersRemaining: liveFuelRemaining,
+          tankCapacity: activeVehicle.tankCapacity,
+          lowLitersThreshold: activeVehicle.lowFuelThresholdLiters,
+        })
+      : 'ok';
+  const liveFuelColor = fuelToneColor(liveFuelTone, colors);
   /** Pendant trajet : derniers points GPS ; sinon itinéraire prévu */
   const mapRoute =
     routePoints.length > 1
@@ -1916,7 +1925,7 @@ export default function TripScreen() {
   );
 
   const navGuidance = useMemo(() => {
-    if (!activeTrip) return null;
+    if (!activeTrip || !activeTrip.destinationName) return null;
     return computeNavGuidance({
       user: userLocation,
       destination: destCoords,
@@ -2022,57 +2031,26 @@ export default function TripScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.segments, { borderBottomColor: colors.border }]}>
-        <TouchableOpacity
-          onPress={() => setTab('live')}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: tab === 'live' }}
-          accessibilityLabel="Trajet en cours"
-          style={[
-            styles.segment,
-            tab === 'live' && { borderBottomColor: colors.accent, borderBottomWidth: 3 },
-          ]}
-        >
-          <Text style={{ color: tab === 'live' ? colors.accent : colors.textSecondary, fontWeight: '700' }}>
-            En cours
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => setTab('history')}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: tab === 'history' }}
-          accessibilityLabel="Historique des trajets"
-          style={[
-            styles.segment,
-            tab === 'history' && { borderBottomColor: colors.accent, borderBottomWidth: 3 },
-          ]}
-        >
-          <Text
-            style={{
-              color: tab === 'history' ? colors.accent : colors.textSecondary,
-              fontWeight: '700',
+      {tab === 'history' ? (
+        <View style={[styles.historyHead, { borderBottomColor: colors.border }]}>
+          <Pressable
+            onPress={() => {
+              setTab('live');
+              router.setParams({ tab: 'live' } as never);
             }}
+            hitSlop={10}
+            style={styles.historyBack}
           >
-            Historique
-            {pending.length > 0
-              ? ` (${pending.length} à valider)`
-              : history.length
-                ? ` (${history.length})`
-                : ''}
-          </Text>
-        </TouchableOpacity>
-      </View>
+            <Ionicons name="arrow-back" size={20} color={colors.accent} />
+            <Text style={{ color: colors.accent, fontWeight: '700', marginLeft: 6 }}>Trajet</Text>
+          </Pressable>
+          <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16 }}>Historique</Text>
+          <View style={{ width: 72 }} />
+        </View>
+      ) : null}
 
       {tab === 'live' ? (
         <>
-          {activeTrip && liveFuelRemaining != null ? (
-            <FloatingFuelBadge
-              liters={liveFuelRemaining}
-              tankCapacity={activeVehicle?.tankCapacity || 50}
-              bottomInset={140 + insets.bottom}
-              topInset={96 + insets.top}
-            />
-          ) : null}
           <View style={[styles.map, mapCollapsed ? styles.mapCollapsed : null]}>
             <TripMap
               ref={mapRef}
@@ -2099,7 +2077,87 @@ export default function TripScreen() {
                 color="#fff"
               />
             </Pressable>
-            {activeVehicle ? (
+            {activeTrip ? (
+              <View style={styles.mapTopHud} pointerEvents="box-none">
+                {isFreeDrive ? (
+                  <View style={styles.mapHudRow}>
+                    {liveSpeedLimit ? (
+                      <View
+                        style={styles.speedLimitSign}
+                        accessibilityLabel={`Limitation ${liveSpeedLimit.limitKmh} km/h`}
+                      >
+                        <Text style={styles.speedLimitValue}>{liveSpeedLimit.limitKmh}</Text>
+                      </View>
+                    ) : null}
+                    {liveFuelRemaining != null ? (
+                      <View
+                        style={[
+                          styles.fuelHudChip,
+                          { borderColor: liveFuelColor, backgroundColor: 'rgba(15,23,42,0.9)' },
+                        ]}
+                      >
+                        <Text style={{ color: liveFuelColor, fontWeight: '900', fontSize: 15 }}>
+                          {liveFuelRemaining.toFixed(1)} L
+                        </Text>
+                        <Text style={{ color: '#94a3b8', fontWeight: '700', fontSize: 11 }}>
+                          {Math.round(
+                            (liveFuelRemaining / Math.max(1, activeVehicle?.tankCapacity || 50)) * 100
+                          )}
+                          %
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : (
+                  <View style={styles.mapHudRow}>
+                    {activeVehicle ? (
+                      <View style={styles.vehicleHudChip}>
+                        <Text style={styles.vehicleFloatText} numberOfLines={1}>
+                          {activeVehicle.name}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {navGuidance ? (
+                      <Pressable
+                        onPress={() => {
+                          if (activeTrip.destinationName) void handleOpenGoogleMaps();
+                        }}
+                        style={[
+                          styles.navHudChip,
+                          {
+                            borderColor: paused ? colors.warning : colors.accent,
+                            backgroundColor: 'rgba(15,23,42,0.92)',
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name="navigate"
+                          size={16}
+                          color={paused ? colors.warning : colors.accent}
+                          style={{ transform: [{ rotate: `${navGuidance.arrowRotateDeg}deg` }] }}
+                        />
+                        <View style={{ flexShrink: 1, maxWidth: 140 }}>
+                          <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }} numberOfLines={1}>
+                            {navGuidance.title}
+                          </Text>
+                          <Text style={{ color: '#94a3b8', fontSize: 10 }} numberOfLines={1}>
+                            {navGuidance.distanceLabel}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    ) : null}
+                    {liveSpeedLimit ? (
+                      <View
+                        style={styles.speedLimitSign}
+                        accessibilityLabel={`Limitation ${liveSpeedLimit.limitKmh} km/h`}
+                      >
+                        <Text style={styles.speedLimitValue}>{liveSpeedLimit.limitKmh}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                )}
+              </View>
+            ) : activeVehicle ? (
               <View style={styles.vehicleFloat} pointerEvents="none">
                 <Text style={styles.vehicleFloatText} numberOfLines={1}>
                   {activeVehicle.name}
@@ -2170,71 +2228,7 @@ export default function TripScreen() {
               styles.panelContent,
               !activeTrip && activeVehicle ? { paddingBottom: 120 + insets.bottom } : null,
             ]}
-            {...tabSwipe.panHandlers}
           >
-            {activeTrip && navGuidance ? (
-              <View style={{ flexDirection: 'row', alignItems: 'stretch', gap: 8, marginBottom: 12 }}>
-                <Pressable
-                  onPress={() => {
-                    if (activeTrip.destinationName) {
-                      void handleOpenGoogleMaps();
-                    }
-                  }}
-                  style={[
-                    styles.navBar,
-                    {
-                      flex: 1,
-                      marginBottom: 0,
-                      backgroundColor: colors.card,
-                      borderColor: paused ? colors.warning : colors.accent,
-                    },
-                  ]}
-                >
-                  <View
-                    style={[
-                      styles.navArrowWrap,
-                      { backgroundColor: (paused ? colors.warning : colors.accent) + '22' },
-                    ]}
-                  >
-                    <Ionicons
-                      name="navigate"
-                      size={28}
-                      color={paused ? colors.warning : colors.accent}
-                      style={{ transform: [{ rotate: `${navGuidance.arrowRotateDeg}deg` }] }}
-                    />
-                  </View>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text
-                      style={{ color: colors.text, fontWeight: '800', fontSize: 16 }}
-                      numberOfLines={1}
-                    >
-                      {navGuidance.title}
-                    </Text>
-                    <Text style={{ color: colors.textSecondary, fontSize: 13 }} numberOfLines={1}>
-                      {navGuidance.subtitle}
-                    </Text>
-                  </View>
-                  <Text
-                    style={{
-                      color: paused ? colors.warning : colors.accent,
-                      fontWeight: '800',
-                      fontSize: 15,
-                    }}
-                  >
-                    {navGuidance.distanceLabel}
-                  </Text>
-                </Pressable>
-                {liveSpeedLimit ? (
-                  <View
-                    style={styles.speedLimitSign}
-                    accessibilityLabel={`Limitation ${liveSpeedLimit.limitKmh} km/h`}
-                  >
-                    <Text style={styles.speedLimitValue}>{liveSpeedLimit.limitKmh}</Text>
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
-
             {activeTrip && nearDestination && (
               <Pressable
                 onPress={() => void handleStopTrip({ fromArrival: true })}
@@ -2267,56 +2261,6 @@ export default function TripScreen() {
               </Card>
             ) : activeTrip ? (
               <>
-                <Card
-                  style={{
-                    ...styles.activeTrip,
-                    borderColor: paused ? colors.warning : colors.accent,
-                  }}
-                >
-                  <View style={styles.tripActiveHeader}>
-                    <Ionicons
-                      name={paused ? 'pause-circle' : 'radio-button-on'}
-                      size={16}
-                      color={paused ? colors.warning : colors.accent}
-                    />
-                    <Text
-                      style={[
-                        styles.tripActiveTitle,
-                        { color: paused ? colors.warning : colors.accent },
-                      ]}
-                    >
-                      {paused ? 'En pause' : 'Suivi en cours'}
-                    </Text>
-                  </View>
-                  <Text style={[styles.placeLine, { color: colors.success }]}>
-                    Départ : {liveOriginLabel || '…'}
-                  </Text>
-                  <Text style={[styles.placeLine, { color: colors.accent }]}>
-                    Arrivée :{' '}
-                    {activeTrip.destinationName
-                      ? liveDestLabel
-                      : 'Suivi libre (sans destination fixe)'}
-                  </Text>
-                </Card>
-
-                <View style={styles.statsRow}>
-                  <StatCard label="Distance" value={formatDistance(activeTrip.distanceKm)} />
-                  <StatCard
-                    label="Vitesse moy."
-                    value={avgSpeed > 0 ? formatSpeedKmh(avgSpeed) : '—'}
-                  />
-                </View>
-                <View style={styles.statsRow}>
-                  <StatCard
-                    label="Carburant est."
-                    value={`${liveActiveFuel.toFixed(2)} L`}
-                  />
-                  <StatCard label="Coût est." value={formatEuro(liveActiveCost)} />
-                </View>
-                <Text style={{ color: colors.textSecondary, marginBottom: 12, fontSize: 13 }}>
-                  Durée : {Math.floor(tripStats?.durationMinutes ?? 0)} min
-                </Text>
-
                 {shortTripPrompt ? (
                   <Card
                     style={{
@@ -2439,6 +2383,56 @@ export default function TripScreen() {
                     </Pressable>
                   </View>
                 )}
+
+                <View style={styles.statsRow}>
+                  <StatCard label="Distance" value={formatDistance(activeTrip.distanceKm)} />
+                  <StatCard
+                    label="Vitesse moy."
+                    value={avgSpeed > 0 ? formatSpeedKmh(avgSpeed) : '—'}
+                  />
+                </View>
+                <View style={styles.statsRow}>
+                  <StatCard
+                    label="Carburant est."
+                    value={`${liveActiveFuel.toFixed(2)} L`}
+                  />
+                  <StatCard label="Coût est." value={formatEuro(liveActiveCost)} />
+                </View>
+                <Text style={{ color: colors.textSecondary, marginBottom: 12, fontSize: 13 }}>
+                  Durée : {Math.floor(tripStats?.durationMinutes ?? 0)} min
+                </Text>
+
+                <Card
+                  style={{
+                    ...styles.activeTrip,
+                    borderColor: paused ? colors.warning : colors.accent,
+                  }}
+                >
+                  <View style={styles.tripActiveHeader}>
+                    <Ionicons
+                      name={paused ? 'pause-circle' : 'radio-button-on'}
+                      size={16}
+                      color={paused ? colors.warning : colors.accent}
+                    />
+                    <Text
+                      style={[
+                        styles.tripActiveTitle,
+                        { color: paused ? colors.warning : colors.accent },
+                      ]}
+                    >
+                      {paused ? 'En pause' : 'Suivi en cours'}
+                    </Text>
+                  </View>
+                  <Text style={[styles.placeLine, { color: colors.success }]}>
+                    Départ : {liveOriginLabel || '…'}
+                  </Text>
+                  <Text style={[styles.placeLine, { color: colors.accent }]}>
+                    Arrivée :{' '}
+                    {activeTrip.destinationName
+                      ? liveDestLabel
+                      : 'Suivi libre (sans destination fixe)'}
+                  </Text>
+                </Card>
               </>
             ) : (
               <>
@@ -3302,6 +3296,56 @@ const styles = StyleSheet.create({
     maxWidth: '70%',
     zIndex: 20,
   },
+  mapTopHud: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    right: 10,
+    zIndex: 22,
+    alignItems: 'flex-end',
+  },
+  mapHudRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  vehicleHudChip: {
+    backgroundColor: 'rgba(15,23,42,0.88)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    maxWidth: 140,
+  },
+  navHudChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    maxWidth: 200,
+  },
+  fuelHudChip: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  historyHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  historyBack: { flexDirection: 'row', alignItems: 'center', width: 72 },
   vehicleFloatText: {
     color: '#fff',
     fontWeight: '800',
