@@ -89,6 +89,10 @@ for i in $(seq 1 24); do
     && curl -sf "https://gasoil-tracking.delhomme.ovh/api/version" >/dev/null; then
     echo "live ok"
     curl -sf "https://gasoil-tracking.delhomme.ovh/api/version"; echo
+    echo "==> Prune anciennes images gasoil sur le VPS..."
+    ssh -o BatchMode=yes -o ConnectTimeout=20 pavel-server 'bash -s' < "$ROOT/scripts/prune-gasoil-images.sh" || {
+      echo "WARN: prune images échoué (stack OK quand même)"
+    }
     exit 0
   fi
   echo "… $i"
