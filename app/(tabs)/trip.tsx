@@ -74,7 +74,6 @@ import {
   SIM_HOME,
   SIM_WORK,
 } from '@/lib/gpsCarSimulator';
-import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { applyTripFuelBurn, fuelRemainingTone, fuelToneColor, setFuelLiters } from '@/lib/fuelLevel';
 import { askFuelGaugeApprox } from '@/lib/fuelGaugePrompt';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
@@ -1663,11 +1662,7 @@ export default function TripScreen() {
         : 'Démarrage sim commute (rapide)…'
     );
     let tripId: number | null = null;
-    const keepTag = 'gasoil-sim-live';
     try {
-      if (pace === 'live') {
-        await activateKeepAwakeAsync(keepTag).catch(() => undefined);
-      }
       await stopBackgroundTracking();
       await purgeSimulatorTrips(activeVehicle.id);
       await stopActiveTrips();
@@ -1874,9 +1869,6 @@ export default function TripScreen() {
       }
       showToast(e instanceof Error ? e.message : 'Échec simulateur');
     } finally {
-      if (pace === 'live') {
-        deactivateKeepAwake(keepTag);
-      }
       setSimRunning(false);
       setSimProgress('');
     }
