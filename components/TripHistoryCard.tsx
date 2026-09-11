@@ -9,7 +9,7 @@ import { formatDurationMinutes } from '@/lib/consumptionModel';
 import { formatDateSlash, formatRelativeDay } from '@/lib/dates';
 import { tripPlaceLabel, tripSourceLabel } from '@/lib/geocode';
 import { getPlaces } from '@/lib/database';
-import { getCachedTripRoute, resolveTripRouteCached } from '@/lib/tripMapCache';
+import { getCachedTripRoute, resolveTripRouteCached, setCachedTripRoute } from '@/lib/tripMapCache';
 import { computeSimilarTripStats } from '@/lib/similarTrips';
 import type { Place, Trip } from '@/types';
 import type { RouteCoord } from '@/components/TripMap.types';
@@ -81,6 +81,18 @@ function TripHistoryCardInner({
     let cancelled = false;
     (async () => {
       try {
+        // GPS déjà dense → garder le tracé réel (boucles / embouteillages),
+        // ne pas remplacer par un OSRM A→B qui efface l’aller-retour.
+        const raw = parseRoutePoints(trip.routePoints);
+        if (raw.length >= 2) {
+          const pts = raw.map((p) => ({
+            latitude: p.latitude,
+            longitude: p.longitude,
+          }));
+          if (!cancelled) setDisplayPts(pts);
+          setCachedTripRoute(trip.id, pts);
+          return;
+        }
         const places = await getPlacesCached();
         const pts = await resolveTripRouteCached(trip, places);
         if (cancelled || !pts.length) return;

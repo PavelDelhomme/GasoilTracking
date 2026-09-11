@@ -51,17 +51,32 @@ export function latLonToWorld(lat: number, lon: number, zoom: number): PixelPt {
   return { x, y };
 }
 
-/** Zoom serré : départ/arrivée bien visibles. */
+/** Zoom serré : départ/arrivée bien visibles + corridor fin (aller-retour) lisible. */
 export function zoomForPoints(pts: LatLng[], width: number, height: number): number {
   if (pts.length < 1) return 14;
   const lats = pts.map((p) => p.latitude);
   const lons = pts.map((p) => p.longitude);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLon = Math.min(...lons);
-  const maxLon = Math.max(...lons);
-  // Marge intérieure ~18% pour laisser place aux pastilles
-  const pad = 1.22;
+  let minLat = Math.min(...lats);
+  let maxLat = Math.max(...lats);
+  let minLon = Math.min(...lons);
+  let maxLon = Math.max(...lons);
+  // Corridor très allongé (ex. aller-retour Ouest) : forcer une marge lat/lon minimale
+  // sinon le zoom colle trop et le tracé paraît « vide » sur la mini-carte.
+  const latSpan = Math.max(1e-6, maxLat - minLat);
+  const lonSpan = Math.max(1e-6, maxLon - minLon);
+  if (lonSpan / latSpan > 6) {
+    const padLat = lonSpan / 6;
+    const mid = (minLat + maxLat) / 2;
+    minLat = mid - padLat / 2;
+    maxLat = mid + padLat / 2;
+  } else if (latSpan / lonSpan > 6) {
+    const padLon = latSpan / 6;
+    const mid = (minLon + maxLon) / 2;
+    minLon = mid - padLon / 2;
+    maxLon = mid + padLon / 2;
+  }
+  // Marge intérieure ~22% pour pastilles + boucle
+  const pad = 1.28;
   for (let z = 17; z >= 9; z--) {
     const a = latLonToWorld(minLat, minLon, z);
     const b = latLonToWorld(maxLat, maxLon, z);

@@ -7,8 +7,14 @@ import { buildDrivingPoints, SIM_HOME, SIM_WORK, SIM_VIA } from '@/lib/gpsCarSim
 import { fetchDrivingRoute, VIA_CHATEAUGIRON } from '@/lib/roadDistance';
 import { forwardGeocode } from '@/lib/geocode';
 import type { Place, Trip } from '@/types';
+import {
+  downsampleRoute,
+  isLoopRoute,
+  type LatLng,
+} from '@/lib/routeDownsample';
 
-export type LatLng = { latitude: number; longitude: number };
+export type { LatLng };
+export { downsampleRoute, isLoopRoute };
 
 function looksLikeCommute(trip: Trip): boolean {
   const o = `${trip.originName || ''} ${trip.destinationName || ''}`.toLowerCase();
@@ -31,18 +37,6 @@ async function geocodeLabel(label: string | null | undefined): Promise<LatLng | 
     geocodeCache.set(key, null);
     return null;
   }
-}
-
-/** Downsample en gardant début/fin (forme du trajet). */
-export function downsampleRoute(pts: LatLng[], max = 160): LatLng[] {
-  if (pts.length <= max) return pts;
-  const out: LatLng[] = [pts[0]];
-  const step = (pts.length - 1) / (max - 1);
-  for (let i = 1; i < max - 1; i++) {
-    out.push(pts[Math.round(i * step)]);
-  }
-  out.push(pts[pts.length - 1]);
-  return out;
 }
 
 function matchPlace(places: Place[], name: string | null | undefined): Place | null {

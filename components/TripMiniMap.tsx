@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Image, LayoutChangeEvent } from 'react-native';
+import Svg, { Polyline, Circle } from 'react-native-svg';
 import type { RouteCoord } from '@/components/TripMap.types';
-import { downsampleRoute } from '@/lib/routeGeometry';
-import { buildTileMapLayout, type PixelPt } from '@/lib/tripMapCache';
+import { downsampleRoute, isLoopRoute } from '@/lib/routeDownsample';
+import { buildTileMapLayout } from '@/lib/tripMapCache';
 
 type Props = {
   routePoints: RouteCoord[];
@@ -13,47 +14,10 @@ type Props = {
   prefetchedUrl?: string | null;
 };
 
-function RouteSegments({
-  line,
-  color,
-}: {
-  line: PixelPt[];
-  color: string;
-}) {
-  if (line.length < 2) return null;
-  const segs: React.ReactNode[] = [];
-  for (let i = 1; i < line.length; i++) {
-    const a = line[i - 1];
-    const b = line[i];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const len = Math.sqrt(dx * dx + dy * dy);
-    if (len < 0.5) continue;
-    const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
-    const mx = (a.x + b.x) / 2;
-    const my = (a.y + b.y) / 2;
-    segs.push(
-      <View
-        key={`s${i}`}
-        style={{
-          position: 'absolute',
-          left: mx - len / 2,
-          top: my - 2.5,
-          width: len,
-          height: 5,
-          borderRadius: 2.5,
-          backgroundColor: color,
-          transform: [{ rotate: `${angle}deg` }],
-        }}
-      />
-    );
-  }
-  return <>{segs}</>;
-}
-
 /**
- * Mini-carte rapide : tuiles OSM + tracé + gros pastilles départ/arrivée.
+ * Mini-carte rapide : tuiles OSM + tracé SVG + pastilles départ/arrivée.
  * Pas de WebView → fluide dans une liste / préchargeable.
+ * Gère les boucles (départ ≈ arrivée) comme la carte détail.
  */
 export function TripMiniMap({
   routePoints,
@@ -63,7 +27,8 @@ export function TripMiniMap({
   height = 168,
 }: Props) {
   const [width, setWidth] = useState(360);
-  const pts = useMemo(() => downsampleRoute(routePoints, 64), [routePoints]);
+  const pts = useMemo(() => downsampleRoute(routePoints, 96), [routePoints]);
+  const loop = useMemo(() => isLoopRoute(pts), [pts]);
   const layout = useMemo(
     () => buildTileMapLayout(pts, { width, height }),
     [pts, width, height]
@@ -74,7 +39,7 @@ export function TripMiniMap({
     if (w > 40 && Math.abs(w - width) > 2) setWidth(w);
   };
 
-  if (!layout || pts.length < 1) {
+  if (!layout || pts.length < 2) {
     return (
       <View style={[styles.schema, { height: Math.min(height, 84) }]} onLayout={onLayout}>
         <View style={styles.schemaRow}>
@@ -95,6 +60,16 @@ export function TripMiniMap({
     );
   }
 
+  const polyPoints = layout.line.map((p) => `${p.x},${p.y}`).join(' ');
+  // Boucle : décaler légèrement la pastille d’arrivée pour ne pas masquer le départ
+  const endPt =
+    loop && layout.line.length > 2
+      ? {
+          x: layout.end.x + 10,
+          y: layout.end.y - 10,
+        }
+      : layout.end;
+
   return (
     <View style={[styles.wrap, { height: layout.height }]} onLayout={onLayout}>
       <View style={styles.mapClip}>
@@ -111,27 +86,28 @@ export function TripMiniMap({
             }}
           />
         ))}
-        <RouteSegments line={layout.line} color={accentColor} />
-        <View
-          style={[
-            styles.marker,
-            {
-              left: layout.start.x - 10,
-              top: layout.start.y - 10,
-              backgroundColor: '#22c55e',
-            },
-          ]}
-        />
-        <View
-          style={[
-            styles.marker,
-            {
-              left: layout.end.x - 10,
-              top: layout.end.y - 10,
-              backgroundColor: '#ef4444',
-            },
-          ]}
-        />
+        <Svg width={layout.width} height={layout.height} style={StyleSheet.absoluteFill}>
+          {/* Halo pour lisibilité sur tuiles claires */}
+          <Polyline
+            points={polyPoints}
+            fill="none"
+            stroke="#0f172a"
+            strokeWidth={loop ? 7 : 6}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            opacity={0.35}
+          />
+          <Polyline
+            points={polyPoints}
+            fill="none"
+            stroke={accentColor}
+            strokeWidth={loop ? 4.5 : 3.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <Circle cx={layout.start.x} cy={layout.start.y} r={7} fill="#22c55e" stroke="#fff" strokeWidth={2.5} />
+          <Circle cx={endPt.x} cy={endPt.y} r={7} fill="#ef4444" stroke="#fff" strokeWidth={2.5} />
+        </Svg>
       </View>
 
       <View style={styles.pinStart} pointerEvents="none">
@@ -143,7 +119,7 @@ export function TripMiniMap({
       <View style={styles.pinEnd} pointerEvents="none">
         <View style={styles.pinEndDot} />
         <Text style={styles.pinLabelEnd} numberOfLines={1}>
-          {destinationName || 'Arrivée'}
+          {loop ? `Boucle · ${destinationName || 'Retour'}` : destinationName || 'Arrivée'}
         </Text>
       </View>
     </View>
@@ -162,15 +138,6 @@ const styles = StyleSheet.create({
   mapClip: {
     ...StyleSheet.absoluteFillObject,
     overflow: 'hidden',
-  },
-  marker: {
-    position: 'absolute',
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 3,
-    borderColor: '#fff',
-    zIndex: 2,
   },
   pinStart: {
     position: 'absolute',
@@ -193,7 +160,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    maxWidth: '52%',
+    maxWidth: '58%',
     backgroundColor: 'rgba(15,23,42,0.82)',
     paddingHorizontal: 8,
     paddingVertical: 5,
