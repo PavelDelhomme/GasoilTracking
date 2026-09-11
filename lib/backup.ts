@@ -9,7 +9,8 @@ import {
 } from '@/lib/dataSnapshot';
 import { repairFillUpVehiclesAndBudgets } from '@/lib/repairFillUpVehicles';
 import { prepareSnapshotForPush, slimSnapshotAggressive, snapshotContentHash } from '@/lib/syncPayload';
-import { getActiveTripLite } from '@/lib/database';
+import { getActiveTripLite, stopActiveTrips } from '@/lib/database';
+import { finalizeStaleActiveTrip } from '@/lib/finalizeStaleTrip';
 
 const BACKUP_KEY = 'gasoil_local_backup_v1';
 const PENDING_UPDATE_KEY = 'gasoil_pending_update_v1';
@@ -168,8 +169,13 @@ export async function refreshFromCloud(): Promise<{
   const token = await getToken();
   if (!token) return { ok: false, reason: 'no-auth' };
   try {
+    // Clôture d’abord les zombies (crash / Freecess) — un faux « trajet actif »
+    // ne doit pas bloquer un pull explicite qui remplace tout le local.
+    await finalizeStaleActiveTrip();
     const live = await getActiveTripLite();
-    if (live?.isActive) return { ok: false, reason: 'active-trip' };
+    if (live?.isActive) {
+      await stopActiveTrips();
+    }
   } catch {
     /* continue */
   }
