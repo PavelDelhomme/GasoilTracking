@@ -48,11 +48,11 @@ export function AppUpdateModal({
         : 'Télécharger / installer';
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={force ? undefined : onLater}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onLater}>
       <View style={styles.backdrop}>
         <View style={[styles.card, { backgroundColor: colors.card || colors.background, borderColor: colors.border }]}>
           <Text style={[styles.title, { color: colors.text }]}>
-            {force ? 'Mise à jour obligatoire' : 'Nouvelle version disponible'}
+            {force ? 'Mise à jour importante' : 'Nouvelle version disponible'}
           </Text>
           <Text style={[styles.versions, { color: colors.textSecondary }]}>
             {local} → {info.version}
@@ -66,7 +66,9 @@ export function AppUpdateModal({
               : Platform.OS === 'web'
                 ? 'Rechargement de la version web. « Plus tard » pour continuer sans mettre à jour.'
                 : 'Vos données restent sur l’appareil. Vous pourrez aussi mettre à jour depuis Mon compte.'}
-            {!force ? ' Rappel dans 2 h si vous reportez.' : ''}
+            {force
+              ? ' Vous pouvez reporter 30 min (ex. finir un trajet), puis la MAJ reviendra.'
+              : ' Rappel dans 2 h si vous reportez.'}
           </Text>
 
           {busy && (
@@ -87,13 +89,11 @@ export function AppUpdateModal({
 
           {!busy && (
             <View style={styles.actions}>
-              {!force && (
-                <Pressable onPress={onLater} style={styles.secondaryBtn}>
-                  <Text style={{ color: colors.textSecondary, fontWeight: '600' }}>
-                    Plus tard (rappel 2 h)
-                  </Text>
-                </Pressable>
-              )}
+              <Pressable onPress={onLater} style={styles.secondaryBtn}>
+                <Text style={{ color: colors.textSecondary, fontWeight: '600' }}>
+                  {force ? 'Plus tard (30 min)' : 'Plus tard (rappel 2 h)'}
+                </Text>
+              </Pressable>
               <Pressable
                 onPress={onUpdate}
                 style={[styles.primaryBtn, { backgroundColor: colors.accent }]}

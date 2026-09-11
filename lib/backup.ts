@@ -44,9 +44,18 @@ export async function prepareDataForUpdate(): Promise<{
   cloudSynced: boolean;
 }> {
   try {
+    // Zombies (crash / Freecess) : ne pas bloquer la MAJ — on clôture puis on sauvegarde.
+    await finalizeStaleActiveTrip();
     const live = await getActiveTripLite();
     if (live?.isActive) {
-      throw new Error('Terminez le trajet en cours avant la mise à jour.');
+      const tiny = (live.distanceKm || 0) < 0.5;
+      if (tiny) {
+        await stopActiveTrips();
+      } else {
+        throw new Error(
+          'Terminez le trajet en cours avant la mise à jour (ou reportez la MAJ).'
+        );
+      }
     }
   } catch (e) {
     if (e instanceof Error && /Terminez le trajet/.test(e.message)) throw e;

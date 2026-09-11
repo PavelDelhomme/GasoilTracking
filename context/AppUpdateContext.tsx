@@ -20,6 +20,8 @@ import { openExternalDownload, performSafeApkUpdate, performWebHardReload, webRe
 
 const SNOOZE_KEY = 'gasoil_update_snooze_v1';
 const SNOOZE_MS = 2 * 60 * 60 * 1000; // 2 h
+/** Force update : reporter pour finir un trajet / sortir du blocage UI. */
+const FORCE_SNOOZE_MS = 30 * 60 * 1000; // 30 min
 /** Web : si le bundle n’a pas bougé après hard-reload, ne pas rebloquer tout de suite. */
 const WEB_DEPLOY_SNOOZE_MS = 30 * 60 * 1000;
 
@@ -121,6 +123,14 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
 
     setForce(must);
     if (must) {
+      // Même en force : respect du snooze court (finir un trajet, etc.)
+      if (!ignoreSnooze) {
+        const snooze = await readSnooze();
+        if (snooze && snooze.version === remote.version && snooze.until > Date.now()) {
+          setVisible(false);
+          return false;
+        }
+      }
       setVisible(true);
       return true;
     }
@@ -236,16 +246,22 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
   }, [info]);
 
   const snoozeLater = useCallback(async () => {
-    if (force || busy) return;
+    if (busy) return;
     const version = info?.version || getLocalAppVersion();
-    await writeSnooze({ version, until: Date.now() + SNOOZE_MS });
+    const ms = force ? FORCE_SNOOZE_MS : SNOOZE_MS;
+    await writeSnooze({ version, until: Date.now() + ms });
     setVisible(false);
   }, [force, busy, info?.version]);
 
   const dismiss = useCallback(() => {
-    if (force || busy) return;
+    if (busy) return;
+    // Force : reporter plutôt que fermer sans snooze (évite de rester coincé)
+    if (force) {
+      void snoozeLater();
+      return;
+    }
     setVisible(false);
-  }, [force, busy]);
+  }, [force, busy, snoozeLater]);
 
   const openManualInstall = useCallback(async () => {
     const remote = info || (await fetchAppVersion().catch(() => null));
