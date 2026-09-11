@@ -39,6 +39,8 @@ type Props = {
   accentColor?: string;
   disabled?: boolean;
   compact?: boolean;
+  /** Très petite jauge (ex. avant/après dans détail plein). */
+  mini?: boolean;
   requireConfirm?: boolean;
 };
 
@@ -49,6 +51,7 @@ export function FuelGaugeSlider({
   onChangeEnd,
   disabled,
   compact,
+  mini,
   requireConfirm = true,
 }: Props) {
   const { colors } = useTheme();
@@ -75,13 +78,13 @@ export function FuelGaugeSlider({
   });
   const fillColor = fuelToneColor(tone, colors);
 
-  const size = compact ? 200 : 260;
-  const stroke = compact ? 14 : 18;
-  const pad = stroke / 2 + 6;
+  const size = mini ? 112 : compact ? 168 : 260;
+  const stroke = mini ? 9 : compact ? 12 : 18;
+  const pad = stroke / 2 + (mini ? 4 : 6);
   const cx = size / 2;
   const cy = size / 2 - 2;
   const r = size / 2 - pad;
-  const svgH = cy + stroke / 2 + 22;
+  const svgH = cy + stroke / 2 + (mini ? 10 : 22);
 
   const [dragging, setDragging] = useState(false);
   const centerPageRef = useRef({ x: 0, y: 0 });
@@ -224,7 +227,7 @@ export function FuelGaugeSlider({
             backgroundColor: colors.background,
             borderColor: colors.border,
             opacity: disabled ? 0.55 : 1,
-            paddingVertical: compact ? 8 : 10,
+            paddingVertical: mini ? 4 : compact ? 8 : 10,
           },
         ]}
       >
@@ -278,7 +281,7 @@ export function FuelGaugeSlider({
             {MARKS.map((m) => {
               const outer = gaugePolar(cx, cy, r + stroke * 0.12, m.f);
               const inner = gaugePolar(cx, cy, r - stroke * 0.5, m.f);
-              const labelPos = gaugePolar(cx, cy, r - stroke - (compact ? 12 : 14), m.f);
+              const labelPos = gaugePolar(cx, cy, r - stroke - (mini ? 8 : compact ? 12 : 14), m.f);
               const active = Math.abs(fraction - m.f) < 0.06;
               return (
                 <G key={m.label}>
@@ -288,20 +291,22 @@ export function FuelGaugeSlider({
                     x2={outer.x}
                     y2={outer.y}
                     stroke={active ? fillColor : colors.textSecondary}
-                    strokeWidth={active ? 2.5 : 1.5}
+                    strokeWidth={active ? (mini ? 2 : 2.5) : 1.5}
                     strokeLinecap="round"
                     opacity={active ? 1 : 0.45}
                   />
-                  <SvgText
-                    x={labelPos.x}
-                    y={labelPos.y + 4}
-                    fill={active ? fillColor : colors.textSecondary}
-                    fontSize={compact ? 12 : 14}
-                    fontWeight="700"
-                    textAnchor="middle"
-                  >
-                    {m.label}
-                  </SvgText>
+                  {!mini ? (
+                    <SvgText
+                      x={labelPos.x}
+                      y={labelPos.y + 4}
+                      fill={active ? fillColor : colors.textSecondary}
+                      fontSize={compact ? 12 : 14}
+                      fontWeight="700"
+                      textAnchor="middle"
+                    >
+                      {m.label}
+                    </SvgText>
+                  ) : null}
                 </G>
               );
             })}
@@ -312,45 +317,66 @@ export function FuelGaugeSlider({
               x2={needleTip.x}
               y2={needleTip.y}
               stroke={fillColor}
-              strokeWidth={compact ? 3 : 4}
+              strokeWidth={mini ? 2 : compact ? 3 : 4}
               strokeLinecap="round"
             />
-            <Circle cx={cx} cy={cy} r={compact ? 7 : 9} fill={fillColor} />
-            <Circle cx={cx} cy={cy} r={compact ? 3 : 4} fill="#fff" />
+            <Circle cx={cx} cy={cy} r={mini ? 5 : compact ? 7 : 9} fill={fillColor} />
+            <Circle cx={cx} cy={cy} r={mini ? 2 : compact ? 3 : 4} fill="#fff" />
 
-            {/* Chiffre + % sur une ligne (pas % en dessous) */}
-            <SvgText
-              x={cx - (compact ? 10 : 14)}
-              y={cy - (compact ? 14 : 18)}
-              fill={tone === 'critical' || tone === 'warn' ? fillColor : colors.text}
-              fontSize={compact ? 26 : 34}
-              fontWeight="900"
-              textAnchor="end"
-            >
-              {known || editing ? `${pct}` : '—'}
-            </SvgText>
-            <SvgText
-              x={cx - (compact ? 6 : 8)}
-              y={cy - (compact ? 14 : 18)}
-              fill={colors.textSecondary}
-              fontSize={compact ? 13 : 15}
-              fontWeight="700"
-              textAnchor="start"
-            >
-              {known || editing ? '%' : ''}
-            </SvgText>
+            {/* Chiffre + % */}
+            {mini ? (
+              <SvgText
+                x={cx}
+                y={cy - 4}
+                fill={tone === 'critical' || tone === 'warn' ? fillColor : colors.text}
+                fontSize={13}
+                fontWeight="900"
+                textAnchor="middle"
+              >
+                {known || editing ? `${pct}%` : '—'}
+              </SvgText>
+            ) : (
+              <>
+                <SvgText
+                  x={cx - (compact ? 10 : 14)}
+                  y={cy - (compact ? 14 : 18)}
+                  fill={tone === 'critical' || tone === 'warn' ? fillColor : colors.text}
+                  fontSize={compact ? 26 : 34}
+                  fontWeight="900"
+                  textAnchor="end"
+                >
+                  {known || editing ? `${pct}` : '—'}
+                </SvgText>
+                <SvgText
+                  x={cx - (compact ? 6 : 8)}
+                  y={cy - (compact ? 14 : 18)}
+                  fill={colors.textSecondary}
+                  fontSize={compact ? 13 : 15}
+                  fontWeight="700"
+                  textAnchor="start"
+                >
+                  {known || editing ? '%' : ''}
+                </SvgText>
+              </>
+            )}
           </Svg>
         </View>
 
-        <Text style={[styles.litersLine, { color: colors.textSecondary }]}>
-          {editing && needsGesture && !gestured
-            ? 'Tournez l’aiguille ou choisissez E / ¼ / ½ / ¾ / F'
-            : known || editing
-              ? `${displayL.toFixed(1)} L / ${capacity.toFixed(0)} L · ${mark}`
-              : 'Régler le niveau'}
-        </Text>
+        {!mini ? (
+          <Text style={[styles.litersLine, { color: colors.textSecondary }]}>
+            {editing && needsGesture && !gestured
+              ? 'Tournez l’aiguille ou choisissez E / ¼ / ½ / ¾ / F'
+              : known || editing
+                ? `${displayL.toFixed(1)} L / ${capacity.toFixed(0)} L · ${mark}`
+                : 'Régler le niveau'}
+          </Text>
+        ) : (
+          <Text style={[styles.litersLine, { color: colors.textSecondary, fontSize: 11 }]}>
+            {known ? `${displayL.toFixed(0)} L` : '—'}
+          </Text>
+        )}
 
-        {interactive ? (
+        {interactive && !mini ? (
           <View style={styles.marks}>
             {MARKS.map((m) => {
               const active = Math.abs(fraction - m.f) < 0.06;

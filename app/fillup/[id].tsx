@@ -20,6 +20,7 @@ import { TripMiniMap } from '@/components/TripMiniMap';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
 import {
   calculateRealConsumption,
+  consumptionFromLitersAndDistance,
   formatConsumption,
   formatDistance,
   formatEuro,
@@ -109,9 +110,28 @@ export default function FillUpDetailScreen() {
   }, [load]);
 
   const consumption = useMemo(() => {
-    if (!fill || !prevFill) return null;
-    return calculateRealConsumption(prevFill, fill);
-  }, [fill, prevFill]);
+    if (!fill) return null;
+    if (prevFill) {
+      const between = calculateRealConsumption(prevFill, fill, vehicle?.fuelType);
+      if (between != null) return between;
+    }
+    return consumptionFromLitersAndDistance(
+      fill.liters,
+      fill.distanceSinceLastKm,
+      vehicle?.fuelType
+    );
+  }, [fill, prevFill, vehicle?.fuelType]);
+
+  const rawImpliedL100 =
+    fill && fill.distanceSinceLastKm && fill.distanceSinceLastKm > 0
+      ? (fill.liters / fill.distanceSinceLastKm) * 100
+      : null;
+  const distanceUnreliable =
+    rawImpliedL100 != null &&
+    consumption == null &&
+    fill != null &&
+    fill.distanceSinceLastKm != null &&
+    fill.distanceSinceLastKm > 0;
 
   const tripPoints = useMemo(
     () => (trip ? parseRoutePoints(trip.routePoints) : []),
@@ -289,7 +309,7 @@ export default function FillUpDetailScreen() {
           <StatCard label="Volume" value={`${fill.liters.toFixed(2)} L`} />
           <StatCard label="Prix / L" value={formatPerLiter(fill.pricePerLiter)} />
           <StatCard
-            label={fill.odometer != null ? 'Compteur' : 'Distance'}
+            label={fill.odometer != null ? 'Compteur' : distanceUnreliable ? 'Km GPS' : 'Distance'}
             value={
               fill.odometer != null
                 ? `${Math.round(fill.odometer).toLocaleString('fr-FR')} km`
@@ -297,41 +317,54 @@ export default function FillUpDetailScreen() {
                   ? formatDistance(fill.distanceSinceLastKm)
                   : '—'
             }
+            subtitle={distanceUnreliable ? 'trajets enregistrés (partiel)' : undefined}
           />
           <StatCard
             label="Conso. estimée"
             value={
               consumption != null && vehicle
                 ? formatConsumption(consumption, vehicle.fuelType)
-                : fill.distanceSinceLastKm && fill.distanceSinceLastKm > 0
-                  ? formatConsumption(
-                      (fill.liters / fill.distanceSinceLastKm) * 100,
-                      vehicle?.fuelType || 'diesel'
-                    )
-                  : '—'
+                : '—'
             }
             subtitle={
               consumption != null
                 ? 'depuis le plein précédent'
-                : fill.distanceSinceLastKm
-                  ? 'sur la distance saisie'
-                  : undefined
+                : distanceUnreliable
+                  ? 'km GPS incomplets'
+                  : fill.distanceSinceLastKm
+                    ? 'distance insuffisante'
+                    : undefined
             }
           />
         </View>
 
+        {distanceUnreliable ? (
+          <Card style={{ marginBottom: 8, borderColor: colors.warning, borderWidth: 1 }}>
+            <Text style={{ color: colors.text, fontWeight: '700', marginBottom: 4 }}>
+              Conso non calculable sur ce plein
+            </Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 17 }}>
+              {fill.liters.toFixed(1)} L pour seulement {formatDistance(fill.distanceSinceLastKm!)}{' '}
+              de trajets GPS → ~{rawImpliedL100!.toFixed(0)} L/100 (irréaliste). Il manque des
+              trajets entre les deux pleins (ou le compteur). Saisissez le compteur au prochain
+              plein pour une vraie conso.
+            </Text>
+          </Card>
+        ) : null}
+
         {/* Jauge avant / après (plein complet) */}
         {vehicle && fill.isFull && (
           <Card style={{ marginTop: 4, marginBottom: 8 }}>
-            <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 8 }]}>
+            <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 4 }]}>
               Réservoir avant → après
             </Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '700', textAlign: 'center' }}>
+            <View style={{ flexDirection: 'row', gap: 6, justifyContent: 'center' }}>
+              <View style={{ flex: 1, alignItems: 'center' }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700', marginBottom: 2 }}>
                   Avant
                 </Text>
                 <FuelGaugeSlider
+                  mini
                   compact
                   requireConfirm={false}
                   disabled
@@ -340,11 +373,12 @@ export default function FillUpDetailScreen() {
                   onChange={() => {}}
                 />
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '700', textAlign: 'center' }}>
+              <View style={{ flex: 1, alignItems: 'center' }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700', marginBottom: 2 }}>
                   Après
                 </Text>
                 <FuelGaugeSlider
+                  mini
                   compact
                   requireConfirm={false}
                   disabled

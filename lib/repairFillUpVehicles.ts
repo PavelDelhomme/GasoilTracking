@@ -157,7 +157,13 @@ export async function repairFillUpVehiclesAndBudgets(): Promise<{
             String(t.startTime) < to
         )
         .reduce((s, t) => s + (t.distanceKm || 0), 0);
-      if (km > 1) distPatch.distanceSinceLastKm = Math.round(km * 10) / 10;
+      if (km > 1) {
+        const implied = liters > 0 ? (liters / km) * 100 : 0;
+        // Ne pas coller des km GPS partiels qui donnent une conso absurde (ex. 113 L/100)
+        if (implied <= 0 || (implied >= 3 && implied <= 18)) {
+          distPatch.distanceSinceLastKm = Math.round(km * 10) / 10;
+        }
+      }
     } catch {
       /* ignore */
     }

@@ -44,13 +44,21 @@ export function resolveFillUpDistanceKm(
   trips: TripForDistance[],
   minTripKm = 20
 ): number | null {
+  const saneEnough = (km: number): boolean => {
+    if (!(curr.liters > 0) || !(km > 0)) return km > 0;
+    const l100 = (curr.liters / km) * 100;
+    // Essence/diesel typique : hors 3–18 = distance très probablement incomplète
+    if (curr.isFull) return l100 >= 3 && l100 <= 18;
+    return l100 >= 2 && l100 <= 25;
+  };
+
   if (prev) {
     const explicit = fillUpDistance(prev, curr);
-    if (explicit && explicit > 0) return explicit;
+    if (explicit && explicit > 0 && saneEnough(explicit)) return explicit;
   } else if (curr.distanceSinceLastKm != null && curr.distanceSinceLastKm > 0) {
-    return curr.distanceSinceLastKm;
+    if (saneEnough(curr.distanceSinceLastKm)) return curr.distanceSinceLastKm;
   }
   const tripKm = sumTripKmBetween(trips, prev?.date ?? null, curr.date);
-  if (tripKm >= minTripKm) return tripKm;
+  if (tripKm >= minTripKm && saneEnough(tripKm)) return tripKm;
   return null;
 }

@@ -66,7 +66,8 @@ export function estimateCost(fuelLiters: number, pricePerLiter: number): number 
 /** Calcule la consommation réelle entre deux pleins complets */
 export function calculateRealConsumption(
   previousFillUp: FillUp,
-  currentFillUp: FillUp
+  currentFillUp: FillUp,
+  fuelType?: Vehicle['fuelType']
 ): number | null {
   if (!currentFillUp.isFull || !previousFillUp.isFull) return null;
   let distance: number | null = null;
@@ -80,7 +81,22 @@ export function calculateRealConsumption(
     distance = currentFillUp.distanceSinceLastKm;
   }
   if (!distance || distance <= 0) return null;
-  return (currentFillUp.liters / distance) * 100;
+  const c = (currentFillUp.liters / distance) * 100;
+  return isSaneConsumptionSample(c, fuelType) ? c : null;
+}
+
+/**
+ * Conso L/100 affichable depuis litres + distance.
+ * Retourne null si absurde (ex. 39 L / 34 km → 113 L/100 = km GPS incomplets).
+ */
+export function consumptionFromLitersAndDistance(
+  liters: number,
+  distanceKm: number | null | undefined,
+  fuelType?: Vehicle['fuelType']
+): number | null {
+  if (!(liters > 0) || !(distanceKm != null && distanceKm > 0)) return null;
+  const c = (liters / distanceKm) * 100;
+  return isSaneConsumptionSample(c, fuelType) ? c : null;
 }
 
 /** Écarte les L/100 absurdes (saisie km / litres incohérente). */
@@ -315,6 +331,7 @@ export async function adaptVehicleConsumption(
   const pushSample = (liters: number, distance: number) => {
     if (!(liters > 0) || !(distance >= 20)) return;
     const c = (liters / distance) * 100;
+    if (!isSaneConsumptionSample(c, vehicle.fuelType)) return;
     const key = `${distance.toFixed(1)}:${liters.toFixed(2)}`;
     if (seen.has(key)) return;
     seen.add(key);
