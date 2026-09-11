@@ -209,7 +209,7 @@ export function AccountDrawer() {
                     gasoil-tracking.delhomme.ovh. Connectez-vous pour les recharger ici.
                   </Text>
                   <Button
-                    title="Connexion / récupérer mes données"
+                    title="Connexion"
                     onPress={() => go('/auth')}
                     disabled={busy}
                   />

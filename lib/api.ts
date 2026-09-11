@@ -60,6 +60,22 @@ function accessExpiresSoon(token: string, skewMs = 120_000): boolean {
 
 let refreshInFlight: Promise<boolean> | null = null;
 
+/** Routes auth publiques : pas de Bearer, pas de retry refresh sur 401. */
+function isPublicAuthPath(path: string): boolean {
+  return (
+    path.startsWith('/api/auth/login') ||
+    path.startsWith('/api/auth/register') ||
+    path.startsWith('/api/auth/refresh') ||
+    path.startsWith('/api/auth/forgot-password') ||
+    path.startsWith('/api/auth/reset-password') ||
+    path.startsWith('/api/auth/verify-email') ||
+    path.startsWith('/api/auth/resend-verification') ||
+    path.startsWith('/api/auth/qr/start') ||
+    path.startsWith('/api/auth/qr/poll') ||
+    path.startsWith('/api/auth/qr/status')
+  );
+}
+
 async function refreshSession(): Promise<boolean> {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
@@ -73,12 +89,16 @@ async function refreshSession(): Promise<boolean> {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        await clearSession();
+        // Ne vider la session que si le serveur refuse vraiment le refresh
+        if (res.status === 401 || res.status === 403) {
+          await clearSession();
+        }
         return false;
       }
       await setSession(data.token, data.user, data.refreshToken);
       return true;
     } catch {
+      // Réseau / 5xx : garder l’ancienne session pour retenter plus tard
       return false;
     } finally {
       refreshInFlight = null;
@@ -87,8 +107,15 @@ async function refreshSession(): Promise<boolean> {
   return refreshInFlight;
 }
 
-async function ensureFreshAccessToken(): Promise<string | null> {
+/** Renouvelle silencieusement l’access token à partir du refresh (session déjà connectée). */
+export async function ensureFreshAccessToken(): Promise<string | null> {
   let token = await getToken();
+  const refresh = await getRefreshToken();
+  // Access absent mais refresh présent (ex. race web / storage)
+  if (!token && refresh) {
+    const ok = await refreshSession();
+    return ok ? getToken() : null;
+  }
   if (!token) return null;
   if (accessExpiresSoon(token)) {
     const ok = await refreshSession();
@@ -99,9 +126,7 @@ async function ensureFreshAccessToken(): Promise<string | null> {
 }
 
 async function request(path: string, options: RequestInit = {}, retried = false): Promise<any> {
-  const token = path.startsWith('/api/auth/login') || path.startsWith('/api/auth/register')
-    ? null
-    : await ensureFreshAccessToken();
+  const token = isPublicAuthPath(path) ? null : await ensureFreshAccessToken();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -131,7 +156,9 @@ async function request(path: string, options: RequestInit = {}, retried = false)
     break;
   }
 
-  if (res!.status === 401 && !retried && !path.startsWith('/api/auth/')) {
+  // Important : /api/auth/me, /qr/pair, /qr/approve, etc. doivent aussi renouveler
+  // (avant : exclus à cause de startsWith('/api/auth/') → « Non authentifié » à tort)
+  if (res!.status === 401 && !retried && !isPublicAuthPath(path)) {
     const ok = await refreshSession();
     if (ok) return request(path, options, true);
   }

@@ -286,7 +286,7 @@ export default function HomeScreen() {
             </Text>
             {!user ? (
               <Button
-                title="Se connecter (récupérer mes données)"
+                title="Connexion"
                 onPress={() => router.push('/auth' as never)}
                 style={{ marginTop: 16 }}
               />

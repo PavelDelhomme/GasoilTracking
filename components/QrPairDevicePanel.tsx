@@ -10,8 +10,9 @@ import {
 } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
 import { Button } from '@/components/Button';
-import { startQrPair, statusQrLogin, type QrLoginStart } from '@/lib/api';
+import { ensureFreshAccessToken, startQrPair, statusQrLogin, type QrLoginStart } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
+import { useAuth } from '@/context/AuthContext';
 
 /**
  * Compte web déjà connecté : affiche un QR pour connecter un autre appareil
@@ -21,6 +22,7 @@ import { useToast } from '@/context/ToastContext';
 export function QrPairDevicePanel() {
   const { colors } = useTheme();
   const { showToast } = useToast();
+  const { user } = useAuth();
   const [qr, setQr] = useState<QrLoginStart | null>(null);
   const [status, setStatus] = useState<'idle' | 'pending' | 'done' | 'expired' | 'error'>('idle');
   const [error, setError] = useState('');
@@ -43,6 +45,13 @@ export function QrPairDevicePanel() {
     setError('');
     setStatus('pending');
     try {
+      // Renouvelle silencieusement l’access token (pas de re-login demandé)
+      const token = await ensureFreshAccessToken();
+      if (!token) {
+        setError('Session locale incomplète — rechargez la page (F5), sans vous déconnecter.');
+        setStatus('error');
+        return;
+      }
       const started = await startQrPair();
       setQr(started);
       const exp = new Date(started.expiresAt).getTime();
@@ -92,15 +101,22 @@ export function QrPairDevicePanel() {
       };
       schedulePoll();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Impossible de générer le QR');
+      const msg = e instanceof Error ? e.message : 'Impossible de générer le QR';
+      // Ancien message trompeur : access expiré alors que l’UI montrait encore le compte
+      if (/non authentifi|token invalide|expir/i.test(msg)) {
+        setError('Renouvellement de session… réessayez « Actualiser le QR ».');
+      } else {
+        setError(msg);
+      }
       setStatus('error');
     }
   }, [showToast, stop]);
 
   useEffect(() => {
-    if (Platform.OS === 'web') void begin();
+    if (Platform.OS !== 'web' || !user) return;
+    void begin();
     return () => stop();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (Platform.OS !== 'web') return null;
 
