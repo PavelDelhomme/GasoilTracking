@@ -11,7 +11,9 @@ import {
   addTrackedKm,
 } from '@/lib/database';
 import { parseRoutePoints, ensureDefaultBudgets, refreshAllBudgets, calculateTripStats, formatSpeedKmh } from '@/lib/calculations';
-import { recoverDataAfterUpdateIfNeeded, getUpdatePending } from '@/lib/backup';
+import { recoverDataAfterUpdateIfNeeded, getUpdatePending, refreshFromCloud } from '@/lib/backup';
+import { getToken } from '@/lib/api';
+import { hasLocalUserData } from '@/lib/dataSnapshot';
 import { confirm, notify } from '@/lib/notify';
 import { flushTripUpdates, stopBackgroundTracking } from '@/lib/locationService';
 import { reverseGeocode } from '@/lib/geocode';
@@ -222,6 +224,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           );
         } else if (!cancelled && pendingBefore && recovery === 'ok') {
           notify('Mise à jour OK', 'Application à jour — votre session est toujours active.');
+        }
+        // Filet : session OK mais base encore vide → tire le cloud une 2ᵉ fois
+        if (!cancelled) {
+          const token = await getToken().catch(() => null);
+          const has = await hasLocalUserData().catch(() => false);
+          if (token && !has) {
+            const r = await refreshFromCloud();
+            if (r.ok && !cancelled) {
+              notify('Données restaurées', 'Snapshot cloud récupéré.');
+            }
+          }
         }
       } catch {
         /* ignore */

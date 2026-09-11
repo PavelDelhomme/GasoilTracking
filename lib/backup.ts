@@ -358,6 +358,23 @@ export async function forcePushLocalToCloud(): Promise<{ ok: boolean; reason: st
     /* ignore */
   }
   const local = await collectSnapshot();
+  // Garde-fou : ne jamais écraser un cloud riche avec un local vide/pauvre
+  try {
+    const remote = await fetchSync();
+    const remoteSnap = normalizeSnapshot(remote?.data);
+    const localW = snapshotWeight(local);
+    const remoteW = snapshotWeight(remoteSnap);
+    const localEmptyish = localW < 5 || (local.vehicles?.length || 0) === 0;
+    const remoteHasData = !!remoteSnap && remoteW >= 5 && (remoteSnap.vehicles?.length || 0) > 0;
+    if (localEmptyish && remoteHasData) {
+      return { ok: false, reason: 'local-empty' };
+    }
+    if (remoteSnap && remoteW > localW + 15 && (remoteSnap.trips?.length || 0) > (local.trips?.length || 0) + 3) {
+      return { ok: false, reason: 'cloud-richer' };
+    }
+  } catch {
+    /* offline : on pousse quand même si on a du local */
+  }
   local.exportedAt = new Date().toISOString();
   await pushSyncSafe(local);
   await saveLocalBackup(local);

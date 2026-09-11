@@ -102,6 +102,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch {
           /* ignore */
         }
+        // Sync / pull cloud dès le démarrage (pas seulement sur le web)
+        try {
+          await syncPreferNewer();
+        } catch {
+          /* offline */
+        }
       }
       setLoading(false);
     })();
@@ -175,16 +181,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const localHas = await hasLocalUserData();
       const remote = await fetchSync();
       const remoteSnap = normalizeSnapshot(remote?.data);
+      const remoteVehicles = remoteSnap?.vehicles?.length || 0;
+      const remoteTrips = remoteSnap?.trips?.length || 0;
 
-      if (remoteSnap && !localHas) {
+      // Toujours récupérer le cloud s’il est riche et que le local est vide / quasi vide
+      if (remoteSnap && remoteVehicles > 0 && !localHas) {
         await applySnapshot(remoteSnap, 'replace');
         await saveLocalBackup(remoteSnap);
+      } else if (remoteSnap && remoteVehicles > 0) {
+        // Ne jamais écraser un cloud riche avec un local pauvre au login
+        const result = await syncPreferNewer();
+        if (result === 'skipped' && remoteTrips > 0) {
+          // Si sync n’a rien fait mais cloud a des trajets, s’assurer qu’on n’est pas vide
+          const stillEmpty = !(await hasLocalUserData());
+          if (stillEmpty) {
+            await applySnapshot(remoteSnap, 'replace');
+            await saveLocalBackup(remoteSnap);
+          }
+        }
       } else if (localHas && Platform.OS !== 'web') {
-        // Téléphone déjà peuplé (source de vérité) → pousser vers le cloud
-        // plutôt que de tirer un cloud périmé (ex. jauge 40,7 L vs 13,9 L local).
+        // Cloud vide + local peuplé → pousser une fois
         await forcePushLocalToCloud();
       } else {
-        // Web : IndexedDB souvent périmé — syncPreferNewer (tirage si cloud plus récent).
         await syncPreferNewer();
       }
     } catch {
@@ -207,7 +225,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
         setUser(u);
         const token = await getToken();
-        if (token) await setSession(token, u);
+        const refresh = await getRefreshToken();
+        if (token) await setSession(token, u, refresh);
       }
     } catch {
       setPendingRegistrationsCount(0);

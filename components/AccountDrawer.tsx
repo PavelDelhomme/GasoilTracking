@@ -147,6 +147,13 @@ export function AccountDrawer() {
                       else if (res.reason === 'active-trip')
                         notify('Sync', 'Terminez le trajet avant de pousser.');
                       else if (res.reason === 'no-auth') notify('Sync', 'Connectez-vous d’abord.');
+                      else if (res.reason === 'local-empty')
+                        notify('Sync', 'Appareil vide — utilisez « Actualiser depuis le cloud ».');
+                      else if (res.reason === 'cloud-richer')
+                        notify(
+                          'Sync',
+                          'Le cloud a plus de données — tirez d’abord depuis le cloud.'
+                        );
                       else notify('Sync', 'Échec du push');
                       closeDrawer();
                     } catch (e) {
@@ -197,8 +204,12 @@ export function AccountDrawer() {
               <>
                 <Text style={[styles.section, { color: colors.textSecondary }]}>Connexion</Text>
                 <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 10 }}>
+                    Hors ligne / non connecté : vos données restent sur{' '}
+                    gasoil-tracking.delhomme.ovh. Connectez-vous pour les recharger ici.
+                  </Text>
                   <Button
-                    title="Connexion / Inscription"
+                    title="Connexion / récupérer mes données"
                     onPress={() => go('/auth')}
                     disabled={busy}
                   />

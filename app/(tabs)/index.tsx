@@ -38,7 +38,7 @@ import { formatDateSlash, formatRelativeDay, toLocalYmd } from '@/lib/dates';
 
 export default function HomeScreen() {
   const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles, selectVehicle, isLoading } = useApp();
-  const { syncNow } = useAuth();
+  const { syncNow, user } = useAuth();
   const { colors } = useTheme();
   const { locale } = useLocale();
   const { checkNow } = useAppUpdate();
@@ -280,13 +280,28 @@ export default function HomeScreen() {
             <Ionicons name="car-outline" size={48} color={colors.textSecondary} />
             <Text style={[styles.emptyTitle, { color: colors.text }]}>Aucun véhicule actif</Text>
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              Ajoutez un véhicule pour commencer à suivre votre consommation. Compte et admin : menu
-              ☰ en haut à gauche.
+              {user
+                ? 'Tirez pour actualiser, ou ☰ → « Actualiser depuis le cloud » pour récupérer vos véhicules et trajets.'
+                : 'Vos données sont sur le serveur prod. Connectez-vous avec votre compte pour les récupérer automatiquement.'}
             </Text>
+            {!user ? (
+              <Button
+                title="Se connecter (récupérer mes données)"
+                onPress={() => router.push('/auth' as never)}
+                style={{ marginTop: 16 }}
+              />
+            ) : (
+              <Button
+                title="Actualiser depuis le cloud"
+                onPress={() => void onRefresh()}
+                style={{ marginTop: 16 }}
+              />
+            )}
             <Button
               title="Ajouter un véhicule"
+              variant="outline"
               onPress={() => router.push('/vehicle/add')}
-              style={{ marginTop: 16 }}
+              style={{ marginTop: 10 }}
             />
             {vehicles.length === 0 && __DEV__ && (
               <Button
