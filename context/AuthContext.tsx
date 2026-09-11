@@ -16,8 +16,7 @@ import {
   type PendingRegistrationSummary,
 } from '@/lib/api';
 import { applySnapshot, hasLocalUserData, normalizeSnapshot } from '@/lib/dataSnapshot';
-import { saveLocalBackup, refreshFromCloud, syncPreferNewer, forcePushLocalToCloud } from '@/lib/backup';
-import { getActiveTripLite } from '@/lib/database';
+import { saveLocalBackup, refreshFromCloud, syncPreferNewer, forcePushLocalToCloud, type SyncPreferResult } from '@/lib/backup';
 
 type AuthContextType = {
   user: AuthUser | null;
@@ -33,7 +32,7 @@ type AuthContextType = {
     inviteCode: string
   ) => Promise<{ ok: boolean; pending?: boolean; message?: string }>;
   logout: () => Promise<void>;
-  syncNow: () => Promise<'pulled' | 'pushed' | 'skipped' | void>;
+  syncNow: () => Promise<SyncPreferResult | void>;
   /** Remplace le local par les données cloud du compte */
   refreshCloudNow: () => Promise<{ ok: boolean; reason: string; updatedAt?: string | null }>;
   /** Pousse le local vers le cloud sans tirer (appareil source). */
@@ -83,8 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const token = await getToken();
       if (!token) return;
-      const live = await getActiveTripLite();
-      if (live?.isActive) return;
+      // finalize + tiny close sont dans syncPreferNewer
       await syncPreferNewer();
     } catch {
       /* ignore */

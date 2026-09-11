@@ -140,7 +140,8 @@ export default function HomeScreen() {
       await refresh();
       if (result === 'pulled') showToast('Cloud téléchargé');
       else if (result === 'pushed') showToast('Sauvegarde envoyée au cloud');
-      else if (result === 'skipped') showToast('Sync reportée — terminez le trajet d’abord');
+      else if (result === 'blocked-trip') showToast('Sync reportée — terminez le trajet d’abord');
+      else if (result === 'up-to-date') showToast('Déjà synchronisé');
       else showToast('Synchronisation à jour');
     } catch (e) {
       const fail = syncFailureMessage(e);

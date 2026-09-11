@@ -1,5 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fetchSync, getToken, isPayloadTooLargeError, pushSync } from '@/lib/api';
+import { getToken, isPayloadTooLargeError, pushSync, fetchSync } from '@/lib/api';
 import {
   applySnapshot,
   collectSnapshot,
@@ -12,6 +11,7 @@ import { prepareSnapshotForPush, slimSnapshotAggressive, snapshotContentHash } f
 import { getActiveTripLite, stopActiveTrips } from '@/lib/database';
 import { finalizeStaleActiveTrip } from '@/lib/finalizeStaleTrip';
 import { decideSyncAction } from '@/lib/syncDecision';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const BACKUP_KEY = 'gasoil_local_backup_v1';
 const PENDING_UPDATE_KEY = 'gasoil_pending_update_v1';
@@ -289,13 +289,37 @@ function snapshotTripKm(snap: { trips?: { distanceKm?: number; isActive?: boolea
  * Si le cloud est plus récent, tire ; sinon pousse.
  * Ne tire jamais un cloud « pauvre » (ex. 1 véhicule fantôme) par-dessus un local riche.
  * Privilégie le téléphone s’il a plus d’activité trajet / km (source de vérité terrain).
+ *
+ * Retours :
+ * - up-to-date : hash local ≡ remote (rien à faire)
+ * - blocked-trip : vrai trajet actif récent (ne pas sync)
+ * - skipped : pas de session / rien à sync
  */
-export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'> {
+export type SyncPreferResult =
+  | 'pulled'
+  | 'pushed'
+  | 'up-to-date'
+  | 'blocked-trip'
+  | 'skipped';
+
+export async function syncPreferNewer(): Promise<SyncPreferResult> {
   const token = await getToken();
   if (!token) return 'skipped';
   try {
-    const live = await getActiveTripLite();
-    if (live?.isActive) return 'skipped';
+    // Zombies d’abord — sinon sync bloquée sans trajet visible à l’UI.
+    await finalizeStaleActiveTrip();
+    let live = await getActiveTripLite();
+    if (live?.isActive) {
+      const tiny = (live.distanceKm || 0) < 0.5;
+      const paused = !!live.isPaused;
+      const startMs = Date.parse(live.startTime || '');
+      const oldGhost = Number.isFinite(startMs) && Date.now() - startMs > 90 * 60 * 1000;
+      if (tiny || paused || oldGhost) {
+        await stopActiveTrips();
+        live = await getActiveTripLite();
+      }
+    }
+    if (live?.isActive) return 'blocked-trip';
   } catch {
     /* continue */
   }
@@ -318,7 +342,7 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
       lastRemoteHash: remoteHash,
       lastPulledServerAt: Math.max(meta.lastPulledServerAt, remoteServerAt),
     });
-    return 'skipped';
+    return 'up-to-date';
   }
 
   const remoteW = snapshotWeight(remoteSnap);
@@ -339,7 +363,7 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
   });
 
   if (action === 'skip' || !remoteSnap) {
-    if (action === 'skip') return 'skipped';
+    if (action === 'skip') return 'up-to-date';
     // Pas de remote → pousser si on a du local
     if ((local.vehicles?.length || 0) > 0) {
       await pushSyncSafe(local);
@@ -375,7 +399,15 @@ export async function forcePushLocalToCloud(): Promise<{ ok: boolean; reason: st
   const token = await getToken();
   if (!token) return { ok: false, reason: 'no-auth' };
   try {
-    const live = await getActiveTripLite();
+    await finalizeStaleActiveTrip();
+    let live = await getActiveTripLite();
+    if (live?.isActive) {
+      const tiny = (live.distanceKm || 0) < 0.5;
+      if (tiny || live.isPaused) {
+        await stopActiveTrips();
+        live = await getActiveTripLite();
+      }
+    }
     if (live?.isActive) return { ok: false, reason: 'active-trip' };
   } catch {
     /* continue */

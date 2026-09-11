@@ -139,7 +139,11 @@ export default function AccountScreen() {
                   ? 'Cloud → appareil'
                   : r === 'pushed'
                     ? 'Appareil → cloud'
-                    : 'Rien à sync'
+                    : r === 'blocked-trip'
+                      ? 'Terminez le trajet d’abord'
+                      : r === 'up-to-date'
+                        ? 'Déjà synchronisé'
+                        : 'Rien à sync'
               );
             } catch (e) {
               notify('Sync', e instanceof Error ? e.message : String(e));
