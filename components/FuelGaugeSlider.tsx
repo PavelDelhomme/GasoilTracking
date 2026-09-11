@@ -42,6 +42,8 @@ type Props = {
   /** Très petite jauge (ex. avant/après dans détail plein). */
   mini?: boolean;
   requireConfirm?: boolean;
+  /** Véhicule (806 = seuil critique au quart). */
+  vehicle?: { name?: string; model?: string; brand?: string } | null;
 };
 
 export function FuelGaugeSlider({
@@ -53,6 +55,7 @@ export function FuelGaugeSlider({
   compact,
   mini,
   requireConfirm = true,
+  vehicle,
 }: Props) {
   const { colors } = useTheme();
   const capacity = Math.max(1, tankCapacity || 50);
@@ -75,6 +78,7 @@ export function FuelGaugeSlider({
   const tone = fuelRemainingTone({
     litersRemaining: displayL,
     tankCapacity: capacity,
+    vehicle,
   });
   const fillColor = fuelToneColor(tone, colors);
 

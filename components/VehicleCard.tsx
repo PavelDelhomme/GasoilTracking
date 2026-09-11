@@ -43,6 +43,7 @@ export function VehicleCard({
     litersRemaining: vehicle.estimatedFuelLiters,
     tankCapacity: vehicle.tankCapacity,
     lowLitersThreshold: vehicle.lowFuelThresholdLiters,
+    vehicle,
   });
   const fuelColor = fuelToneColor(fuelTone, colors);
   const [draftLiters, setDraftLiters] = useState<number | null>(vehicle.estimatedFuelLiters);
@@ -136,6 +137,7 @@ export function VehicleCard({
           tankCapacity={vehicle.tankCapacity}
           liters={draftLiters}
           accentColor={fuelColor}
+          vehicle={vehicle}
           onChange={setDraftLiters}
           onChangeEnd={(L) => void commitFuel(L)}
         />

@@ -76,6 +76,7 @@ import {
   SIM_WORK,
 } from '@/lib/gpsCarSimulator';
 import { applyTripFuelBurn, fuelRemainingTone, fuelToneColor, setFuelLiters } from '@/lib/fuelLevel';
+import { checkNearestStationReach } from '@/lib/nearestStationReach';
 import { askFuelGaugeApprox } from '@/lib/fuelGaugePrompt';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
 import { SpeedDialFab } from '@/components/SpeedDialFab';
@@ -142,6 +143,7 @@ async function offerDetourStations(opts: {
     litersRemaining: opts.liters,
     tankCapacity: opts.vehicle.tankCapacity,
     lowLitersThreshold: opts.vehicle.lowFuelThresholdLiters,
+    vehicle: opts.vehicle,
   });
   if (tone !== 'critical' && tone !== 'warn') return 'continue';
   if (!isFrenchFuelOpenDataAvailable(opts.countryCode) || !opts.origin) {
@@ -294,6 +296,8 @@ export default function TripScreen() {
   const [fuelStopVia, setFuelStopVia] = useState<GeoCoords | null>(null);
   const arrivalPromptedRef = useRef(false);
   const startingRef = useRef(false);
+  /** Une alerte station mid-trajet par trajet (critique). */
+  const criticalStationAlertedRef = useRef(false);
   const fittedTripIdRef = useRef<number | null>(null);
   /** Queue carte live (max ~80 pts) — ne jamais garder le JSON GPS complet en state React. */
   const [liveMapTail, setLiveMapTail] = useState<RoutePoint[]>([]);
@@ -892,6 +896,7 @@ export default function TripScreen() {
         await setFuelLiters(activeVehicle, startFuel);
       }
       setTripStartFuelLiters(startFuel);
+      criticalStationAlertedRef.current = false;
 
       await stopActiveTrips();
       const loc = await getCurrentLocation({ fresh: true });
@@ -1591,6 +1596,7 @@ export default function TripScreen() {
   useEffect(() => {
     if (!activeTrip?.id) {
       arrivalPromptedRef.current = false;
+      criticalStationAlertedRef.current = false;
       setNearDestination(false);
       return;
     }
@@ -1604,6 +1610,123 @@ export default function TripScreen() {
     const sub = AppState.addEventListener('change', onChange);
     return () => sub.remove();
   }, [activeTrip?.id, activeTrip?.isPaused, checkArrivalProximity]);
+
+  // Pendant trajet : alerte une fois si réservoir critique → station proche / moins chère
+  useEffect(() => {
+    if (!activeTrip?.isActive || activeTrip.isPaused || !activeVehicle) return;
+    if (criticalStationAlertedRef.current) return;
+
+    const burned =
+      activeTrip.estimatedFuelUsed > 0.01
+        ? activeTrip.estimatedFuelUsed
+        : estimateTripFuelLiters(activeVehicle, activeTrip.distanceKm, {
+            learnedFactor: activeVehicle.consumptionLearnFactor,
+          });
+    const remaining = Math.max(
+      0,
+      (tripStartFuelLiters ??
+        activeVehicle.estimatedFuelLiters ??
+        activeVehicle.tankCapacity) - burned
+    );
+    const tone = fuelRemainingTone({
+      litersRemaining: remaining,
+      tankCapacity: activeVehicle.tankCapacity,
+      lowLitersThreshold: activeVehicle.lowFuelThresholdLiters,
+      vehicle: activeVehicle,
+    });
+    if (tone !== 'critical') return;
+    criticalStationAlertedRef.current = true;
+    void (async () => {
+      const origin =
+        userLocation ||
+        (await getCurrentLocation()
+          .then((l) =>
+            l
+              ? { latitude: l.coords.latitude, longitude: l.coords.longitude }
+              : null
+          )
+          .catch(() => null));
+      if (!origin || !isFrenchFuelOpenDataAvailable(countryCode)) {
+        Alert.alert(
+          'Réservoir critique',
+          `Il reste ~${remaining.toFixed(1)} L — trouvez une station rapidement.`,
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      try {
+        const stations = await fetchCheapestStations({
+          latitude: origin.latitude,
+          longitude: origin.longitude,
+          radiusKm: 18,
+          fuel: activeVehicle.fuelType,
+          limit: 20,
+          countryCode,
+        });
+        const res = await checkNearestStationReach({
+          vehicle: activeVehicle,
+          litersRemaining: remaining,
+          latitude: origin.latitude,
+          longitude: origin.longitude,
+          countryCode,
+        });
+        const ranked = rankStationsForDetour({
+          stations,
+          vehicle: activeVehicle,
+          litersRemaining: remaining,
+          limit: 3,
+        });
+        const lines = [
+          `Il reste ~${remaining.toFixed(1)} L — allez à une station.`,
+          res ? res.message : null,
+          ranked[0]
+            ? `Moins chère à portée : ${ranked[0].name} · ${ranked[0].pricePerL.toFixed(3)} €/L · ${ranked[0].detourKm.toFixed(1)} km`
+            : null,
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+        Alert.alert('Attention — carburant critique', lines, [
+          { text: 'Plus tard', style: 'cancel' },
+          ...(ranked[0]
+            ? [
+                {
+                  text: 'Via cette station',
+                  onPress: () => {
+                    setFuelStopVia({
+                      latitude: ranked[0].latitude,
+                      longitude: ranked[0].longitude,
+                    });
+                    notify('Détour station', ranked[0].name);
+                  },
+                },
+              ]
+            : []),
+          {
+            text: 'Nouveau plein',
+            onPress: () => router.push('/fillup/add' as never),
+          },
+        ]);
+      } catch {
+        Alert.alert(
+          'Réservoir critique',
+          `Il reste ~${remaining.toFixed(1)} L — trouvez une station.`,
+          [{ text: 'OK' }]
+        );
+      }
+    })();
+  }, [
+    activeTrip?.id,
+    activeTrip?.isActive,
+    activeTrip?.isPaused,
+    activeTrip?.distanceKm,
+    activeTrip?.estimatedFuelUsed,
+    activeVehicle?.id,
+    activeVehicle?.estimatedFuelLiters,
+    tripStartFuelLiters,
+    userLocation?.latitude,
+    userLocation?.longitude,
+    countryCode,
+  ]);
 
   // Pendant trajet : vérifier proximité périodiquement
   useEffect(() => {
@@ -1984,6 +2107,7 @@ export default function TripScreen() {
           litersRemaining: liveFuelRemaining,
           tankCapacity: activeVehicle.tankCapacity,
           lowLitersThreshold: activeVehicle.lowFuelThresholdLiters,
+          vehicle: activeVehicle,
         })
       : 'ok';
   const liveFuelColor = fuelToneColor(liveFuelTone, colors);
@@ -2248,6 +2372,26 @@ export default function TripScreen() {
                         accessibilityLabel={`Limitation ${liveSpeedLimit.limitKmh} km/h`}
                       >
                         <Text style={styles.speedLimitValue}>{liveSpeedLimit.limitKmh}</Text>
+                      </View>
+                    ) : null}
+                    {liveFuelRemaining != null &&
+                    (liveFuelTone === 'warn' || liveFuelTone === 'critical') ? (
+                      <View
+                        style={[
+                          styles.fuelHudChip,
+                          { borderColor: liveFuelColor, backgroundColor: 'rgba(15,23,42,0.9)' },
+                        ]}
+                      >
+                        <Text style={{ color: liveFuelColor, fontWeight: '900', fontSize: 15 }}>
+                          {liveFuelRemaining.toFixed(1)} L
+                        </Text>
+                        <Text style={{ color: '#94a3b8', fontWeight: '700', fontSize: 11 }}>
+                          {Math.round(
+                            (liveFuelRemaining / Math.max(1, activeVehicle?.tankCapacity || 50)) *
+                              100
+                          )}
+                          %
+                        </Text>
                       </View>
                     ) : null}
                   </View>
@@ -3195,6 +3339,7 @@ export default function TripScreen() {
                       tankCapacity: tank,
                       lowLitersThreshold: activeVehicle?.lowFuelThresholdLiters,
                       rangeKm: sinceFill.rangeKm,
+                      vehicle: activeVehicle,
                     });
                     const toneColor = fuelToneColor(tone, colors);
                     return (

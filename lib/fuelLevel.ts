@@ -149,34 +149,63 @@ export function fuelLevelPercent(vehicle: Vehicle): number {
 
 export type FuelTone = 'ok' | 'warn' | 'critical' | 'unknown';
 
-/** Autonomie basse ≈ ⅓ réservoir ; critique ≈ ¼. */
+/** Autonomie basse ≈ ⅓ réservoir. */
 export const FUEL_WARN_FRACTION = 1 / 3;
-export const FUEL_CRITICAL_FRACTION = 1 / 4;
+/**
+ * Critique ≈ moitié du quart (1/8).
+ * Exception 806 (jauge / réservoir trompeur) : dès le quart (1/4) = quasiment vide.
+ */
+export const FUEL_CRITICAL_FRACTION = 1 / 8;
+export const FUEL_CRITICAL_FRACTION_UNRELIABLE_TANK = 1 / 4;
+
+/** 806 : la jauge « quart » correspond déjà à un réservoir quasi vide. */
+export function vehicleHasUnreliableFuelGauge(vehicle: {
+  name?: string;
+  model?: string;
+  brand?: string;
+}): boolean {
+  const blob = `${vehicle.name || ''} ${vehicle.model || ''} ${vehicle.brand || ''}`;
+  return /\b806\b/i.test(blob);
+}
+
+export function criticalFuelFraction(vehicle?: {
+  name?: string;
+  model?: string;
+  brand?: string;
+} | null): number {
+  if (vehicle && vehicleHasUnreliableFuelGauge(vehicle)) {
+    return FUEL_CRITICAL_FRACTION_UNRELIABLE_TANK;
+  }
+  return FUEL_CRITICAL_FRACTION;
+}
 
 export function fuelRemainingTone(opts: {
   litersRemaining: number | null | undefined;
   tankCapacity: number;
   lowLitersThreshold?: number | null;
   rangeKm?: number | null;
+  /** Pour seuils 806 (quart) vs standard (½ quart). */
+  vehicle?: { name?: string; model?: string; brand?: string } | null;
 }): FuelTone {
-  const { litersRemaining, tankCapacity, lowLitersThreshold, rangeKm } = opts;
+  const { litersRemaining, tankCapacity, lowLitersThreshold, rangeKm, vehicle } = opts;
   if (litersRemaining == null || !Number.isFinite(litersRemaining) || tankCapacity <= 0) {
     return 'unknown';
   }
+  const critFrac = criticalFuelFraction(vehicle);
   const pct = (litersRemaining / tankCapacity) * 100;
   const warnLiters =
     lowLitersThreshold != null && lowLitersThreshold > 0
       ? lowLitersThreshold
       : tankCapacity * FUEL_WARN_FRACTION;
-  const criticalLiters = Math.min(warnLiters * 0.75, tankCapacity * FUEL_CRITICAL_FRACTION);
+  const criticalLiters = Math.min(warnLiters * 0.85, tankCapacity * critFrac);
 
-  // Seuils km (approx) : critique ~¼ plein, warn ~⅓ — basés sur conso typique ~8 L/100
-  const criticalKm = tankCapacity * FUEL_CRITICAL_FRACTION * (100 / 8);
+  // Seuils km (approx) — conso typique ~8 L/100
+  const criticalKm = tankCapacity * critFrac * (100 / 8);
   const warnKm = tankCapacity * FUEL_WARN_FRACTION * (100 / 8);
 
   if (
     litersRemaining <= criticalLiters ||
-    pct <= FUEL_CRITICAL_FRACTION * 100 ||
+    pct <= critFrac * 100 ||
     (rangeKm != null && rangeKm > 0 && rangeKm < criticalKm)
   ) {
     return 'critical';

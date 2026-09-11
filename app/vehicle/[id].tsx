@@ -94,6 +94,7 @@ export default function VehicleDetailScreen() {
     tankCapacity: vehicle.tankCapacity,
     lowLitersThreshold: vehicle.lowFuelThresholdLiters,
     rangeKm: since?.rangeKm,
+    vehicle,
   });
   const fuelColor = fuelToneColor(tone, colors);
   const isActive = activeVehicle?.id === vehicle.id;

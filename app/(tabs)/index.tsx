@@ -30,6 +30,8 @@ import { getPlaces, getMaintenances, getTrips, reconcileTrackedKmFromTrips } fro
 import { syncFailureMessage } from '@/lib/api';
 import { computeBudgetOutlook } from '@/lib/budgetOutlook';
 import { fuelRemainingTone, fuelToneColor, setFuelLiters } from '@/lib/fuelLevel';
+import { checkNearestStationReach } from '@/lib/nearestStationReach';
+import { getCurrentLocation } from '@/lib/locationService';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
 import { TutorialAnchor } from '@/components/TutorialAnchor';
 import type { ConsumptionStats, Place, SinceLastFillStats, Trip, VehicleMaintenance } from '@/types';
@@ -40,7 +42,7 @@ export default function HomeScreen() {
   const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles, selectVehicle, isLoading } = useApp();
   const { syncNow, user } = useAuth();
   const { colors } = useTheme();
-  const { locale } = useLocale();
+  const { locale, countryCode } = useLocale();
   const { checkNow } = useAppUpdate();
   const { showToast } = useToast();
   const [stats, setStats] = useState<ConsumptionStats | null>(null);
@@ -52,6 +54,7 @@ export default function HomeScreen() {
   const [dueMaintenances, setDueMaintenances] = useState<VehicleMaintenance[]>([]);
   const [todayTrips, setTodayTrips] = useState<Trip[]>([]);
   const [homeFuelDraft, setHomeFuelDraft] = useState<number | null>(null);
+  const [stationCheckBusy, setStationCheckBusy] = useState(false);
 
   useEffect(() => {
     setHomeFuelDraft(activeVehicle?.estimatedFuelLiters ?? null);
@@ -211,6 +214,54 @@ export default function HomeScreen() {
     } as never);
   };
 
+  const checkReachNearestStation = useCallback(async () => {
+    if (!activeVehicle || stationCheckBusy) return;
+    const liters =
+      activeVehicle.estimatedFuelLiters ?? sinceFill?.fuelRemainingEst ?? null;
+    if (liters == null) {
+      notify('Carburant', 'Indiquez d’abord le niveau sur la jauge.');
+      return;
+    }
+    setStationCheckBusy(true);
+    try {
+      const loc = await getCurrentLocation();
+      if (!loc) {
+        notify('GPS', 'Activez la localisation pour trouver une station.');
+        return;
+      }
+      const res = await checkNearestStationReach({
+        vehicle: activeVehicle,
+        litersRemaining: liters,
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        countryCode,
+      });
+      if (!res) {
+        notify('Stations', 'Aucune station trouvée à proximité (France open data).');
+        return;
+      }
+      const extra = res.best
+        ? `\n\nMoins chère intéressante : ${res.best.name} · ${res.best.distanceKm.toFixed(1)} km · ${res.best.pricePerL.toFixed(3)} €/L` +
+          (res.best.canReach ? '' : ' (détour risqué)')
+        : '';
+      Alert.alert(
+        res.canReachNearest ? 'Assez pour la station' : 'Attention — marge faible',
+        res.message + extra,
+        [
+          { text: 'OK', style: 'cancel' },
+          {
+            text: 'Nouveau plein',
+            onPress: () => router.push('/fillup/add' as never),
+          },
+        ]
+      );
+    } catch (e) {
+      notify('Stations', e instanceof Error ? e.message : 'Échec');
+    } finally {
+      setStationCheckBusy(false);
+    }
+  }, [activeVehicle, stationCheckBusy, sinceFill?.fuelRemainingEst, countryCode]);
+
   const mainBudget = budgetStatuses.find((s) => s.budget.vehicleId == null) || budgetStatuses[0];
   const homePlace = places.find((p) => p.kind === 'home');
   const workPlace = places.find((p) => p.kind === 'work');
@@ -255,9 +306,12 @@ export default function HomeScreen() {
         tankCapacity: activeVehicle.tankCapacity,
         lowLitersThreshold: activeVehicle.lowFuelThresholdLiters,
         rangeKm: sinceFill?.rangeKm,
+        vehicle: activeVehicle,
       })
     : 'unknown';
   const fuelColor = fuelToneColor(fuelTone, colors);
+  const litersNow =
+    activeVehicle?.estimatedFuelLiters ?? sinceFill?.fuelRemainingEst ?? null;
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -371,6 +425,7 @@ export default function HomeScreen() {
                   tankCapacity={activeVehicle.tankCapacity}
                   liters={homeFuelDraft}
                   accentColor={fuelColor}
+                  vehicle={activeVehicle}
                   onChange={setHomeFuelDraft}
                   onChangeEnd={async (L) => {
                     setHomeFuelDraft(L);
@@ -535,12 +590,36 @@ export default function HomeScreen() {
                 <Text style={{ color: fuelColor, fontWeight: '800', fontSize: 14 }}>
                   {fuelTone === 'critical' ? 'Réservoir critique' : 'Carburant bas'}
                 </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4, lineHeight: 17 }}>
+                  {fuelTone === 'critical'
+                    ? 'Allez à une station bientôt (plus proche ou moins chère à portée).'
+                    : 'Vérifiez si vous atteignez au moins la station la plus proche.'}
+                </Text>
                 <Button
                   title="Nouveau plein"
                   onPress={() => router.push('/fillup/add')}
                   style={{ marginTop: 8 }}
                 />
+                <Button
+                  title={stationCheckBusy ? 'Recherche…' : 'Assez pour la station ?'}
+                  variant="outline"
+                  onPress={() => void checkReachNearestStation()}
+                  disabled={stationCheckBusy || litersNow == null}
+                  style={{ marginTop: 8 }}
+                />
               </Card>
+            )}
+
+            {fuelTone === 'ok' && litersNow != null && activeVehicle && (
+              <Pressable
+                onPress={() => void checkReachNearestStation()}
+                disabled={stationCheckBusy}
+                style={{ marginBottom: 10, alignSelf: 'flex-start' }}
+              >
+                <Text style={{ color: colors.accent, fontWeight: '600', fontSize: 13 }}>
+                  {stationCheckBusy ? 'Recherche station…' : 'Assez pour la station la plus proche ?'}
+                </Text>
+              </Pressable>
             )}
 
             {/* Totaux : toujours sous la jauge / depuis-plein, jamais chevauchés */}
