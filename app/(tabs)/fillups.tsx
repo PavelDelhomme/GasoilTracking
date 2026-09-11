@@ -108,7 +108,7 @@ export default function FillUpsScreen() {
   }, [allFillUps, selectedMonth]);
 
   const periodStats = useMemo((): MonthFillStats => {
-    if (selectedMonth !== 'all') return getMonthFillStats(allFillUps, selectedMonth);
+    if (selectedMonth !== 'all') return getMonthFillStats(allFillUps, selectedMonth, activeVehicle?.fuelType);
     let totalCost = 0;
     let totalLiters = 0;
     let totalDistanceKm = 0;
@@ -161,8 +161,13 @@ export default function FillUpsScreen() {
   const compareMonth = selectedMonth === 'all' ? currentMonthKey() : selectedMonth;
   const monthCompare = useMemo(() => {
     if (!allFillUps.length || selectedMonth === 'all') return null;
-    return compareMonthFillStats(allFillUps, compareMonth, previousMonthKey(compareMonth));
-  }, [allFillUps, compareMonth, selectedMonth]);
+    return compareMonthFillStats(
+      allFillUps,
+      compareMonth,
+      previousMonthKey(compareMonth),
+      activeVehicle?.fuelType
+    );
+  }, [allFillUps, compareMonth, selectedMonth, activeVehicle?.fuelType]);
 
   const exportCsv = async () => {
     const month = selectedMonth === 'all' ? currentMonthKey() : selectedMonth;

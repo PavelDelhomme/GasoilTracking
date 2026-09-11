@@ -135,6 +135,7 @@ export async function getConsumptionStats(vehicleId: number): Promise<Consumptio
   for (const f of ordered) {
     if (f.distanceSinceLastKm && f.distanceSinceLastKm > 0 && f.liters > 0) {
       const c = (f.liters / f.distanceSinceLastKm) * 100;
+      if (!isSaneConsumptionSample(c, vehicle?.fuelType)) continue;
       if (!consumptions.some((x) => Math.abs(x - c) < 0.05)) {
         consumptions.push(c);
         totalDistance += f.distanceSinceLastKm;
@@ -164,7 +165,11 @@ export async function getConsumptionStats(vehicleId: number): Promise<Consumptio
 }
 
 /** Agrégats pleins pour un mois (AAAA-MM) */
-export function getMonthFillStats(fillUps: FillUp[], monthKey: string): MonthFillStats {
+export function getMonthFillStats(
+  fillUps: FillUp[],
+  monthKey: string,
+  fuelType?: Vehicle['fuelType']
+): MonthFillStats {
   const monthFills = fillUps.filter((f) => monthKeyFromDate(f.date) === monthKey);
   const totalCost = monthFills.reduce((s, f) => s + f.totalCost, 0);
   const totalLiters = monthFills.reduce((s, f) => s + f.liters, 0);
@@ -172,8 +177,11 @@ export function getMonthFillStats(fillUps: FillUp[], monthKey: string): MonthFil
   const consumptions: number[] = [];
   for (const f of monthFills) {
     if (f.distanceSinceLastKm && f.distanceSinceLastKm > 0 && f.liters > 0) {
+      const c = (f.liters / f.distanceSinceLastKm) * 100;
+      // Ignore km GPS partiels qui donnent une conso absurde
+      if (!isSaneConsumptionSample(c, fuelType)) continue;
       totalDistanceKm += f.distanceSinceLastKm;
-      consumptions.push((f.liters / f.distanceSinceLastKm) * 100);
+      consumptions.push(c);
     }
   }
   return {
@@ -203,16 +211,18 @@ export type MonthFillCompare = {
 export function compareMonthFillStats(
   fillUps: FillUp[],
   currentMonthKey: string,
-  previousMonthKey: string
+  previousMonthKey: string,
+  fuelType?: Vehicle['fuelType']
 ): MonthFillCompare {
-  const current = getMonthFillStats(fillUps, currentMonthKey);
-  const previous = getMonthFillStats(fillUps, previousMonthKey);
+  const current = getMonthFillStats(fillUps, currentMonthKey, fuelType);
+  const previous = getMonthFillStats(fillUps, previousMonthKey, fuelType);
   const deltaCost = Math.round((current.totalCost - previous.totalCost) * 100) / 100;
   const deltaLiters = Math.round((current.totalLiters - previous.totalLiters) * 100) / 100;
   const deltaCostPct =
     previous.totalCost > 0
       ? Math.round(((current.totalCost - previous.totalCost) / previous.totalCost) * 1000) / 10
       : null;
+  // L/100 seulement si les deux moyennes sont saines (déjà filtrées)
   const deltaConsumption =
     current.avgConsumption != null && previous.avgConsumption != null
       ? Math.round((current.avgConsumption - previous.avgConsumption) * 10) / 10

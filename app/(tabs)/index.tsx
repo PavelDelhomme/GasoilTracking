@@ -528,9 +528,10 @@ export default function HomeScreen() {
               </Card>
             )}
 
-            <View style={styles.statsRow}>
+            {/* Totaux : toujours sous la jauge / depuis-plein, jamais chevauchés */}
+            <View style={[styles.statsRow, { alignItems: 'stretch' }]}>
               <StatCard
-                label="Carburant total"
+                label="Dépensé"
                 value={formatEuro(stats?.totalCost ?? 0)}
                 subtitle={`${stats?.fillUpCount ?? 0} plein(s)`}
                 onPress={() => router.push('/(tabs)/budget' as never)}
@@ -538,6 +539,7 @@ export default function HomeScreen() {
               <StatCard
                 label="Distance"
                 value={formatDistance(stats?.totalDistance ?? 0)}
+                subtitle="tous trajets"
               />
             </View>
 
@@ -829,7 +831,12 @@ const styles = StyleSheet.create({
   tripTitle: { fontSize: 16, fontWeight: '700' },
   tripStats: { flexDirection: 'row', justifyContent: 'space-around' },
   tripStat: { fontSize: 18, fontWeight: '600' },
-  statsRow: { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 12,
+    width: '100%',
+  },
   budgetCard: { marginBottom: 16 },
   sectionTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
   quickChip: {

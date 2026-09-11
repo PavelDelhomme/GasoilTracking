@@ -35,19 +35,32 @@ export function StatCard({ label, value, subtitle, color, onPress }: StatCardPro
       style={styles.statCard}
       accessibilityLabel={`${label} : ${value}${subtitle ? `, ${subtitle}` : ''}`}
     >
-      <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{label}</Text>
-      <Text style={[styles.statValue, { color: color ?? colors.text }]}>{value}</Text>
-      {subtitle && (
-        <Text style={[styles.statSubtitle, { color: colors.textSecondary }]}>{subtitle}</Text>
-      )}
+      <Text style={[styles.statLabel, { color: colors.textSecondary }]} numberOfLines={1}>
+        {label}
+      </Text>
+      <Text
+        style={[styles.statValue, { color: color ?? colors.text }]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.75}
+      >
+        {value}
+      </Text>
+      {subtitle ? (
+        <Text style={[styles.statSubtitle, { color: colors.textSecondary }]} numberOfLines={2}>
+          {subtitle}
+        </Text>
+      ) : null}
     </Card>
   );
-  if (!onPress) return inner;
+  if (!onPress) {
+    return <View style={{ flex: 1, minWidth: 0 }}>{inner}</View>;
+  }
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      style={{ flex: 1 }}
+      style={{ flex: 1, minWidth: 0 }}
     >
       {inner}
     </Pressable>
@@ -119,7 +132,8 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    minWidth: 140,
+    minWidth: 0,
+    maxWidth: '100%',
   },
   statLabel: {
     fontSize: 12,
@@ -129,8 +143,9 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   statValue: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '700',
+    flexShrink: 1,
   },
   statSubtitle: {
     fontSize: 12,

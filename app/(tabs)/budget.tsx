@@ -433,12 +433,16 @@ export default function BudgetScreen() {
   const vehicleName = (id: number) => vehicles.find((v) => v.id === id)?.name || `Véhicule #${id}`;
 
   const compareMonth = selectedMonth || calendarMonth;
+  const fillsForCompare = budgetAllVehicles
+    ? allFillsForCompare
+    : allFillsForCompare.filter((f) => !activeVehicle || f.vehicleId === activeVehicle.id);
   const monthCompare = (() => {
-    if (!allFillsForCompare.length) return null;
+    if (!fillsForCompare.length) return null;
     return compareMonthFillStats(
-      allFillsForCompare,
+      fillsForCompare,
       compareMonth,
-      previousMonthKey(compareMonth)
+      previousMonthKey(compareMonth),
+      activeVehicle && !budgetAllVehicles ? activeVehicle.fuelType : undefined
     );
   })();
 
@@ -562,9 +566,9 @@ export default function BudgetScreen() {
                   : ''}
                 {' · '}
                 {monthCompare.deltaLiters >= 0 ? '+' : ''}
-                {monthCompare.deltaLiters.toFixed(1)} L
+                {monthCompare.deltaLiters.toFixed(1)} L achetés
                 {monthCompare.deltaConsumption != null
-                  ? ` · L/100 ${monthCompare.deltaConsumption >= 0 ? '+' : ''}${monthCompare.deltaConsumption}`
+                  ? ` · L/100 ${monthCompare.deltaConsumption >= 0 ? '+' : ''}${monthCompare.deltaConsumption.toFixed(1)}`
                   : ''}
               </Text>
             )}
