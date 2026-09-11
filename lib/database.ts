@@ -1320,6 +1320,31 @@ export async function getMonthlySpendByVehicle(
     .sort((a, b) => a.month.localeCompare(b.month));
 }
 
+/** expo-sqlite refuse / compte mal les `undefined` dans les binds → toujours null. */
+function sqlBind(values: unknown[]): (string | number | null)[] {
+  return values.map((v) => {
+    if (v === undefined || v === null) return null;
+    if (typeof v === 'boolean') return v ? 1 : 0;
+    if (typeof v === 'number' || typeof v === 'string') return v;
+    return String(v);
+  });
+}
+
+async function runInsert(
+  database: SQLite.SQLiteDatabase,
+  sql: string,
+  values: unknown[]
+): Promise<void> {
+  const binds = sqlBind(values);
+  const placeholders = (sql.match(/\?/g) || []).length;
+  if (binds.length !== placeholders) {
+    throw new Error(
+      `SQLite bind mismatch: ${binds.length} values for ${placeholders} placeholders`
+    );
+  }
+  await database.runAsync(sql, binds);
+}
+
 /** Remplace tout le contenu local (préserve les ids) — utilisé backup / sync. */
 export async function replaceAllData(data: {
   vehicles: Vehicle[];
@@ -1345,9 +1370,22 @@ export async function replaceAllData(data: {
       `);
 
       for (const v of data.vehicles || []) {
-        await database.runAsync(
-          `INSERT INTO vehicles (id, name, brand, model, year, fuel_type, consumption_per_100, tank_capacity, default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters, consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters, consumption_learn_factor, transmission_gears, curb_weight_kg, drag_area_scx, vehicle_segment, payload_kg, is_active, created_at, plate_number, vin, registration_photo_uri)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        const checklist =
+          v.maintenanceChecklist == null
+            ? null
+            : typeof v.maintenanceChecklist === 'string'
+              ? v.maintenanceChecklist
+              : JSON.stringify(v.maintenanceChecklist);
+        await runInsert(
+          database,
+          `INSERT INTO vehicles (
+            id, name, brand, model, year, fuel_type, consumption_per_100, tank_capacity,
+            default_fuel_price, current_odometer, has_odometer, tracked_km, estimated_fuel_liters,
+            consumption_auto_adapt, notify_maintenance, notify_low_fuel, low_fuel_threshold_liters,
+            consumption_learn_factor, transmission_gears, curb_weight_kg, drag_area_scx,
+            vehicle_segment, payload_kg, maintenance_up_to_date, maintenance_checklist,
+            is_active, created_at, plate_number, vin, registration_photo_uri
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             v.id,
             v.name,
@@ -1372,6 +1410,8 @@ export async function replaceAllData(data: {
             v.dragAreaScx ?? null,
             v.vehicleSegment ?? null,
             v.payloadKg ?? null,
+            v.maintenanceUpToDate == null ? null : v.maintenanceUpToDate ? 1 : 0,
+            checklist,
             v.isActive ? 1 : 0,
             v.createdAt || new Date().toISOString(),
             v.plateNumber ?? null,
@@ -1382,9 +1422,13 @@ export async function replaceAllData(data: {
       }
 
       for (const t of data.trips || []) {
-        await database.runAsync(
-          `INSERT INTO trips (id, vehicle_id, start_time, end_time, distance_km, estimated_fuel_used, estimated_cost, route_points, origin_name, destination_name, is_active, status, source, fill_up_id, note, is_paused)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        await runInsert(
+          database,
+          `INSERT INTO trips (
+            id, vehicle_id, start_time, end_time, distance_km, estimated_fuel_used, estimated_cost,
+            route_points, origin_name, destination_name, is_active, status, source, fill_up_id,
+            note, is_paused
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             t.id,
             t.vehicleId,
@@ -1407,9 +1451,12 @@ export async function replaceAllData(data: {
       }
 
       for (const f of data.fillUps || []) {
-        await database.runAsync(
-          `INSERT INTO fill_ups (id, vehicle_id, date, liters, price_per_liter, total_cost, odometer, distance_since_last_km, is_full, note, trip_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        await runInsert(
+          database,
+          `INSERT INTO fill_ups (
+            id, vehicle_id, date, liters, price_per_liter, total_cost, odometer,
+            distance_since_last_km, is_full, note, trip_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             f.id,
             f.vehicleId,
@@ -1417,8 +1464,8 @@ export async function replaceAllData(data: {
             f.liters,
             f.pricePerLiter,
             f.totalCost,
-            f.odometer,
-            f.distanceSinceLastKm,
+            f.odometer ?? null,
+            f.distanceSinceLastKm ?? null,
             f.isFull ? 1 : 0,
             f.note || null,
             f.tripId ?? null,
@@ -1427,15 +1474,17 @@ export async function replaceAllData(data: {
       }
 
       for (const b of data.budgets || []) {
-        await database.runAsync(
-          `INSERT INTO budgets (id, vehicle_id, name, amount, spent, period, start_date, end_date, is_active)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        await runInsert(
+          database,
+          `INSERT INTO budgets (
+            id, vehicle_id, name, amount, spent, period, start_date, end_date, is_active
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             b.id,
             b.vehicleId,
             b.name,
             b.amount,
-            b.spent,
+            b.spent ?? 0,
             b.period,
             b.startDate,
             b.endDate,
@@ -1445,25 +1494,31 @@ export async function replaceAllData(data: {
       }
 
       for (const p of data.places || []) {
-        await database.runAsync(
-          `INSERT INTO places (id, name, address, kind, latitude, longitude, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        await runInsert(
+          database,
+          `INSERT INTO places (
+            id, name, address, kind, latitude, longitude, created_at, sort_order
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             p.id,
             p.name,
             p.address || '',
             p.kind || 'other',
-            p.latitude,
-            p.longitude,
+            p.latitude ?? null,
+            p.longitude ?? null,
             p.createdAt || new Date().toISOString(),
+            p.sortOrder ?? 0,
           ]
         );
       }
 
       for (const r of data.recurringRoutes || []) {
-        await database.runAsync(
-          `INSERT INTO recurring_routes (id, vehicle_id, name, from_place_id, to_place_id, distance_km, times_per_week, work_days_per_week, is_on_vacation, vacation_until, is_active)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        await runInsert(
+          database,
+          `INSERT INTO recurring_routes (
+            id, vehicle_id, name, from_place_id, to_place_id, distance_km, times_per_week,
+            work_days_per_week, is_on_vacation, vacation_until, is_active
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             r.id,
             r.vehicleId,
@@ -1481,17 +1536,20 @@ export async function replaceAllData(data: {
       }
 
       for (const m of data.maintenances || []) {
-        await database.runAsync(
-          `INSERT INTO vehicle_maintenances (id, vehicle_id, kind, title, amount, done_at, due_date, status, note, created_at, photo_uri, due_odometer)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        await runInsert(
+          database,
+          `INSERT INTO vehicle_maintenances (
+            id, vehicle_id, kind, title, amount, done_at, due_date, status, note, created_at,
+            photo_uri, due_odometer
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             m.id,
             m.vehicleId,
             m.kind,
             m.title,
-            m.amount,
-            m.doneAt,
-            m.dueDate,
+            m.amount ?? null,
+            m.doneAt ?? null,
+            m.dueDate ?? null,
             m.status || 'pending',
             m.note ?? null,
             m.createdAt || new Date().toISOString(),
