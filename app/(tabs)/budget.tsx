@@ -28,7 +28,10 @@ import {
   getFillUps,
   getPlaces,
   getRecurringRoutes,
+  swapPlaceOrder,
 } from '@/lib/database';
+import { SwipeableRow } from '@/components/SwipeableRow';
+import { TutorialAnchor } from '@/components/TutorialAnchor';
 import {
   fetchCheapestStations,
   fuelLabel,
@@ -525,6 +528,7 @@ export default function BudgetScreen() {
         ) : null}
 
         {/* Visu mensuelle */}
+        <TutorialAnchor id="budget-card">
         <Text style={[styles.section, { color: colors.text }]}>Dépenses par mois</Text>
         {monthlyAllocation > 0 && (
           <Card style={{ marginBottom: 8 }}>
@@ -629,6 +633,7 @@ export default function BudgetScreen() {
             )}
           </Card>
         )}
+        </TutorialAnchor>
         <Card>
           {monthly.length === 0 ? (
             <Text style={{ color: colors.textSecondary }}>
@@ -782,95 +787,125 @@ export default function BudgetScreen() {
               Ajoutez Domicile, Travail, ou d&apos;autres lieux récurrents.
             </Text>
           ) : (
-            places.map((p) => (
-              <View
+            places.map((p, idx) => (
+              <SwipeableRow
                 key={p.id}
-                style={[styles.placeRow, { borderBottomColor: colors.border }]}
+                style={{ marginBottom: 6 }}
+                onEdit={() =>
+                  router.push({
+                    pathname: '/place/edit' as never,
+                    params: { id: String(p.id) },
+                  } as never)
+                }
+                onDelete={() =>
+                  confirm('Supprimer', `Supprimer « ${p.name} » ?`, async () => {
+                    await deletePlace(p.id);
+                    await loadExtra();
+                  }, 'Supprimer')
+                }
               >
-                <Pressable
-                  onPress={() =>
-                    router.push({
-                      pathname: '/place/edit' as never,
-                      params: { id: String(p.id) },
-                    } as never)
-                  }
-                  onLongPress={() =>
-                    confirm('Supprimer', `Supprimer « ${p.name} » ?`, async () => {
-                      await deletePlace(p.id);
-                      await loadExtra();
-                    }, 'Supprimer')
-                  }
-                  style={{ flex: 1 }}
+                <View
+                  style={[
+                    styles.placeRow,
+                    { borderBottomColor: colors.border, backgroundColor: colors.card },
+                  ]}
                 >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                    <View
-                      style={{
-                        paddingHorizontal: 8,
-                        paddingVertical: 2,
-                        borderRadius: 8,
-                        backgroundColor: colors.accent + '22',
+                  <View style={{ gap: 2, marginRight: 4 }}>
+                    <Pressable
+                      disabled={idx === 0}
+                      hitSlop={6}
+                      accessibilityLabel="Monter le lieu"
+                      onPress={async () => {
+                        const prev = places[idx - 1];
+                        if (!prev) return;
+                        await swapPlaceOrder(p.id, prev.id);
+                        await loadExtra();
                       }}
+                      style={{ opacity: idx === 0 ? 0.25 : 1 }}
                     >
-                      <Text style={{ color: colors.accent, fontSize: 11, fontWeight: '700' }}>
-                        {KIND_LABEL[p.kind] || p.kind}
+                      <Ionicons name="chevron-up" size={18} color={colors.accent} />
+                    </Pressable>
+                    <Pressable
+                      disabled={idx >= places.length - 1}
+                      hitSlop={6}
+                      accessibilityLabel="Descendre le lieu"
+                      onPress={async () => {
+                        const next = places[idx + 1];
+                        if (!next) return;
+                        await swapPlaceOrder(p.id, next.id);
+                        await loadExtra();
+                      }}
+                      style={{ opacity: idx >= places.length - 1 ? 0.25 : 1 }}
+                    >
+                      <Ionicons name="chevron-down" size={18} color={colors.accent} />
+                    </Pressable>
+                  </View>
+                  <Pressable
+                    onPress={() =>
+                      router.push({
+                        pathname: '/place/edit' as never,
+                        params: { id: String(p.id) },
+                      } as never)
+                    }
+                    style={{ flex: 1 }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                      <View
+                        style={{
+                          paddingHorizontal: 8,
+                          paddingVertical: 2,
+                          borderRadius: 8,
+                          backgroundColor: colors.accent + '22',
+                        }}
+                      >
+                        <Text style={{ color: colors.accent, fontSize: 11, fontWeight: '700' }}>
+                          {KIND_LABEL[p.kind] || p.kind}
+                        </Text>
+                      </View>
+                      <Text style={{ color: colors.text, fontWeight: '700', flex: 1 }} numberOfLines={1}>
+                        {p.name}
                       </Text>
                     </View>
-                    <Text style={{ color: colors.text, fontWeight: '700', flex: 1 }} numberOfLines={1}>
-                      {p.name}
+                    <Text style={{ color: colors.textSecondary, fontSize: 12 }} numberOfLines={2}>
+                      {p.address?.trim()
+                        ? p.address
+                        : p.latitude != null
+                          ? `${p.latitude.toFixed(5)}, ${p.longitude?.toFixed(5)}`
+                          : 'Aucune adresse — taper pour modifier'}
                     </Text>
-                  </View>
-                  <Text style={{ color: colors.textSecondary, fontSize: 12 }} numberOfLines={2}>
-                    {p.address?.trim()
-                      ? p.address
-                      : p.latitude != null
-                        ? `${p.latitude.toFixed(5)}, ${p.longitude?.toFixed(5)}`
-                        : 'Aucune adresse — taper pour modifier'}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    const dest = p.address?.trim() || p.name;
-                    router.push({
-                      pathname: '/(tabs)/trip' as never,
-                      params: {
-                        mode: 'nav',
-                        dest,
-                        destLat: p.latitude != null ? String(p.latitude) : '',
-                        destLon: p.longitude != null ? String(p.longitude) : '',
-                        autoStart: '0',
-                        prepare: '1',
-                      },
-                    } as never);
-                  }}
-                  style={{
-                    paddingHorizontal: 10,
-                    paddingVertical: 8,
-                    borderRadius: 10,
-                    borderWidth: 1,
-                    borderColor: colors.accent,
-                    marginRight: 6,
-                  }}
-                >
-                  <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 12 }}>Trajet</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() =>
-                    confirm('Supprimer', `Supprimer « ${p.name} » ?`, async () => {
-                      await deletePlace(p.id);
-                      await loadExtra();
-                    }, 'Supprimer')
-                  }
-                  hitSlop={10}
-                  style={[styles.trashBtn, { borderColor: colors.danger }]}
-                  accessibilityLabel={`Supprimer ${p.name}`}
-                >
-                  <Ionicons name="trash-outline" size={18} color={colors.danger} />
-                </Pressable>
-              </View>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      const dest = p.address?.trim() || p.name;
+                      router.push({
+                        pathname: '/(tabs)/trip' as never,
+                        params: {
+                          mode: 'nav',
+                          dest,
+                          destLat: p.latitude != null ? String(p.latitude) : '',
+                          destLon: p.longitude != null ? String(p.longitude) : '',
+                          autoStart: '0',
+                          prepare: '1',
+                        },
+                      } as never);
+                    }}
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 8,
+                      borderRadius: 10,
+                      borderWidth: 1,
+                      borderColor: colors.accent,
+                      marginRight: 6,
+                    }}
+                  >
+                    <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 12 }}>Trajet</Text>
+                  </Pressable>
+                </View>
+              </SwipeableRow>
             ))
           )}
           <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
-            Trajet = navigation depuis votre position. Icône poubelle ou appui long pour supprimer.
+            Swipe ← modifier · → supprimer (avec confirmation). Flèches ↑↓ pour réordonner.
           </Text>
         </Card>
 
@@ -901,9 +936,21 @@ export default function BudgetScreen() {
               const days = r.workDaysPerWeek || r.timesPerWeek;
               const weekCost = routeWeeklyCost(r);
               return (
-                <View
+                <SwipeableRow
                   key={r.id}
-                  style={[styles.placeRow, { borderBottomColor: colors.border }]}
+                  style={{ marginBottom: 6 }}
+                  onEdit={() =>
+                    router.push({
+                      pathname: '/place/route' as never,
+                      params: { id: String(r.id) },
+                    } as never)
+                  }
+                  onDelete={() =>
+                    confirm('Supprimer', `Supprimer « ${r.name} » ?`, async () => {
+                      await deleteRecurringRoute(r.id);
+                      await loadExtra();
+                    }, 'Supprimer')
+                  }
                 >
                   <Pressable
                     onPress={() =>
@@ -912,59 +959,42 @@ export default function BudgetScreen() {
                         params: { id: String(r.id) },
                       } as never)
                     }
-                    onLongPress={() =>
-                      confirm('Supprimer', `Supprimer « ${r.name} » ?`, async () => {
-                        await deleteRecurringRoute(r.id);
-                        await loadExtra();
-                      }, 'Supprimer')
-                    }
-                    style={{ flex: 1 }}
+                    style={[
+                      styles.placeRow,
+                      { borderBottomColor: colors.border, backgroundColor: colors.card },
+                    ]}
                   >
-                    <Text style={{ color: colors.text, fontWeight: '700' }}>
-                      {r.name}
-                      {onVac ? ' · en vacances' : ''}
-                    </Text>
-                    <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                      {from?.name || '?'} → {to?.name || '?'} · {r.distanceKm} km · {days}{' '}
-                      j/sem.
-                      {onVac && r.vacationUntil ? ` · reprise ${r.vacationUntil}` : ''}
-                    </Text>
-                    {!onVac && weekCost > 0 && (
-                      <Text style={{ color: colors.accent, fontSize: 13, fontWeight: '700', marginTop: 4 }}>
-                        ~{formatEuro(weekCost)} / semaine
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.text, fontWeight: '700' }}>
+                        {r.name}
+                        {onVac ? ' · en vacances' : ''}
                       </Text>
-                    )}
+                      <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                        {from?.name || '?'} → {to?.name || '?'} · {r.distanceKm} km · {days}{' '}
+                        j/sem.
+                        {onVac && r.vacationUntil ? ` · reprise ${r.vacationUntil}` : ''}
+                      </Text>
+                      {!onVac && weekCost > 0 && (
+                        <Text
+                          style={{
+                            color: colors.accent,
+                            fontSize: 13,
+                            fontWeight: '700',
+                            marginTop: 4,
+                          }}
+                        >
+                          ~{formatEuro(weekCost)} / semaine
+                        </Text>
+                      )}
+                    </View>
                   </Pressable>
-                  <Pressable
-                    onPress={() =>
-                      router.push({
-                        pathname: '/place/route' as never,
-                        params: { id: String(r.id) },
-                      } as never)
-                    }
-                    hitSlop={8}
-                    style={{ marginRight: 8 }}
-                    accessibilityLabel="Modifier"
-                  >
-                    <Ionicons name="create-outline" size={18} color={colors.accent} />
-                  </Pressable>
-                  <Pressable
-                    onPress={() =>
-                      confirm('Supprimer', `Supprimer « ${r.name} » ?`, async () => {
-                        await deleteRecurringRoute(r.id);
-                        await loadExtra();
-                      }, 'Supprimer')
-                    }
-                    hitSlop={10}
-                    style={[styles.trashBtn, { borderColor: colors.danger }]}
-                    accessibilityLabel={`Supprimer ${r.name}`}
-                  >
-                    <Ionicons name="trash-outline" size={18} color={colors.danger} />
-                  </Pressable>
-                </View>
+                </SwipeableRow>
               );
             })
           )}
+          <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
+            Swipe ← modifier · → supprimer. Aussi dans menu ☰ → Trajets programmés.
+          </Text>
           {activeVehicle && routes.length > 0 && (
             <View style={{ marginTop: 10, gap: 4 }}>
               <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 15 }}>

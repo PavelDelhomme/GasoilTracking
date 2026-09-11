@@ -31,6 +31,7 @@ import { syncFailureMessage } from '@/lib/api';
 import { computeBudgetOutlook } from '@/lib/budgetOutlook';
 import { fuelRemainingTone, fuelToneColor, setFuelLiters } from '@/lib/fuelLevel';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
+import { TutorialAnchor } from '@/components/TutorialAnchor';
 import type { ConsumptionStats, Place, SinceLastFillStats, Trip, VehicleMaintenance } from '@/types';
 import { MAINTENANCE_KIND_LABELS, maintenanceIsUrgent } from '@/lib/vehicleMaintenance';
 import { formatDateSlash, formatRelativeDay, toLocalYmd } from '@/lib/dates';
@@ -299,6 +300,7 @@ export default function HomeScreen() {
           </Card>
         ) : (
           <>
+            <TutorialAnchor id="home-vehicle">
             <Card style={styles.vehicleHeader}>
               <View style={styles.vehicleRow}>
                 <View style={styles.vehicleInfo}>
@@ -388,6 +390,7 @@ export default function HomeScreen() {
                 })()}
               </View>
             </Card>
+            </TutorialAnchor>
 
             {(todayTrips.length > 0 || todayKm > 0) && (
               <Card style={{ marginTop: 12 }}>
@@ -744,42 +747,44 @@ export default function HomeScreen() {
         )}
       </ScrollView>
 
-      <SpeedDialFab
-        dual
-        actions={[
-          {
-            key: 'fillup',
-            label: 'Nouveau plein',
-            icon: 'gas-pump',
-            onPress: () => {
-              if (!activeVehicle) {
-                router.push('/(tabs)/vehicles' as never);
-                return;
-              }
-              router.push('/fillup/add');
-            },
-          },
-          activeTrip
-            ? {
-                key: 'trip',
-                label: 'Voir trajet',
-                icon: 'navigate',
-                onPress: () => router.push('/(tabs)/trip'),
-              }
-            : {
-                key: 'trip',
-                label: 'Démarrer trajet',
-                icon: 'map',
-                onPress: () => {
-                  if (!activeVehicle) {
-                    router.push('/(tabs)/vehicles' as never);
-                    return;
-                  }
-                  router.push('/(tabs)/maps' as never);
-                },
+      <TutorialAnchor id="home-fabs">
+        <SpeedDialFab
+          dual
+          actions={[
+            {
+              key: 'fillup',
+              label: 'Nouveau plein',
+              icon: 'gas-pump',
+              onPress: () => {
+                if (!activeVehicle) {
+                  router.push('/(tabs)/vehicles' as never);
+                  return;
+                }
+                router.push('/fillup/add');
               },
-        ]}
-      />
+            },
+            activeTrip
+              ? {
+                  key: 'trip',
+                  label: 'Voir trajet',
+                  icon: 'navigate',
+                  onPress: () => router.push('/(tabs)/trip'),
+                }
+              : {
+                  key: 'trip',
+                  label: 'Démarrer trajet',
+                  icon: 'map',
+                  onPress: () => {
+                    if (!activeVehicle) {
+                      router.push('/(tabs)/vehicles' as never);
+                      return;
+                    }
+                    router.push('/(tabs)/maps' as never);
+                  },
+                },
+          ]}
+        />
+      </TutorialAnchor>
     </View>
   );
 }

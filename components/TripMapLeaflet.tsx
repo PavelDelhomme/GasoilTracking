@@ -46,7 +46,7 @@ function buildHtml(
 <body>
   <div id="map"></div>
   <script>
-    var map = L.map('map', { zoomControl: true }).setView([${lat}, ${lon}], ${zoom});
+    var map = L.map('map', { zoomControl: false }).setView([${lat}, ${lon}], ${zoom});
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap'

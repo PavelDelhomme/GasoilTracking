@@ -14,6 +14,7 @@ import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/Button';
+import { TutorialAnchor } from '@/components/TutorialAnchor';
 import { createVehicle, getVehicles } from '@/lib/database';
 import { confirm, notify } from '@/lib/notify';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
@@ -231,6 +232,7 @@ export default function AddVehicleScreen() {
   const segments = Object.keys(SEGMENT_DEFAULTS) as VehicleSegment[];
 
   return (
+    <TutorialAnchor id="vehicle-add-form" style={{ flex: 1 }}>
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={styles.content}
@@ -477,6 +479,7 @@ export default function AddVehicleScreen() {
         Astuce : appui long sur un favori pour seulement remplir le formulaire.
       </Text>
     </ScrollView>
+    </TutorialAnchor>
   );
 }
 

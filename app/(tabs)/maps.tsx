@@ -26,11 +26,15 @@ import { fetchSpeedLimitNear, type SpeedLimitInfo } from '@/lib/roadSpeedLimits'
 import { forwardGeocode } from '@/lib/geocode';
 import { formatSpeedKmh } from '@/lib/calculations';
 import { Button } from '@/components/Button';
+import { DrawerMenuButton } from '@/components/DrawerMenuButton';
+import { HeaderActions } from '@/components/HeaderActions';
+import { TutorialAnchor } from '@/components/TutorialAnchor';
 import { getPlaces } from '@/lib/database';
 import {
   getRecentDestinations,
   type RecentDestination,
 } from '@/lib/recentDestinations';
+import { searchAddressSuggestions, type SuggestHit } from '@/lib/placeSuggest';
 import type { Place } from '@/types';
 
 export default function MapsScreen() {
@@ -43,10 +47,13 @@ export default function MapsScreen() {
   const [speedKmh, setSpeedKmh] = useState(0);
   const [limit, setLimit] = useState<SpeedLimitInfo | null>(null);
   const [query, setQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [searchHits, setSearchHits] = useState<SuggestHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [places, setPlaces] = useState<Place[]>([]);
   const [recentDests, setRecentDests] = useState<RecentDestination[]>([]);
+  const suggestDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshLoc = useCallback(async () => {
     const loc = await getCurrentLocation({ fresh: true });
@@ -155,52 +162,119 @@ export default function MapsScreen() {
     }
   }, [query]);
 
+  useEffect(() => {
+    if (suggestDebounce.current) clearTimeout(suggestDebounce.current);
+    const q = query.trim();
+    if (q.length < 2) {
+      setSearchHits([]);
+      return;
+    }
+    suggestDebounce.current = setTimeout(() => {
+      void (async () => {
+        const geo = await searchAddressSuggestions(q, 6);
+        const qn = q.toLowerCase();
+        const recentHits: SuggestHit[] = recentDests
+          .filter((r) => r.label.toLowerCase().includes(qn))
+          .slice(0, 4)
+          .map((r, i) => ({
+            id: `recent-${i}-${r.label}`,
+            label: r.label,
+            source: 'place' as const,
+            latitude: r.latitude ?? undefined,
+            longitude: r.longitude ?? undefined,
+            subtitle: 'Récent',
+          }));
+        const placeHits: SuggestHit[] = places
+          .filter((p) => {
+            const hay = `${p.name} ${p.address}`.toLowerCase();
+            return hay.includes(qn);
+          })
+          .slice(0, 4)
+          .map((p) => ({
+            id: `place-${p.id}`,
+            label: p.name,
+            subtitle: p.address || undefined,
+            source: 'place' as const,
+            latitude: p.latitude ?? undefined,
+            longitude: p.longitude ?? undefined,
+          }));
+        setSearchHits([...recentHits, ...placeHits, ...geo].slice(0, 10));
+      })();
+    }, 320);
+    return () => {
+      if (suggestDebounce.current) clearTimeout(suggestDebounce.current);
+    };
+  }, [query, places, recentDests]);
+
   useLayoutEffect(() => {
     navigation.setOptions({
-      headerTitleAlign: 'left',
-      headerTitle: () => (
+      header: () => (
         <View
           style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            flex: 1,
-            maxWidth: '100%',
-            marginRight: 8,
-            borderWidth: 1,
-            borderColor: colors.border,
-            backgroundColor: colors.card,
-            borderRadius: 10,
-            paddingHorizontal: 10,
-            minHeight: 38,
+            paddingTop: insets.top,
+            backgroundColor: colors.background,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: colors.border,
           }}
         >
-          <Ionicons name="search" size={16} color={colors.textSecondary} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Tapez une adresse…"
-            placeholderTextColor={colors.textSecondary}
+          <View
             style={{
-              flex: 1,
-              color: colors.text,
-              paddingVertical: Platform.OS === 'ios' ? 8 : 6,
-              paddingHorizontal: 8,
-              fontSize: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
+              height: 44,
+              paddingLeft: 2,
+              paddingRight: 4,
+              gap: 4,
             }}
-            returnKeyType="search"
-            onSubmitEditing={() => void goSearch()}
-          />
-          {searching ? (
-            <ActivityIndicator size="small" color={colors.accent} />
-          ) : query.trim().length >= 2 ? (
-            <Pressable onPress={() => void goSearch()} hitSlop={8}>
-              <Ionicons name="arrow-forward-circle" size={22} color={colors.accent} />
-            </Pressable>
-          ) : null}
+          >
+            <DrawerMenuButton />
+            <View
+              style={{
+                flex: 1,
+                flexDirection: 'row',
+                alignItems: 'center',
+                height: 32,
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: colors.border,
+                backgroundColor: colors.card,
+                borderRadius: 8,
+                paddingHorizontal: 8,
+              }}
+            >
+              <Ionicons name="search" size={14} color={colors.textSecondary} />
+              <TextInput
+                value={query}
+                onChangeText={setQuery}
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => setTimeout(() => setSearchFocused(false), 180)}
+                placeholder="Tapez une adresse…"
+                placeholderTextColor={colors.textSecondary}
+                style={{
+                  flex: 1,
+                  color: colors.text,
+                  paddingVertical: 0,
+                  paddingHorizontal: 6,
+                  fontSize: 13,
+                  height: 30,
+                  ...(Platform.OS === 'android' ? { includeFontPadding: false } : null),
+                }}
+                returnKeyType="search"
+                onSubmitEditing={() => void goSearch()}
+              />
+              {searching ? (
+                <ActivityIndicator size="small" color={colors.accent} />
+              ) : query.trim().length >= 2 ? (
+                <Pressable onPress={() => void goSearch()} hitSlop={8}>
+                  <Ionicons name="arrow-forward-circle" size={20} color={colors.accent} />
+                </Pressable>
+              ) : null}
+            </View>
+            <HeaderActions />
+          </View>
         </View>
       ),
     });
-  }, [navigation, colors, query, searching, goSearch]);
+  }, [navigation, colors, query, searching, goSearch, insets.top]);
 
   const goFreeTrack = () => {
     router.push({ pathname: '/(tabs)/trip', params: { mode: 'free', autoStart: '1' } });
@@ -264,6 +338,7 @@ export default function MapsScreen() {
         </View>
       </View>
 
+      <TutorialAnchor id="maps-search">
       <View
         style={[
           styles.sheet,
@@ -276,6 +351,49 @@ export default function MapsScreen() {
       >
         {searchError ? (
           <Text style={{ color: colors.warning, fontSize: 12, marginBottom: 6 }}>{searchError}</Text>
+        ) : null}
+
+        {(searchFocused || query.trim().length >= 2) && searchHits.length > 0 ? (
+          <View style={{ marginBottom: 10, maxHeight: 180 }}>
+            <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+              {searchHits.map((h) => (
+                <Pressable
+                  key={h.id}
+                  onPress={() => {
+                    setQuery(h.label);
+                    setSearchFocused(false);
+                    if (h.latitude != null && h.longitude != null) {
+                      goToPlace(h.label, h.latitude, h.longitude);
+                    } else {
+                      setQuery(h.label);
+                      void goSearch();
+                    }
+                  }}
+                  style={{
+                    paddingVertical: 8,
+                    borderBottomWidth: StyleSheet.hairlineWidth,
+                    borderBottomColor: colors.border,
+                  }}
+                >
+                  <Text style={{ color: colors.accent, fontSize: 10, fontWeight: '800' }}>
+                    {h.subtitle === 'Récent'
+                      ? 'Récent'
+                      : h.source === 'place'
+                        ? 'Lieu'
+                        : 'Adresse'}
+                  </Text>
+                  <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1}>
+                    {h.label}
+                  </Text>
+                  {!!h.subtitle && h.subtitle !== 'Récent' ? (
+                    <Text style={{ color: colors.textSecondary, fontSize: 11 }} numberOfLines={1}>
+                      {h.subtitle}
+                    </Text>
+                  ) : null}
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
         ) : null}
 
         {activeTrip ? (
@@ -364,6 +482,7 @@ export default function MapsScreen() {
           />
         </View>
       </View>
+      </TutorialAnchor>
     </View>
   );
 }

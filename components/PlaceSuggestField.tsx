@@ -8,6 +8,10 @@ import {
   searchContactSuggestions,
   type SuggestHit,
 } from '@/lib/placeSuggest';
+import {
+  getRecentDestinations,
+  type RecentDestination,
+} from '@/lib/recentDestinations';
 
 const KIND_LABEL: Record<PlaceKind, string> = {
   home: 'Domicile',
@@ -77,7 +81,12 @@ export function PlaceSuggestField({
   const { colors } = useTheme();
   const [focused, setFocused] = useState(false);
   const [remote, setRemote] = useState<SuggestHit[]>([]);
+  const [recents, setRecents] = useState<RecentDestination[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    void getRecentDestinations(8).then(setRecents);
+  }, []);
 
   const quick = useMemo(() => {
     const list: Place[] = [];
@@ -90,6 +99,25 @@ export function PlaceSuggestField({
     }
     return list.slice(0, 8);
   }, [places, preferKinds]);
+
+  const recentHits = useMemo(() => {
+    const q = value.trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+    const scored = recents
+      .map((r) => {
+        const label = r.label.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+        let score = 0;
+        if (!q) score = 1;
+        else if (label.startsWith(q)) score = 3;
+        else if (label.includes(q)) score = 2;
+        else if (q.split(/\s+/).every((w) => !w || label.includes(w))) score = 1;
+        return { r, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score || b.r.at - a.r.at)
+      .slice(0, 5)
+      .map((x) => x.r);
+    return scored;
+  }, [recents, value]);
 
   const placeSuggestions = useMemo(() => {
     const filtered = places.filter((p) => matchesQuery(p, value)).slice(0, 8);
@@ -142,8 +170,15 @@ export function PlaceSuggestField({
     if (h.latitude != null && h.longitude != null) {
       onPickCoords?.({ latitude: h.latitude, longitude: h.longitude, label: labelText });
     } else if (h.subtitle) {
-      // Contact : adresse texte → géocode plus tard au start
       onPickCoords?.({ latitude: NaN, longitude: NaN, label: h.subtitle });
+    }
+    setFocused(false);
+  };
+
+  const pickRecent = (r: RecentDestination) => {
+    onChangeText(r.label);
+    if (r.latitude != null && r.longitude != null) {
+      onPickCoords?.({ latitude: r.latitude, longitude: r.longitude, label: r.label });
     }
     setFocused(false);
   };
@@ -169,48 +204,63 @@ export function PlaceSuggestField({
         onBlur={() => setTimeout(() => setFocused(false), 220)}
       />
 
-      {showList && (placeSuggestions.length > 0 || remote.length > 0) && (
-        <View style={[styles.list, { borderColor: colors.border, backgroundColor: colors.card }]}>
-          {placeSuggestions.map((p) => (
-            <Pressable
-              key={`p-${p.id}`}
-              onPress={() => pickPlace(p)}
-              accessibilityRole="button"
-              accessibilityLabel={`Lieu ${p.name}`}
-              style={[styles.row, { borderBottomColor: colors.border }]}
-            >
-              <Text style={{ color: colors.accent, fontSize: 11, fontWeight: '800' }}>
-                {KIND_LABEL[p.kind]}
-              </Text>
-              <Text style={{ color: colors.text, fontWeight: '600' }}>{p.name}</Text>
-              {!!p.address && (
-                <Text style={{ color: colors.textSecondary, fontSize: 12 }} numberOfLines={1}>
-                  {p.address}
+      {showList &&
+        (placeSuggestions.length > 0 || recentHits.length > 0 || remote.length > 0) && (
+          <View style={[styles.list, { borderColor: colors.border, backgroundColor: colors.card }]}>
+            {recentHits.map((r, i) => (
+              <Pressable
+                key={`recent-${i}-${r.label}`}
+                onPress={() => pickRecent(r)}
+                accessibilityRole="button"
+                accessibilityLabel={`Récent ${r.label}`}
+                style={[styles.row, { borderBottomColor: colors.border }]}
+              >
+                <Text style={{ color: colors.accent, fontSize: 11, fontWeight: '800' }}>Récent</Text>
+                <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1}>
+                  {r.label}
                 </Text>
-              )}
-            </Pressable>
-          ))}
-          {remote.map((h) => (
-            <Pressable
-              key={h.id}
-              onPress={() => pickRemote(h)}
-              accessibilityRole="button"
-              accessibilityLabel={`${h.source === 'contact' ? 'Contact' : 'Adresse'} ${h.label}`}
-              style={[styles.row, { borderBottomColor: colors.border }]}
-            >
-              <Text style={{ color: colors.accent, fontSize: 11, fontWeight: '800' }}>
-                {h.source === 'contact' ? 'Contact' : 'Adresse'}
-              </Text>
-              <Text style={{ color: colors.text, fontWeight: '600' }}>{h.label}</Text>
-              {!!h.subtitle && (
-                <Text style={{ color: colors.textSecondary, fontSize: 12 }} numberOfLines={2}>
-                  {h.subtitle}
+              </Pressable>
+            ))}
+            {placeSuggestions.map((p) => (
+              <Pressable
+                key={`p-${p.id}`}
+                onPress={() => pickPlace(p)}
+                accessibilityRole="button"
+                accessibilityLabel={`Lieu ${p.name}`}
+                style={[styles.row, { borderBottomColor: colors.border }]}
+              >
+                <Text style={{ color: colors.accent, fontSize: 11, fontWeight: '800' }}>
+                  {KIND_LABEL[p.kind]}
                 </Text>
-              )}
-            </Pressable>
-          ))}
-        </View>
-      )}
+                <Text style={{ color: colors.text, fontWeight: '600' }}>{p.name}</Text>
+                {!!p.address && (
+                  <Text style={{ color: colors.textSecondary, fontSize: 12 }} numberOfLines={1}>
+                    {p.address}
+                  </Text>
+                )}
+              </Pressable>
+            ))}
+            {remote.map((h) => (
+              <Pressable
+                key={h.id}
+                onPress={() => pickRemote(h)}
+                accessibilityRole="button"
+                accessibilityLabel={`${h.source === 'contact' ? 'Contact' : 'Adresse'} ${h.label}`}
+                style={[styles.row, { borderBottomColor: colors.border }]}
+              >
+                <Text style={{ color: colors.accent, fontSize: 11, fontWeight: '800' }}>
+                  {h.source === 'contact' ? 'Contact' : 'Adresse'}
+                </Text>
+                <Text style={{ color: colors.text, fontWeight: '600' }}>{h.label}</Text>
+                {!!h.subtitle && (
+                  <Text style={{ color: colors.textSecondary, fontSize: 12 }} numberOfLines={2}>
+                    {h.subtitle}
+                  </Text>
+                )}
+              </Pressable>
+            ))}
+          </View>
+        )}
     </View>
   );
 }

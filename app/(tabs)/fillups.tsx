@@ -15,6 +15,7 @@ import { useApp } from '@/context/AppContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useTheme } from '@/hooks/useTheme';
 import { SimpleFab } from '@/components/SpeedDialFab';
+import { TutorialAnchor } from '@/components/TutorialAnchor';
 import { getFillUps } from '@/lib/database';
 import {
   compareMonthFillStats,
@@ -455,6 +456,7 @@ export default function FillUpsScreen() {
         </View>
       ) : null}
 
+      <TutorialAnchor id="fillups-list" style={{ flex: 1 }}>
       <FlatList
         style={styles.listFlex}
         data={visible}
@@ -616,6 +618,7 @@ export default function FillUpsScreen() {
           </Pressable>
         )}
       />
+      </TutorialAnchor>
 
       <SimpleFab
         label="Nouveau plein"

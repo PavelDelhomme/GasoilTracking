@@ -438,13 +438,24 @@ export async function stopActiveTrips(): Promise<void> {
 
 export async function getPlaces(): Promise<Place[]> {
   const s = await load();
-  return [...s.places].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
+  return [...s.places].sort(
+    (a, b) =>
+      (a.sortOrder ?? 0) - (b.sortOrder ?? 0) ||
+      a.kind.localeCompare(b.kind) ||
+      a.name.localeCompare(b.name)
+  );
 }
 
 export async function createPlace(place: Omit<Place, 'id' | 'createdAt'>): Promise<number> {
   const s = await load();
   const id = s.seq.places++;
-  s.places.push({ ...place, id, createdAt: nowIso() });
+  const maxOrder = s.places.reduce((m, p) => Math.max(m, p.sortOrder ?? 0), -1);
+  s.places.push({
+    ...place,
+    id,
+    sortOrder: place.sortOrder ?? maxOrder + 1,
+    createdAt: nowIso(),
+  });
   await save(s);
   return id;
 }
@@ -452,6 +463,18 @@ export async function createPlace(place: Omit<Place, 'id' | 'createdAt'>): Promi
 export async function updatePlace(id: number, place: Partial<Place>): Promise<void> {
   const s = await load();
   s.places = s.places.map((p) => (p.id === id ? { ...p, ...place, id } : p));
+  await save(s);
+}
+
+export async function swapPlaceOrder(idA: number, idB: number): Promise<void> {
+  const s = await load();
+  const a = s.places.find((p) => p.id === idA);
+  const b = s.places.find((p) => p.id === idB);
+  if (!a || !b) return;
+  const orderA = a.sortOrder ?? 0;
+  const orderB = b.sortOrder ?? 0;
+  a.sortOrder = orderB;
+  b.sortOrder = orderA;
   await save(s);
 }
 

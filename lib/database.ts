@@ -173,6 +173,7 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
   await alterSafe('ALTER TABLE vehicles ADD COLUMN registration_photo_uri TEXT');
   await alterSafe('ALTER TABLE vehicle_maintenances ADD COLUMN photo_uri TEXT');
   await alterSafe('ALTER TABLE vehicle_maintenances ADD COLUMN due_odometer REAL');
+  await alterSafe('ALTER TABLE places ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
 }
 
 function mapVehicle(row: unknown): Vehicle {
@@ -1094,6 +1095,7 @@ function mapPlace(row: unknown): Place {
     kind: (r.kind as PlaceKind) || 'other',
     latitude: r.latitude == null ? null : (r.latitude as number),
     longitude: r.longitude == null ? null : (r.longitude as number),
+    sortOrder: (r.sort_order as number) ?? 0,
     createdAt: r.created_at as string,
   };
 }
@@ -1118,15 +1120,21 @@ function mapRoute(row: unknown): RecurringRoute {
 
 export async function getPlaces(): Promise<Place[]> {
   const database = await getDatabase();
-  const rows = await database.getAllAsync('SELECT * FROM places ORDER BY kind ASC, name ASC');
+  const rows = await database.getAllAsync(
+    'SELECT * FROM places ORDER BY sort_order ASC, kind ASC, name ASC'
+  );
   return rows.map(mapPlace);
 }
 
 export async function createPlace(place: Omit<Place, 'id' | 'createdAt'>): Promise<number> {
   const database = await getDatabase();
+  const maxRow = await database.getFirstAsync<{ m: number }>(
+    'SELECT COALESCE(MAX(sort_order), -1) AS m FROM places'
+  );
+  const sortOrder = place.sortOrder ?? ((maxRow?.m ?? -1) + 1);
   const result = await database.runAsync(
-    `INSERT INTO places (name, address, kind, latitude, longitude) VALUES (?, ?, ?, ?, ?)`,
-    [place.name, place.address || '', place.kind, place.latitude, place.longitude]
+    `INSERT INTO places (name, address, kind, latitude, longitude, sort_order) VALUES (?, ?, ?, ?, ?, ?)`,
+    [place.name, place.address || '', place.kind, place.latitude, place.longitude, sortOrder]
   );
   return Number(result.lastInsertRowId);
 }
@@ -1140,9 +1148,22 @@ export async function updatePlace(id: number, place: Partial<Place>): Promise<vo
   if (place.kind !== undefined) { fields.push('kind = ?'); values.push(place.kind); }
   if (place.latitude !== undefined) { fields.push('latitude = ?'); values.push(place.latitude); }
   if (place.longitude !== undefined) { fields.push('longitude = ?'); values.push(place.longitude); }
+  if (place.sortOrder !== undefined) { fields.push('sort_order = ?'); values.push(place.sortOrder); }
   if (!fields.length) return;
   values.push(id);
   await database.runAsync(`UPDATE places SET ${fields.join(', ')} WHERE id = ?`, values);
+}
+
+/** Échange l’ordre de deux lieux (↑ / ↓ dans la liste). */
+export async function swapPlaceOrder(idA: number, idB: number): Promise<void> {
+  const places = await getPlaces();
+  const a = places.find((p) => p.id === idA);
+  const b = places.find((p) => p.id === idB);
+  if (!a || !b) return;
+  const orderA = a.sortOrder ?? 0;
+  const orderB = b.sortOrder ?? 0;
+  await updatePlace(idA, { sortOrder: orderB });
+  await updatePlace(idB, { sortOrder: orderA });
 }
 
 export async function deletePlace(id: number): Promise<void> {

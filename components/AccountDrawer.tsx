@@ -66,7 +66,7 @@ function DrawerRow({ icon, label, subtitle, onPress, danger }: RowProps) {
 /** Menu profil : compte, MAJ, admin, préférences (sync = icône header). */
 export function AccountDrawer() {
   const { open, closeDrawer } = useAccountDrawer();
-  const { colors } = useTheme();
+  const { colors, scheme, toggleScheme } = useTheme();
   const { user, logout, refreshCloudNow, pushLocalNow, pendingRegistrationsCount } = useAuth();
   const { refresh, activeVehicle } = useApp();
   const { country } = useLocale();
@@ -271,6 +271,19 @@ export function AccountDrawer() {
             />
 
             <Text style={[styles.section, { color: colors.textSecondary }]}>Préférences</Text>
+            <DrawerRow
+              icon={scheme === 'dark' ? 'sunny-outline' : 'moon-outline'}
+              label={scheme === 'dark' ? 'Mode clair' : 'Mode sombre'}
+              subtitle={
+                scheme === 'dark'
+                  ? 'Apparence actuelle : sombre — toucher pour passer en clair'
+                  : 'Apparence actuelle : clair — toucher pour passer en sombre'
+              }
+              onPress={() => {
+                toggleScheme();
+                showToast(scheme === 'dark' ? 'Mode clair activé' : 'Mode sombre activé');
+              }}
+            />
             <View style={{ paddingHorizontal: 12 }}>
               <CountryPickerCard />
             </View>
@@ -279,6 +292,21 @@ export function AccountDrawer() {
               label="Véhicule actif"
               subtitle={activeVehicle?.name || 'Aucun'}
               onPress={() => go('/(tabs)/vehicles')}
+            />
+            <DrawerRow
+              icon="school-outline"
+              label="Relancer le guide"
+              subtitle="Tutoriel interactif + données démo (nettoyées à la fin)"
+              onPress={() => {
+                closeDrawer();
+                void import('@/components/OnboardingTutorial').then((m) => m.replayOnboarding());
+              }}
+            />
+            <DrawerRow
+              icon="git-branch-outline"
+              label="Trajets programmés"
+              subtitle="Trajets réguliers (domicile ↔ travail…)"
+              onPress={() => go('/scheduled-trips')}
             />
 
             {user && (

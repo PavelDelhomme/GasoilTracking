@@ -184,7 +184,63 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: 'places',
         title: 'Lieux Maison / Travail',
         body:
-          'Dans Budget (ou lieux), définissez Maison et Travail avec une adresse ou GPS. Ils servent de raccourcis pour la navigation et les suggestions.',
+          'Dans Budget → Lieux, définissez Maison et Travail (adresse ou GPS). Swipe ← pour modifier, → pour supprimer (confirmation). Flèches ↑↓ pour réordonner. Ces lieux alimentent Maps, suggestions et trajets programmés.',
+      },
+      {
+        id: 'scheduled',
+        title: 'Trajets programmés',
+        body:
+          'Menu ☰ → Trajets programmés (aussi dans Budget). Ex. Domicile → Travail × 5 j/sem. Sert aux estimations budget et aux suggestions « trajet habituel ». Swipe pour modifier / supprimer.',
+        link: { label: 'Trajets programmés', href: '/scheduled-trips' },
+      },
+      {
+        id: 'theme-pref',
+        title: 'Mode clair / sombre',
+        body:
+          'Le thème se règle dans le menu ☰ → Préférences (plus dans la barre du haut), pour laisser la place à la recherche d’adresse sur Maps. La sync cloud reste l’icône en haut à droite.',
+      },
+    ],
+  },
+  {
+    id: 'tutorial',
+    title: 'Parcours guidé',
+    subtitle: 'Première utilisation pas à pas',
+    icon: 'school-outline',
+    articles: [
+      {
+        id: 'tuto-1',
+        title: 'Étape 1 — Compte & sync',
+        body:
+          'Créez un compte (ou connectez-vous) via ☰. Validez l’e-mail si demandé. L’icône sync en haut à droite pousse/tire le cloud. Sans compte, tout reste local sur le téléphone.',
+        link: { label: 'Connexion', href: '/auth' },
+      },
+      {
+        id: 'tuto-2',
+        title: 'Étape 2 — Véhicule actif',
+        body:
+          'Mon Garage → ajoutez votre voiture (catalogue ou manuel). Sélectionnez-la comme active : tous les trajets et pleins s’y rattachent. Corrigez la jauge sur l’Accueil si besoin.',
+        link: { label: 'Mon Garage', href: '/(tabs)/vehicles' },
+      },
+      {
+        id: 'tuto-3',
+        title: 'Étape 3 — Lieux & trajets habituels',
+        body:
+          'Budget → Lieux : Domicile + Travail. Puis Trajets programmés pour le trajet domicile-travail. Ainsi Maps et Accueil proposent les bons raccourcis.',
+        link: { label: 'Budget', href: '/(tabs)/budget' },
+      },
+      {
+        id: 'tuto-4',
+        title: 'Étape 4 — Premier trajet',
+        body:
+          'Maps → tapez une adresse (autocomplétion + récents prioritaires) ou lancez un suivi libre. Choisissez l’itinéraire éco ou rapide sur la carte avant de démarrer. Terminer → récap, puis retour Maps.',
+        link: { label: 'Maps', href: '/(tabs)/maps' },
+      },
+      {
+        id: 'tuto-5',
+        title: 'Étape 5 — Premier plein',
+        body:
+          'Pleins → Nouveau plein : station proche proposée, prix auto si connu, litres plafonnés. Un plein complet aide l’app à apprendre votre vraie conso.',
+        link: { label: 'Pleins', href: '/(tabs)/fillups' },
       },
     ],
   },
@@ -211,6 +267,13 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         title: 'Mise à jour de l’app',
         body:
           'Menu ☰ → Vérifier / installer. Une mise à jour forcée peut s’afficher au lancement. Sur Android, l’APK s’installe dans l’app (pas besoin du Play Store).',
+      },
+      {
+        id: 'password',
+        title: 'Mot de passe oublié',
+        body:
+          'Sur l’écran Connexion → « Mot de passe oublié ». Vous recevez un lien unique (jeton aléatoire, ~2 h, usage unique). Une fois connecté, changez le mot de passe depuis Mon compte.',
+        link: { label: 'Compte', href: '/account' },
       },
     ],
   },

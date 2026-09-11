@@ -104,8 +104,35 @@ console.log(JSON.stringify({ ok: true, action: 'deleted', email, id: u.id }));
 NODE
 )"
     ;;
+  wipe)
+    # Remet le blob sync cloud à vide (trajets / véhicules / lieux) sans supprimer le compte.
+    remote_node "$(cat <<'NODE'
+const Database = require('better-sqlite3');
+const db = new Database('/data/gasoil.db');
+const email = process.env.QA_EMAIL;
+const u = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+if (!u) { console.log(JSON.stringify({ ok:false, error:'no user', email })); process.exit(1); }
+const now = new Date().toISOString();
+const empty = JSON.stringify({
+  vehicles: [],
+  fillUps: [],
+  budgets: [],
+  trips: [],
+  places: [],
+  routes: [],
+  maintenances: [],
+});
+db.prepare(`INSERT INTO sync_data (user_id, payload, updated_at) VALUES (?, ?, ?)
+  ON CONFLICT(user_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`)
+  .run(u.id, empty, now);
+const sync = db.prepare('SELECT updated_at, length(payload) as bytes FROM sync_data WHERE user_id = ?').get(u.id);
+console.log(JSON.stringify({ ok:true, action:'wipe', email, userId:u.id, sync }, null, 2));
+NODE
+)"
+    echo "→ Cloud QA vidé. Sur l’appareil : adb shell pm clear com.gasoiltracking.qa puis reconnecter."
+    ;;
   *)
-    echo "Usage: $0 status|create|reset|delete"
+    echo "Usage: $0 status|create|reset|wipe|delete"
     exit 1
     ;;
 esac

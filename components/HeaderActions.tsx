@@ -5,10 +5,9 @@ import { useAuth } from '@/context/AuthContext';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
 import { useToast } from '@/context/ToastContext';
-import { ThemeToggleButton } from '@/components/ThemeToggleButton';
 import { pingApiHealth, syncFailureMessage } from '@/lib/api';
 
-/** Sync manuelle (icône animée) + toggle thème — bien séparés dans le header. */
+/** Sync manuelle (icône animée) — le thème clair/sombre est dans Préférences (menu). */
 export function HeaderActions() {
   const { colors } = useTheme();
   const { user, syncNow } = useAuth();
@@ -81,41 +80,34 @@ export function HeaderActions() {
   return (
     <View style={styles.row}>
       {!!user && (
-        <>
-          <Pressable
-            onPress={onSync}
-            disabled={busy}
-            accessibilityRole="button"
-            accessibilityState={{ busy }}
-            accessibilityLabel={busy ? 'Synchronisation en cours…' : 'Synchroniser manuellement'}
-            accessibilityHint={
-              offline ? 'Hors ligne — dernière synchronisation échouée' : 'Synchroniser avec le cloud'
-            }
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 4 }}
-            style={[
-              styles.actionBtn,
-              {
-                borderColor: colors.border,
-                backgroundColor: busy ? colors.accent + '18' : colors.card,
-              },
-            ]}
-          >
-            <Animated.View style={{ transform: [{ rotate }] }}>
-              <Ionicons
-                name={offline ? 'cloud-offline-outline' : 'sync-outline'}
-                size={20}
-                color={busy ? colors.accent : offline ? colors.warning : colors.text}
-              />
-            </Animated.View>
-          </Pressable>
-          <View
-            style={[styles.divider, { backgroundColor: colors.border }]}
-            accessibilityElementsHidden
-            importantForAccessibility="no"
-          />
-        </>
+        <Pressable
+          onPress={onSync}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityState={{ busy }}
+          accessibilityLabel={busy ? 'Synchronisation en cours…' : 'Synchroniser manuellement'}
+          accessibilityHint={
+            offline ? 'Hors ligne — dernière synchronisation échouée' : 'Synchroniser avec le cloud'
+          }
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={[
+            styles.actionBtn,
+            {
+              borderColor: colors.border,
+              backgroundColor: busy ? colors.accent + '18' : colors.card,
+              marginRight: Platform.OS === 'web' ? 12 : 4,
+            },
+          ]}
+        >
+          <Animated.View style={{ transform: [{ rotate }] }}>
+            <Ionicons
+              name={offline ? 'cloud-offline-outline' : 'sync-outline'}
+              size={18}
+              color={busy ? colors.accent : offline ? colors.warning : colors.text}
+            />
+          </Animated.View>
+        </Pressable>
       )}
-      <ThemeToggleButton />
     </View>
   );
 }
@@ -128,17 +120,11 @@ const styles = StyleSheet.create({
     marginRight: Platform.OS === 'web' ? 4 : 0,
   },
   actionBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  divider: {
-    width: StyleSheet.hairlineWidth,
-    height: 22,
-    marginHorizontal: 2,
-    opacity: 0.9,
   },
 });

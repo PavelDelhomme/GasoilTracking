@@ -233,6 +233,7 @@ export default function VehicleMaintenanceScreen() {
       <MaintenanceStatusPanel
         upToDate={vehicle.maintenanceUpToDate}
         checklist={vehicle.maintenanceChecklist}
+        currentOdometer={displayOdometerKm(vehicle)}
         onChangeUpToDate={async (v) => {
           await updateVehicle(vehicleId, { maintenanceUpToDate: v });
           await refresh();
@@ -243,6 +244,10 @@ export default function VehicleMaintenanceScreen() {
         }}
       />
 
+      <Text style={{ color: colors.textSecondary, marginBottom: 12, fontSize: 12, lineHeight: 17 }}>
+        Ajoutez ci-dessous une entrée garage (montant = facture) pour un défaut CT, une contre-visite
+        ou un entretien. Les rappels se basent sur la date / le km d’échéance.
+      </Text>
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
         <Button title="Photo CT / facture" variant="secondary" onPress={pickPhoto} style={{ flex: 1 }} />
         <Button

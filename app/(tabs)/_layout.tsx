@@ -81,7 +81,6 @@ export default function TabLayout() {
           title: 'Maps',
           tabBarLabel: 'Maps',
           tabBarIcon: ({ color }) => <Ionicons name="map" size={20} color={color} />,
-          headerTitleContainerStyle: { flex: 1, maxWidth: '100%' },
         }}
       />
       <Tabs.Screen

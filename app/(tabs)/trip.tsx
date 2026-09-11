@@ -23,6 +23,7 @@ import * as Location from 'expo-location';
 import Constants from 'expo-constants';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
+import { TutorialAnchor } from '@/components/TutorialAnchor';
 import { useToast } from '@/context/ToastContext';
 import { Card, StatCard } from '@/components/Card';
 import { Button } from '@/components/Button';
@@ -288,6 +289,8 @@ export default function TripScreen() {
   const [nearDestination, setNearDestination] = useState(false);
   const [smartDismissed, setSmartDismissed] = useState(false);
   const [mapCollapsed, setMapCollapsed] = useState(false);
+  /** Remonte la WebView carte après fin de trajet (évite carte blanche). */
+  const [mapRemountKey, setMapRemountKey] = useState(0);
   const [fuelStopVia, setFuelStopVia] = useState<GeoCoords | null>(null);
   const arrivalPromptedRef = useRef(false);
   const startingRef = useRef(false);
@@ -1396,12 +1399,18 @@ export default function TripScreen() {
       setNearDestination(false);
       setStopConfirm(false);
       arrivalPromptedRef.current = false;
+      setMapCollapsed(false);
+      setMapRemountKey((k) => k + 1);
       await refresh();
       await loadLists();
 
       if (opts?.openRecap !== false) {
         setTimeout(() => {
-          router.push(`/trip/${finishedId}` as never);
+          // Retour « arrière » depuis le récap → Maps (hub), pas l’écran trajet vide
+          router.replace('/(tabs)/maps' as never);
+          setTimeout(() => {
+            router.push(`/trip/${finishedId}` as never);
+          }, 40);
         }, 80);
       } else {
         setTab('history');
@@ -1606,16 +1615,32 @@ export default function TripScreen() {
   }, [activeTrip?.id, activeTrip?.isPaused, destCoords, checkArrivalProximity]);
 
   const handleOpenGoogleMaps = async () => {
+    // Suivi libre / pas de destination réelle → jamais d’itinéraire fantôme (~4 min)
+    const inFree =
+      startMode === 'free' ||
+      Boolean(activeTrip && !activeTrip.destinationName?.trim());
     const label =
-      destination.trim() ||
-      activeTrip?.destinationName?.trim() ||
-      liveDestLabel?.trim() ||
-      '';
+      (inFree
+        ? activeTrip?.destinationName?.trim() || ''
+        : destination.trim() ||
+          activeTrip?.destinationName?.trim() ||
+          liveDestLabel?.trim() ||
+          '') || '';
+    const coordsForNav = inFree ? null : destCoords;
+
+    if (inFree || (!coordsForNav && !label)) {
+      notify(
+        'Suivi libre',
+        'Pas de destination : le suivi GPS reste dans l’app. Choisissez « Avec destination » pour ouvrir un itinéraire Maps.'
+      );
+      return;
+    }
+
     let opened = false;
     try {
-      if (destCoords) {
+      if (coordsForNav) {
         opened = await launchGoogleMapsNavigation({
-          destination: destCoords,
+          destination: coordsForNav,
           origin: userLocation,
           waypoints: mapsWaypointsForRoute(selectedRoute),
           label: label || 'Destination',
@@ -1623,15 +1648,6 @@ export default function TripScreen() {
       } else if (label) {
         await Linking.openURL(openGoogleMapsSearch(label));
         opened = true;
-      } else {
-        const loc = userLocation || (await getCurrentLocation())?.coords;
-        if (loc) {
-          opened = await launchGoogleMapsNavigation({
-            destination: { latitude: loc.latitude + 0.01, longitude: loc.longitude + 0.01 },
-            origin: loc,
-            label: 'Destination',
-          });
-        }
       }
     } catch {
       opened = false;
@@ -2115,6 +2131,7 @@ export default function TripScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {tab === 'history' ? (
+        <TutorialAnchor id="trip-history-list">
         <View style={[styles.historyHead, { borderBottomColor: colors.border }]}>
           <Pressable
             onPress={() => {
@@ -2130,12 +2147,15 @@ export default function TripScreen() {
           <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16 }}>Historique</Text>
           <View style={{ width: 72 }} />
         </View>
+        </TutorialAnchor>
       ) : null}
 
       {tab === 'live' ? (
         <>
+          <TutorialAnchor id="trip-live-panel" style={{ flex: 1 }}>
           <View style={[styles.map, mapCollapsed ? styles.mapCollapsed : null]}>
             <TripMap
+              key={`trip-map-${mapRemountKey}`}
               ref={mapRef}
               region={currentRegion}
               routePoints={mapRoute}
@@ -2193,13 +2213,6 @@ export default function TripScreen() {
                   </View>
                 ) : (
                   <View style={styles.mapHudRow}>
-                    {activeVehicle ? (
-                      <View style={styles.vehicleHudChip}>
-                        <Text style={styles.vehicleFloatText} numberOfLines={1}>
-                          {activeVehicle.name}
-                        </Text>
-                      </View>
-                    ) : null}
                     {navGuidance ? (
                       <Pressable
                         onPress={() => {
@@ -2219,7 +2232,7 @@ export default function TripScreen() {
                           color={paused ? colors.warning : colors.accent}
                           style={{ transform: [{ rotate: `${navGuidance.arrowRotateDeg}deg` }] }}
                         />
-                        <View style={{ flexShrink: 1, maxWidth: 140 }}>
+                        <View style={{ flexShrink: 1, maxWidth: 160 }}>
                           <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }} numberOfLines={1}>
                             {navGuidance.title}
                           </Text>
@@ -2239,12 +2252,6 @@ export default function TripScreen() {
                     ) : null}
                   </View>
                 )}
-              </View>
-            ) : activeVehicle ? (
-              <View style={styles.vehicleFloat} pointerEvents="none">
-                <Text style={styles.vehicleFloatText} numberOfLines={1}>
-                  {activeVehicle.name}
-                </Text>
               </View>
             ) : null}
             {!userLocation && (
@@ -2282,7 +2289,12 @@ export default function TripScreen() {
                             fontSize: 12,
                           }}
                         >
-                          {r.label}
+                          {r.kind === 'eco'
+                            ? 'Éco'
+                            : r.kind === 'fastest'
+                              ? 'Rapide'
+                              : r.label}
+                          {r.kind === 'eco' || r.kind === 'fastest' ? ` · ${r.label}` : ''}
                         </Text>
                         <Text
                           style={{
@@ -2956,12 +2968,23 @@ export default function TripScreen() {
               anchor="content"
               extraBottom={activeVehicle ? 62 : 0}
               actions={[
-                {
-                  key: 'maps',
-                  label: 'Ouvrir Maps',
-                  icon: 'map',
-                  onPress: () => void handleOpenGoogleMaps(),
-                },
+                ...(startMode === 'nav' && (destination.trim() || destCoords)
+                  ? [
+                      {
+                        key: 'maps',
+                        label: 'Ouvrir Maps',
+                        icon: 'map' as const,
+                        onPress: () => void handleOpenGoogleMaps(),
+                      },
+                    ]
+                  : [
+                      {
+                        key: 'maps-hub',
+                        label: 'Hub Maps',
+                        icon: 'map' as const,
+                        onPress: () => router.push('/(tabs)/maps' as never),
+                      },
+                    ]),
                 {
                   key: 'manual',
                   label: 'Saisie manuelle',
@@ -2977,6 +3000,7 @@ export default function TripScreen() {
               ]}
             />
           ) : null}
+          </TutorialAnchor>
         </>
       ) : !activeVehicle && !historyAllVehicles ? (
         <View style={[styles.panel, styles.panelContent]}>

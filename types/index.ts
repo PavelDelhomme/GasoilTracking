@@ -54,8 +54,8 @@ export interface Vehicle {
    * Entretien régulier à jour ? null = non renseigné, true = Oui, false = Non.
    */
   maintenanceUpToDate?: boolean | null;
-  /** Checklist entretien (JSON keys → boolean). */
-  maintenanceChecklist?: Record<string, boolean>;
+  /** Checklist entretien (clés → bool ou méta avec lastDoneKm / facture). */
+  maintenanceChecklist?: Record<string, boolean | { done?: boolean; lastDoneKm?: number | null; lastDoneAt?: string | null; note?: string | null; invoiceAmount?: number | null }>;
   /** Immatriculation (carte grise). */
   plateNumber?: string | null;
   /** VIN / n° de série (17 car.) — optionnel, fiche technique Autoref etc. */
@@ -92,6 +92,8 @@ export interface Place {
   kind: PlaceKind;
   latitude: number | null;
   longitude: number | null;
+  /** Ordre d’affichage (plus petit = plus haut) */
+  sortOrder?: number;
   createdAt: string;
 }
 

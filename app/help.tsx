@@ -17,7 +17,6 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/useTheme';
-import { InlineBackBar } from '@/components/HeaderBackButton';
 import { getLocalAppVersion } from '@/lib/api';
 import {
   filterHelp,
@@ -64,7 +63,6 @@ export default function HelpScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
-      <InlineBackBar />
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: 32 + insets.bottom }]}
         keyboardShouldPersistTaps="handled"
@@ -72,7 +70,7 @@ export default function HelpScreen() {
         <Text style={[styles.hero, { color: colors.text }]}>Aide</Text>
         <Text style={{ color: colors.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: 14 }}>
           Guide pratique de Gasoil Tracking — v{getLocalAppVersion()}. Cherchez un mot, ou ouvrez une
-          catégorie.
+          catégorie. Un seul bouton retour (en haut à gauche) suffit pour quitter cette page.
         </Text>
 
         <View

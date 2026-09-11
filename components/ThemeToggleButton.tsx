@@ -23,7 +23,7 @@ export function ThemeToggleButton() {
     >
       <Ionicons
         name={scheme === 'dark' ? 'sunny-outline' : 'moon-outline'}
-        size={20}
+        size={18}
         color={colors.text}
       />
     </Pressable>
@@ -32,12 +32,12 @@ export function ThemeToggleButton() {
 
 const styles = StyleSheet.create({
   btn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: Platform.OS === 'web' ? 12 : 8,
+    marginRight: Platform.OS === 'web' ? 12 : 4,
   },
 });

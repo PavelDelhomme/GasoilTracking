@@ -8,7 +8,7 @@ import {
   Pressable,
   ActivityIndicator,
 } from 'react-native';
-import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/hooks/useTheme';
@@ -30,6 +30,7 @@ import { formatRelativeDay } from '@/lib/dates';
 import { notify } from '@/lib/notify';
 import { updateVehicle } from '@/lib/database';
 import { MaintenanceStatusPanel } from '@/components/MaintenanceStatusPanel';
+import { TutorialAnchor } from '@/components/TutorialAnchor';
 import type { FillUp, SinceLastFillStats, Trip } from '@/types';
 
 export default function VehicleDetailScreen() {
@@ -81,6 +82,7 @@ export default function VehicleDetailScreen() {
   if (!vehicle) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
+        <Stack.Screen options={{ title: 'Véhicule' }} />
         <Text style={{ color: colors.textSecondary }}>Véhicule introuvable</Text>
         <Button title="Retour" onPress={() => router.back()} style={{ marginTop: 16 }} />
       </View>
@@ -110,6 +112,8 @@ export default function VehicleDetailScreen() {
         />
       }
     >
+      <Stack.Screen options={{ title: vehicle.name }} />
+      <TutorialAnchor id="vehicle-detail-card">
       <Card>
         <View style={styles.header}>
           <Ionicons name="car-sport" size={36} color={colors.accent} />
@@ -143,6 +147,7 @@ export default function VehicleDetailScreen() {
           />
         </View>
       </Card>
+      </TutorialAnchor>
 
       <Card>
         <Text style={[styles.section, { color: colors.text }]}>Niveau carburant</Text>
@@ -218,6 +223,7 @@ export default function VehicleDetailScreen() {
       <MaintenanceStatusPanel
         upToDate={vehicle.maintenanceUpToDate}
         checklist={vehicle.maintenanceChecklist}
+        currentOdometer={displayOdometerKm(vehicle)}
         onChangeUpToDate={async (v) => {
           await updateVehicle(vehicle.id, { maintenanceUpToDate: v });
           await refresh();

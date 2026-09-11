@@ -17,6 +17,14 @@ import { ClientOnly } from '@/components/ClientOnly';
 import { AppUpdateModal } from '@/components/AppUpdateModal';
 import { FuelGaugeModalHost } from '@/components/FuelGaugeModalHost';
 import { RegisterServiceWorker } from '@/components/RegisterServiceWorker';
+import { OnboardingTutorial } from '@/components/OnboardingTutorial';
+import { TutorialProvider } from '@/context/TutorialContext';
+import { useApp } from '@/context/AppContext';
+
+function TutorialBridge({ children }: { children: React.ReactNode }) {
+  const { refresh } = useApp();
+  return <TutorialProvider onRefresh={refresh}>{children}</TutorialProvider>;
+}
 
 function RootNavigation() {
   const { colors, scheme } = useTheme();
@@ -48,6 +56,7 @@ function RootNavigation() {
           name="vehicle/maintenance"
           options={{ title: 'Entretien & CT', presentation: 'modal' }}
         />
+        <Stack.Screen name="vehicle/[id]" options={{ title: 'Véhicule' }} />
         <Stack.Screen name="fillup/add" options={{ title: 'Nouveau plein', presentation: 'modal' }} />
         <Stack.Screen name="fillup/[id]" options={{ title: 'Détail du plein' }} />
         <Stack.Screen name="fillup/station" options={{ title: 'Station essence', presentation: 'modal' }} />
@@ -106,8 +115,16 @@ function RootNavigation() {
         <Stack.Screen name="place/add" options={{ title: 'Nouveau lieu', presentation: 'modal' }} />
         <Stack.Screen name="place/edit" options={{ title: 'Modifier le lieu', presentation: 'modal' }} />
         <Stack.Screen name="place/route" options={{ title: 'Trajet régulier', presentation: 'modal' }} />
+        <Stack.Screen
+          name="scheduled-trips"
+          options={{
+            title: 'Trajets programmés',
+            headerLeft: () => <HeaderBackButton />,
+          }}
+        />
       </Stack>
       <AccountDrawer />
+      <OnboardingTutorial />
       <FuelGaugeModalHost />
       <AppUpdateModal
         visible={update.visible}
@@ -132,11 +149,13 @@ export default function RootLayout() {
             <LocaleProvider>
               <AuthProvider>
                 <AppProvider>
-                  <AppUpdateProvider>
-                    <AccountDrawerProvider>
-                      <RootNavigation />
-                    </AccountDrawerProvider>
-                  </AppUpdateProvider>
+                  <TutorialBridge>
+                    <AppUpdateProvider>
+                      <AccountDrawerProvider>
+                        <RootNavigation />
+                      </AccountDrawerProvider>
+                    </AppUpdateProvider>
+                  </TutorialBridge>
                 </AppProvider>
               </AuthProvider>
             </LocaleProvider>
