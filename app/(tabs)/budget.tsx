@@ -33,6 +33,7 @@ import {
 import { SwipeableRow } from '@/components/SwipeableRow';
 import { TutorialAnchor } from '@/components/TutorialAnchor';
 import {
+  cheapestStationFuelPrice,
   fetchCheapestStations,
   fuelLabel,
   isFrenchFuelOpenDataAvailable,
@@ -1178,12 +1179,11 @@ export default function BudgetScreen() {
               title="Y aller · station la moins chère"
               onPress={() => {
                 const s = stations[0];
-                const fuelKey =
-                  activeVehicle?.fuelType === 'diesel'
-                    ? 'gazole'
-                    : activeVehicle?.fuelType === 'gpl'
-                      ? 'gplc'
-                      : 'e10';
+                const pick = cheapestStationFuelPrice(
+                  s.prices,
+                  activeVehicle?.fuelType || 'diesel'
+                );
+                const fuelKey = pick?.key || 'e10';
                 router.push({
                   pathname: '/fillup/station' as never,
                   params: {
@@ -1191,7 +1191,7 @@ export default function BudgetScreen() {
                     address: `${s.address} ${s.city}`.trim(),
                     lat: String(s.latitude),
                     lon: String(s.longitude),
-                    price: String(s.prices[fuelKey] ?? ''),
+                    price: String(pick?.price ?? ''),
                     fuelKey,
                   },
                 } as never);
@@ -1200,13 +1200,12 @@ export default function BudgetScreen() {
             />
           )}
           {stations.map((s, idx) => {
-            const fuelKey =
-              activeVehicle?.fuelType === 'diesel'
-                ? 'gazole'
-                : activeVehicle?.fuelType === 'gpl'
-                  ? 'gplc'
-                  : 'e10';
-            const price = s.prices[fuelKey];
+            const pick = cheapestStationFuelPrice(
+              s.prices,
+              activeVehicle?.fuelType || 'diesel'
+            );
+            const fuelKey = pick?.key || 'e10';
+            const price = pick?.price;
             const cheapest = idx === 0;
             return (
               <Pressable
@@ -1249,6 +1248,9 @@ export default function BudgetScreen() {
                   </Text>
                   <Text style={{ color: colors.textSecondary, fontSize: 12 }} numberOfLines={1}>
                     {s.city || s.address} · {s.distanceKm != null ? `${s.distanceKm.toFixed(1)} km` : '—'}
+                    {activeVehicle?.fuelType === 'essence' && pick
+                      ? ` · ${fuelLabel(pick.key)}`
+                      : ''}
                   </Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
@@ -1262,15 +1264,8 @@ export default function BudgetScreen() {
           })}
           {stations.length > 0 && (
             <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
-              Touchez = Maps + suivi GPS des km, puis plein. Tri par{' '}
-              {fuelLabel(
-                activeVehicle?.fuelType === 'diesel'
-                  ? 'gazole'
-                  : activeVehicle?.fuelType === 'gpl'
-                    ? 'gplc'
-                    : 'e10'
-              )}
-              .
+              Touchez = Maps + suivi GPS des km, puis plein. Tri par prix le plus bas
+              {activeVehicle?.fuelType === 'essence' ? ' (E10 / SP95 / SP98)' : ''}.
             </Text>
           )}
         </Card>

@@ -11,9 +11,37 @@ import { repairFillUpVehiclesAndBudgets } from '@/lib/repairFillUpVehicles';
 import { prepareSnapshotForPush, slimSnapshotAggressive, snapshotContentHash } from '@/lib/syncPayload';
 import { getActiveTripLite, stopActiveTrips } from '@/lib/database';
 import { finalizeStaleActiveTrip } from '@/lib/finalizeStaleTrip';
+import { decideSyncAction } from '@/lib/syncDecision';
 
 const BACKUP_KEY = 'gasoil_local_backup_v1';
 const PENDING_UPDATE_KEY = 'gasoil_pending_update_v1';
+const SYNC_META_KEY = 'gasoil_sync_meta_v1';
+
+type SyncMeta = {
+  lastPushedAt: number;
+  lastPulledServerAt: number;
+  lastRemoteHash: string;
+};
+
+async function readSyncMeta(): Promise<SyncMeta> {
+  try {
+    const raw = await AsyncStorage.getItem(SYNC_META_KEY);
+    if (!raw) return { lastPushedAt: 0, lastPulledServerAt: 0, lastRemoteHash: '' };
+    const p = JSON.parse(raw) as Partial<SyncMeta>;
+    return {
+      lastPushedAt: Number(p.lastPushedAt) || 0,
+      lastPulledServerAt: Number(p.lastPulledServerAt) || 0,
+      lastRemoteHash: typeof p.lastRemoteHash === 'string' ? p.lastRemoteHash : '',
+    };
+  } catch {
+    return { lastPushedAt: 0, lastPulledServerAt: 0, lastRemoteHash: '' };
+  }
+}
+
+async function writeSyncMeta(patch: Partial<SyncMeta>): Promise<void> {
+  const cur = await readSyncMeta();
+  await AsyncStorage.setItem(SYNC_META_KEY, JSON.stringify({ ...cur, ...patch }));
+}
 
 export type PendingUpdateMeta = {
   targetVersion: string;
@@ -155,6 +183,10 @@ async function pushSyncSafe(snapshot: AppDataSnapshot): Promise<void> {
     if (!isPayloadTooLargeError(e)) throw e;
     await pushSync(slimSnapshotAggressive(prepared));
   }
+  await writeSyncMeta({
+    lastPushedAt: Date.now(),
+    lastRemoteHash: snapshotContentHash(snapshot),
+  });
 }
 
 /** Sync cloud complète (tous les objets) + backup local. */
@@ -193,6 +225,13 @@ export async function refreshFromCloud(): Promise<{
   if (!snap) return { ok: false, reason: 'empty', updatedAt: remote?.updatedAt ?? null };
   await applySnapshot(snap, 'replace');
   await saveLocalBackup(snap);
+  const serverAt = remote?.updatedAt ? Date.parse(remote.updatedAt) || Date.now() : Date.now();
+  await writeSyncMeta({
+    lastPulledServerAt: serverAt,
+    lastRemoteHash: snapshotContentHash(snap),
+    // Pull explicite : cloud = source — évite un re-push immédiat de l’ancien local.
+    lastPushedAt: serverAt,
+  });
   return { ok: true, reason: 'applied', updatedAt: remote?.updatedAt ?? null };
 }
 
@@ -215,7 +254,10 @@ function snapshotWeight(snap: {
   );
 }
 
-/** Activité la plus récente (trajets / pleins / export) — pour privilégier le téléphone source. */
+/**
+ * Activité métier (trajets / pleins) — ignore `exportedAt` (souvent tamponné à now
+ * par collectSnapshot → fausse « nouveauté » locale).
+ */
 function snapshotActivityAt(snap: {
   exportedAt?: string;
   trips?: { startTime?: string; endTime?: string | null }[];
@@ -223,7 +265,7 @@ function snapshotActivityAt(snap: {
   vehicles?: { estimatedFuelLiters?: number | null; currentOdometer?: number | null; trackedKm?: number | null }[];
 } | null): number {
   if (!snap) return 0;
-  let max = snap.exportedAt ? Date.parse(snap.exportedAt) || 0 : 0;
+  let max = 0;
   for (const t of snap.trips || []) {
     const a = Date.parse(t.endTime || t.startTime || '') || 0;
     if (a > max) max = a;
@@ -265,73 +307,49 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
   const remote = await fetchSync();
   const remoteSnap = normalizeSnapshot(remote?.data);
   const local = await collectSnapshot();
+  const localHash = snapshotContentHash(local);
+  const remoteHash = snapshotContentHash(remoteSnap);
+  const meta = await readSyncMeta();
+  const remoteServerAt = remote?.updatedAt ? Date.parse(remote.updatedAt) || 0 : 0;
+
   // Identiques (hors exportedAt / tracés GPS) → pas de push cosmétique.
-  {
-    const localHash = snapshotContentHash(local);
-    const remoteHash = snapshotContentHash(remoteSnap);
-    if (remoteSnap && localHash && localHash === remoteHash) {
-      return 'skipped';
-    }
-  }
-  // collectSnapshot() tamponne exportedAt=now → ne pas s’en servir pour décider push/pull
-  // (sinon un vieux IndexedDB web écrase toujours le cloud du téléphone).
-  const localAt = snapshotActivityAt(local);
-  const remoteAt = Math.max(
-    remote?.updatedAt ? Date.parse(remote.updatedAt) || 0 : 0,
-    snapshotActivityAt(remoteSnap)
-  );
-  const remoteW = snapshotWeight(remoteSnap);
-  const localW = snapshotWeight(local);
-  const localActivity = localAt;
-  const remoteActivity = snapshotActivityAt(remoteSnap);
-  const localKm = snapshotTripKm(local);
-  const remoteKm = snapshotTripKm(remoteSnap);
-  const remoteTripCount = remoteSnap?.trips?.length || 0;
-  const localTripCount = local.trips?.length || 0;
-
-  // Local quasi vide + cloud riche → toujours tirer (jamais pousser un wipe).
-  const localEmptyish = localW < 5 || (local.vehicles?.length || 0) === 0;
-  const remoteHasData = !!remoteSnap && remoteW >= 5 && (remoteSnap.vehicles?.length || 0) > 0;
-  if (localEmptyish && remoteHasData) {
-    await applySnapshot(remoteSnap!, 'replace');
-    try {
-      await repairFillUpVehiclesAndBudgets();
-    } catch {
-      /* ignore */
-    }
-    await saveLocalBackup(await collectSnapshot());
-    return 'pulled';
-  }
-
-  const remoteClearlyNewer = remoteAt > localAt + 2000;
-  const remoteRicherAndNotOlder =
-    (remoteW > localW + 5 || remoteTripCount > localTripCount + 1) &&
-    remoteAt >= localAt - 2000;
-  // Cloud nettement plus pauvre (même si même nb de véhicules) → pousser le local.
-  const remoteClearlyPoorer =
-    !!remoteSnap &&
-    (localW > remoteW + 8 || localTripCount > remoteTripCount + 1);
-
-  // Téléphone plus « vivant » (km / activité plus récente) → pousser même si cloud « plus récent »
-  // (ex. web a sync un vieux 40,7 L qui écrase 13,9 L du Nothing).
-  const localMoreLived =
-    !localEmptyish &&
-    (localKm > remoteKm + 5 ||
-      (localActivity > remoteActivity + 60_000 && localW + 3 >= remoteW && localTripCount >= remoteTripCount));
-
-  // Ne jamais pousser un local vide/pauvre par-dessus un cloud non vide.
-  if (localEmptyish && remoteSnap) {
+  if (remoteSnap && localHash && localHash === remoteHash) {
+    await writeSyncMeta({
+      lastRemoteHash: remoteHash,
+      lastPulledServerAt: Math.max(meta.lastPulledServerAt, remoteServerAt),
+    });
     return 'skipped';
   }
 
-  // Ne jamais tirer un cloud plus léger juste parce qu’il est « plus récent ».
-  if (remoteSnap && (remoteClearlyPoorer || localMoreLived)) {
-    await pushSyncSafe(local);
-    await saveLocalBackup(local);
-    return 'pushed';
+  const remoteW = snapshotWeight(remoteSnap);
+  const action = decideSyncAction({
+    localHash,
+    remoteHash,
+    remoteServerAt,
+    lastPushedAt: meta.lastPushedAt,
+    lastPulledServerAt: meta.lastPulledServerAt,
+    localW: (local.vehicles?.length || 0) === 0 ? 0 : snapshotWeight(local),
+    remoteW: remoteSnap && (remoteSnap.vehicles?.length || 0) > 0 ? remoteW : 0,
+    localKm: snapshotTripKm(local),
+    remoteKm: snapshotTripKm(remoteSnap),
+    localTripCount: local.trips?.length || 0,
+    remoteTripCount: remoteSnap?.trips?.length || 0,
+    localActivityAt: snapshotActivityAt(local),
+    remoteActivityAt: snapshotActivityAt(remoteSnap),
+  });
+
+  if (action === 'skip' || !remoteSnap) {
+    if (action === 'skip') return 'skipped';
+    // Pas de remote → pousser si on a du local
+    if ((local.vehicles?.length || 0) > 0) {
+      await pushSyncSafe(local);
+      await saveLocalBackup(local);
+      return 'pushed';
+    }
+    return 'skipped';
   }
 
-  if (remoteSnap && (remoteClearlyNewer || remoteRicherAndNotOlder) && !localMoreLived) {
+  if (action === 'pull') {
     await applySnapshot(remoteSnap, 'replace');
     try {
       await repairFillUpVehiclesAndBudgets();
@@ -339,19 +357,14 @@ export async function syncPreferNewer(): Promise<'pulled' | 'pushed' | 'skipped'
       /* ignore */
     }
     await saveLocalBackup(await collectSnapshot());
+    await writeSyncMeta({
+      lastPulledServerAt: remoteServerAt || Date.now(),
+      lastRemoteHash: remoteHash,
+      lastPushedAt: remoteServerAt || Date.now(),
+    });
     return 'pulled';
   }
-  // Ambigu : ne pas écraser un cloud plus riche en trajets.
-  if (remoteSnap && remoteTripCount > localTripCount) {
-    await applySnapshot(remoteSnap, 'replace');
-    try {
-      await repairFillUpVehiclesAndBudgets();
-    } catch {
-      /* ignore */
-    }
-    await saveLocalBackup(await collectSnapshot());
-    return 'pulled';
-  }
+
   await pushSyncSafe(local);
   await saveLocalBackup(local);
   return 'pushed';

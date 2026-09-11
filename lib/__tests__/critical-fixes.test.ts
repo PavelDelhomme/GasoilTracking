@@ -15,6 +15,8 @@ import {
   gaugeFractionFromArcTouch,
   gaugePolar,
 } from '../fuelGaugeMath';
+import { decideSyncAction } from '../syncDecision';
+import { cheapestStationFuelPrice } from '../fuelPrices';
 
 describe('compareSemver', () => {
   it('ordonne correctement', () => {
@@ -78,14 +80,80 @@ describe('vehicles search', () => {
   });
 });
 
-/** Logique syncPreferNewer (extrait) : poids seul ne tire pas si remote plus vieux. */
-function shouldPull(remoteAt: number, localAt: number, remoteW: number, localW: number) {
-  const remoteClearlyNewer = remoteAt > localAt + 2000;
-  const remoteRicherAndNotOlder = remoteW > localW + 5 && remoteAt >= localAt - 2000;
-  return remoteClearlyNewer || remoteRicherAndNotOlder;
-}
+describe('decideSyncAction', () => {
+  const base = {
+    localHash: 'aaa',
+    remoteHash: 'bbb',
+    remoteServerAt: 10_000,
+    lastPushedAt: 0,
+    lastPulledServerAt: 0,
+    localW: 50,
+    remoteW: 50,
+    localKm: 100,
+    remoteKm: 100,
+    localTripCount: 10,
+    remoteTripCount: 10,
+    localActivityAt: 5_000,
+    remoteActivityAt: 5_000,
+  };
 
-describe('syncPreferNewer policy', () => {
+  it('skip si hash égal', () => {
+    expect(decideSyncAction({ ...base, localHash: 'x', remoteHash: 'x' })).toBe('skip');
+  });
+
+  it('pull si cloud corrigé après notre push (même km)', () => {
+    expect(
+      decideSyncAction({
+        ...base,
+        lastPushedAt: 1_000,
+        remoteServerAt: 20_000,
+      })
+    ).toBe('pull');
+  });
+
+  it('push si local a nettement plus de km', () => {
+    expect(
+      decideSyncAction({
+        ...base,
+        localKm: 200,
+        remoteKm: 100,
+        lastPushedAt: 1_000,
+        remoteServerAt: 20_000,
+      })
+    ).toBe('push');
+  });
+
+  it('pull local vide + cloud riche', () => {
+    expect(
+      decideSyncAction({
+        ...base,
+        localW: 0,
+        remoteW: 80,
+      })
+    ).toBe('pull');
+  });
+});
+
+describe('cheapestStationFuelPrice (essence)', () => {
+  it('prend E10 plutôt que SP98', () => {
+    const pick = cheapestStationFuelPrice(
+      { e10: 1.72, sp95: 1.79, sp98: 1.95 },
+      'essence'
+    );
+    expect(pick?.key).toBe('e10');
+    expect(pick?.price).toBe(1.72);
+  });
+  it('diesel = gazole', () => {
+    expect(cheapestStationFuelPrice({ gazole: 1.65, e10: 1.5 }, 'diesel')?.price).toBe(1.65);
+  });
+});
+
+describe('syncPreferNewer policy (legacy)', () => {
+  function shouldPull(remoteAt: number, localAt: number, remoteW: number, localW: number) {
+    const remoteClearlyNewer = remoteAt > localAt + 2000;
+    const remoteRicherAndNotOlder = remoteW > localW + 5 && remoteAt >= localAt - 2000;
+    return remoteClearlyNewer || remoteRicherAndNotOlder;
+  }
   it('ne tire pas un cloud plus riche mais plus vieux', () => {
     expect(shouldPull(1_000, 10_000, 100, 10)).toBe(false);
   });

@@ -11,6 +11,9 @@ export type FuelStationPrice = {
   distanceKm?: number;
 };
 
+/** Grades essence usuels (pas E85) — on prend le moins cher dispo à la pompe. */
+export const PETROL_PRICE_KEYS = ['e10', 'sp95', 'sp98'] as const;
+
 function mapAppFuel(fuel: FuelType): keyof FuelStationPrice['prices'] {
   if (fuel === 'diesel') return 'gazole';
   if (fuel === 'gpl') return 'gplc';
@@ -18,9 +21,39 @@ function mapAppFuel(fuel: FuelType): keyof FuelStationPrice['prices'] {
   return 'e10';
 }
 
-/** Clé prix open-data pour le type de carburant app. */
+/** Clé prix open-data « par défaut » (essence → E10). Préférer `cheapestStationFuelPrice`. */
 export function fuelPriceKey(fuel: FuelType): keyof FuelStationPrice['prices'] {
   return mapAppFuel(fuel);
+}
+
+/**
+ * Prix à utiliser pour un véhicule à une station :
+ * diesel/GPL = grade unique ; essence = min(E10, SP95, SP98).
+ */
+export function cheapestStationFuelPrice(
+  prices: FuelStationPrice['prices'] | null | undefined,
+  fuel: FuelType
+): { key: keyof FuelStationPrice['prices']; price: number } | null {
+  if (!prices) return null;
+  if (fuel === 'diesel') {
+    return prices.gazole != null && Number.isFinite(prices.gazole)
+      ? { key: 'gazole', price: prices.gazole }
+      : null;
+  }
+  if (fuel === 'gpl') {
+    return prices.gplc != null && Number.isFinite(prices.gplc)
+      ? { key: 'gplc', price: prices.gplc }
+      : null;
+  }
+  if (fuel === 'electrique') return null;
+  let best: { key: keyof FuelStationPrice['prices']; price: number } | null = null;
+  for (const key of PETROL_PRICE_KEYS) {
+    const p = prices[key];
+    if (p != null && Number.isFinite(p) && (!best || p < best.price)) {
+      best = { key, price: p };
+    }
+  }
+  return best;
 }
 
 export function fuelLabel(key: string): string {
@@ -133,7 +166,12 @@ async function fetchStationsRaw(
 
 function mapResults(
   results: Record<string, unknown>[],
-  opts: { latitude: number; longitude: number; fuelKey: keyof FuelStationPrice['prices']; limit: number }
+  opts: {
+    latitude: number;
+    longitude: number;
+    fuel: FuelType;
+    limit: number;
+  }
 ): FuelStationPrice[] {
   const stations: FuelStationPrice[] = [];
   for (const r of results) {
@@ -162,13 +200,14 @@ function mapResults(
     });
   }
 
-  const withFuel = stations.filter((s) => s.prices[opts.fuelKey] != null);
+  const priceOf = (s: FuelStationPrice) =>
+    cheapestStationFuelPrice(s.prices, opts.fuel)?.price ?? 99;
+  const withFuel = stations.filter((s) => cheapestStationFuelPrice(s.prices, opts.fuel) != null);
   const pool = withFuel.length ? withFuel : stations; // fallback : montrer quand même
   return pool
     .sort(
       (a, b) =>
-        (a.prices[opts.fuelKey] ?? 99) - (b.prices[opts.fuelKey] ?? 99) ||
-        (a.distanceKm ?? 99) - (b.distanceKm ?? 99)
+        priceOf(a) - priceOf(b) || (a.distanceKm ?? 99) - (b.distanceKm ?? 99)
     )
     .slice(0, opts.limit);
 }
@@ -188,7 +227,7 @@ export async function fetchCheapestStations(opts: {
   }
   const baseRadius = Math.max(1, Math.min(opts.radiusKm ?? 12, 30));
   const limit = opts.limit ?? 15;
-  const fuelKey = mapAppFuel(opts.fuel || 'diesel');
+  const fuel = opts.fuel || 'diesel';
 
   // 1ʳᵉ passe + élargissement auto si zone trop vide (ex. GPS imprécis / campagne)
   const radii = Array.from(
@@ -203,7 +242,7 @@ export async function fetchCheapestStations(opts: {
       last = mapResults(results, {
         latitude: opts.latitude,
         longitude: opts.longitude,
-        fuelKey,
+        fuel,
         limit,
       });
       if (last.length > 0) return last;

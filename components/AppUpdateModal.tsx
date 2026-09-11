@@ -67,8 +67,8 @@ export function AppUpdateModal({
                 ? 'Rechargement de la version web. « Plus tard » pour continuer sans mettre à jour.'
                 : 'Vos données restent sur l’appareil. Vous pourrez aussi mettre à jour depuis Mon compte.'}
             {force
-              ? ' Vous pouvez reporter 30 min (ex. finir un trajet), puis la MAJ reviendra.'
-              : ' Rappel dans 2 h si vous reportez.'}
+              ? ' Vous pouvez reporter 4 h (plusieurs fois si besoin), puis la MAJ reviendra.'
+              : ' Rappel dans 6 h si vous reportez (répétable).'}
           </Text>
 
           {busy && (
@@ -91,7 +91,7 @@ export function AppUpdateModal({
             <View style={styles.actions}>
               <Pressable onPress={onLater} style={styles.secondaryBtn}>
                 <Text style={{ color: colors.textSecondary, fontWeight: '600' }}>
-                  {force ? 'Plus tard (30 min)' : 'Plus tard (rappel 2 h)'}
+                  {force ? 'Plus tard (4 h)' : 'Plus tard (rappel 6 h)'}
                 </Text>
               </Pressable>
               <Pressable

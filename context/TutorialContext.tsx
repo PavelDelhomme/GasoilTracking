@@ -11,13 +11,13 @@ import React, {
   useState,
 } from 'react';
 import { DeviceEventEmitter } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { cleanupTutorialDemo, getTutorialDemoIds, seedTutorialDemo } from '@/lib/tutorialDemo';
 import { getAppFlavor } from '@/lib/appFlavor';
+import { readOnboardingDoneLocal, writeOnboardingDoneLocal } from '@/lib/clientPrefs';
+import { syncFullBackup } from '@/lib/backup';
 
 export const ONBOARDING_REPLAY_EVENT = 'gasoil_onboarding_replay';
-const DONE_KEY = 'gasoil_onboarding_done_v2';
 
 export type HighlightRect = { x: number; y: number; width: number; height: number };
 
@@ -242,7 +242,13 @@ export function TutorialProvider({
   };
 
   const markDone = async () => {
-    await AsyncStorage.setItem(DONE_KEY, '1');
+    await writeOnboardingDoneLocal(true);
+    // Propage le flag sur le cloud (évite de réafficher après wipe / autre appareil).
+    try {
+      await syncFullBackup();
+    } catch {
+      /* offline */
+    }
   };
 
   const start = useCallback(async () => {
@@ -345,15 +351,19 @@ export function TutorialProvider({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const done = await AsyncStorage.getItem(DONE_KEY);
-      const doneV1 = await AsyncStorage.getItem('gasoil_onboarding_done_v1');
-      if (!cancelled && done !== '1' && doneV1 !== '1') {
-        await start();
-      }
+      // Laisse le login / pull cloud appliquer clientPrefs avant de décider.
+      await new Promise((r) => setTimeout(r, 1800));
+      if (cancelled) return;
+      if (await readOnboardingDoneLocal()) return;
+      // 2ᵉ chance : sync peut encore écrire le flag
+      await new Promise((r) => setTimeout(r, 1200));
+      if (cancelled) return;
+      if (await readOnboardingDoneLocal()) return;
+      await start();
     })();
     const sub = DeviceEventEmitter.addListener(ONBOARDING_REPLAY_EVENT, () => {
       void (async () => {
-        await AsyncStorage.multiRemove([DONE_KEY, 'gasoil_onboarding_done_v1']);
+        await writeOnboardingDoneLocal(false);
         await start();
       })();
     });
@@ -408,7 +418,7 @@ export function useTutorial() {
 }
 
 export async function resetOnboardingFlag(): Promise<void> {
-  await AsyncStorage.multiRemove([DONE_KEY, 'gasoil_onboarding_done_v1']);
+  await writeOnboardingDoneLocal(false);
 }
 
 export async function replayOnboarding(): Promise<void> {

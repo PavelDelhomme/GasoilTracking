@@ -19,11 +19,12 @@ import { followsProductionOta } from '@/lib/appFlavor';
 import { openExternalDownload, performSafeApkUpdate, performWebHardReload, webReloadAlreadyTried, type UpdateProgress } from '@/lib/appUpdate';
 
 const SNOOZE_KEY = 'gasoil_update_snooze_v1';
-const SNOOZE_MS = 2 * 60 * 60 * 1000; // 2 h
-/** Force update : reporter pour finir un trajet / sortir du blocage UI. */
-const FORCE_SNOOZE_MS = 30 * 60 * 1000; // 30 min
+/** Soft prompt : reporter longtemps (répétable). */
+const SNOOZE_MS = 6 * 60 * 60 * 1000; // 6 h
+/** Force update : reporter plusieurs fois sans bloquer (trajet, sync…). */
+const FORCE_SNOOZE_MS = 4 * 60 * 60 * 1000; // 4 h
 /** Web : si le bundle n’a pas bougé après hard-reload, ne pas rebloquer tout de suite. */
-const WEB_DEPLOY_SNOOZE_MS = 30 * 60 * 1000;
+const WEB_DEPLOY_SNOOZE_MS = 60 * 60 * 1000; // 1 h
 
 type Snooze = { version: string; until: number };
 

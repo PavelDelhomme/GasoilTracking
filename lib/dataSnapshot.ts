@@ -19,6 +19,13 @@ import {
   replaceAllData,
 } from '@/lib/database';
 import { getLocalAppVersion } from '@/lib/api';
+import {
+  applyClientPrefs,
+  collectClientPrefs,
+  mergeClientPrefs,
+  normalizeClientPrefs,
+  type ClientPrefs,
+} from '@/lib/clientPrefs';
 
 export const SNAPSHOT_SCHEMA = 1;
 
@@ -33,10 +40,12 @@ export type AppDataSnapshot = {
   places: Place[];
   recurringRoutes: RecurringRoute[];
   maintenances: VehicleMaintenance[];
+  /** Préférences UI (visite guidée, etc.) — sync cloud. */
+  clientPrefs?: ClientPrefs;
 };
 
 export async function collectSnapshot(): Promise<AppDataSnapshot> {
-  const [vehicles, fillUps, budgets, trips, places, recurringRoutes, maintenances] =
+  const [vehicles, fillUps, budgets, trips, places, recurringRoutes, maintenances, clientPrefs] =
     await Promise.all([
       getVehicles(),
       getFillUps(),
@@ -45,6 +54,7 @@ export async function collectSnapshot(): Promise<AppDataSnapshot> {
       getPlaces(),
       getRecurringRoutes(),
       getMaintenances(),
+      collectClientPrefs(),
     ]);
   return {
     schema: SNAPSHOT_SCHEMA,
@@ -57,6 +67,7 @@ export async function collectSnapshot(): Promise<AppDataSnapshot> {
     places,
     recurringRoutes,
     maintenances,
+    clientPrefs,
   };
 }
 
@@ -76,6 +87,7 @@ export function normalizeSnapshot(raw: unknown): AppDataSnapshot | null {
   const maintenances = Array.isArray(d.maintenances)
     ? (d.maintenances as VehicleMaintenance[])
     : [];
+  const clientPrefs = normalizeClientPrefs(d.clientPrefs);
   if (
     vehicles.length +
       fillUps.length +
@@ -99,6 +111,7 @@ export function normalizeSnapshot(raw: unknown): AppDataSnapshot | null {
     places,
     recurringRoutes,
     maintenances,
+    clientPrefs,
   };
 }
 
@@ -118,6 +131,9 @@ export async function applySnapshot(
     recurringRoutes: snap.recurringRoutes,
     maintenances: snap.maintenances || [],
   });
+  // Sticky : une visite déjà faite localement reste faite même si le cloud n’a pas encore le flag.
+  const merged = mergeClientPrefs(await collectClientPrefs(), snap.clientPrefs);
+  await applyClientPrefs(merged);
   return true;
 }
 

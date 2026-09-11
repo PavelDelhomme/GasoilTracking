@@ -76,6 +76,7 @@ export type SnapshotHashInput = {
     amount?: number | null;
     status: string;
   }>;
+  clientPrefs?: { onboardingDoneV2?: boolean };
 };
 
 /**
@@ -159,6 +160,9 @@ export function snapshotContentHash(snap: SnapshotHashInput | null | undefined):
       places,
       recurringRoutes,
       maintenances,
+      clientPrefs: {
+        onboardingDoneV2: !!snap.clientPrefs?.onboardingDoneV2,
+      },
     })
   );
 }

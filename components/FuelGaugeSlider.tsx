@@ -327,7 +327,7 @@ export function FuelGaugeSlider({
             <Circle cx={cx} cy={cy} r={mini ? 5 : compact ? 7 : 9} fill={fillColor} />
             <Circle cx={cx} cy={cy} r={mini ? 2 : compact ? 3 : 4} fill="#fff" />
 
-            {/* Chiffre + % */}
+            {/* Chiffre centré (évite « 100% » trop à gauche qui masque E / ¼) */}
             {mini ? (
               <SvgText
                 x={cx}
@@ -340,28 +340,16 @@ export function FuelGaugeSlider({
                 {known || editing ? `${pct}%` : '—'}
               </SvgText>
             ) : (
-              <>
-                <SvgText
-                  x={cx - (compact ? 10 : 14)}
-                  y={cy - (compact ? 14 : 18)}
-                  fill={tone === 'critical' || tone === 'warn' ? fillColor : colors.text}
-                  fontSize={compact ? 26 : 34}
-                  fontWeight="900"
-                  textAnchor="end"
-                >
-                  {known || editing ? `${pct}` : '—'}
-                </SvgText>
-                <SvgText
-                  x={cx - (compact ? 6 : 8)}
-                  y={cy - (compact ? 14 : 18)}
-                  fill={colors.textSecondary}
-                  fontSize={compact ? 13 : 15}
-                  fontWeight="700"
-                  textAnchor="start"
-                >
-                  {known || editing ? '%' : ''}
-                </SvgText>
-              </>
+              <SvgText
+                x={cx}
+                y={cy - (compact ? 16 : 20)}
+                fill={tone === 'critical' || tone === 'warn' ? fillColor : colors.text}
+                fontSize={compact ? 24 : 32}
+                fontWeight="900"
+                textAnchor="middle"
+              >
+                {known || editing ? `${pct}%` : '—'}
+              </SvgText>
             )}
           </Svg>
         </View>
