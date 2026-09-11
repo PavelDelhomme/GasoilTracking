@@ -1405,7 +1405,7 @@ export default function BudgetScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  list: { padding: 16, paddingBottom: 120 },
+  list: { padding: 16, paddingBottom: 160 },
   infoCard: { marginBottom: 16 },
   infoTitle: { fontSize: 16, fontWeight: '700', marginBottom: 4 },
   infoText: { fontSize: 14, lineHeight: 20 },
