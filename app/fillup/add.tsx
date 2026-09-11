@@ -275,14 +275,14 @@ export default function AddFillUpScreen() {
       const list = await fetchCheapestStations({
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude,
-        radiusKm: 3,
+        radiusKm: 8,
         fuel: activeVehicle?.fuelType || 'diesel',
         limit: 12,
         countryCode,
       });
       list.sort((a, b) => (a.distanceKm || 99) - (b.distanceKm || 99));
       if (!list.length) {
-        if (!opts?.autoPick) notify('Stations', 'Aucune station dans un rayon de 3 km.');
+        if (!opts?.autoPick) notify('Stations', 'Aucune station dans un rayon élargi (~25 km). Vérifiez le GPS.');
         setNearby([]);
         return;
       }
