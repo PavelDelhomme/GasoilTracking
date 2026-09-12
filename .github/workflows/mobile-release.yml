@@ -62,6 +62,22 @@ jobs:
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "versionCode=$VC" >> "$GITHUB_OUTPUT"
 
+      - name: Stamp versionCode local (évite EAS remote = downgrade Android)
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const app = require('./app.json');
+          const eas = JSON.parse(fs.readFileSync('eas.json', 'utf8'));
+          const vc = app.expo.android.versionCode;
+          const vn = app.expo.version;
+          eas.cli = eas.cli || {};
+          eas.cli.appVersionSource = 'local';
+          eas.build.production.android.gradleCommand =
+            `:app:assembleRelease -PreactNativeArchitectures=arm64-v8a -Pandroid.injected.version.code=${vc} -Pandroid.injected.version.name=${vn}`;
+          fs.writeFileSync('eas.json', JSON.stringify(eas, null, 2) + '\n');
+          console.log('gradleCommand', eas.build.production.android.gradleCommand);
+          NODE
+
       - name: Announce build pending (API)
         env:
           TOKEN: ${{ secrets.RELEASE_UPLOAD_TOKEN }}
@@ -90,6 +106,17 @@ jobs:
             exit 1
           fi
 
+      - name: Verify APK (versionCode réel, ABI, certificat)
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          VERSION_CODE: ${{ steps.ver.outputs.versionCode }}
+        run: |
+          pip install -q pyaxmlparser
+          python3 scripts/verify-release-apk.py /tmp/gasoil.apk \
+            --package com.gasoiltracking.app \
+            --version-code "$VERSION_CODE" \
+            --version-name "$VERSION"
+
       - name: Upload to Gasoil API (prod)
         env:
           TOKEN: ${{ secrets.RELEASE_UPLOAD_TOKEN }}
@@ -108,7 +135,7 @@ jobs:
             -F "version=$VERSION" \
             -F "versionCode=$VERSION_CODE" \
             -F "forceUpdate=1" \
-            -F "releaseNotes=Suivi libre GPS corrigé — les km s’enregistrent à nouveau (v$VERSION)." \
+            -F "releaseNotes=Mise à jour installable (versionCode corrigé) · suivi GPS libre · OTA sans retéléchargement (v$VERSION)." \
             -F "apk=@/tmp/gasoil.apk")
           cat /tmp/rel.json
           echo

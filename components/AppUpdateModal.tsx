@@ -62,7 +62,7 @@ export function AppUpdateModal({
           </Text>
           <Text style={[styles.safe, { color: colors.textSecondary }]}>
             {Platform.OS === 'android'
-              ? 'Mise à jour en un tap : vos trajets, véhicules et connexion sont conservés.'
+              ? 'Mise à jour en un tap : vos trajets, véhicules et connexion sont conservés. Le fichier reste dans le cache de l’app (pas Téléchargements) : si vous annulez l’installateur Android, « Réessayer » n’aura pas à tout retélécharger.'
               : Platform.OS === 'web'
                 ? 'Rechargement de la version web. « Plus tard » pour continuer sans mettre à jour.'
                 : 'Vos données restent sur l’appareil. Vous pourrez aussi mettre à jour depuis Mon compte.'}

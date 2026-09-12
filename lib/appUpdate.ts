@@ -3,7 +3,14 @@ import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 import Constants from 'expo-constants';
 import type { AppVersionInfo } from '@/lib/api';
+import { getLocalVersionCode } from '@/lib/api';
 import { markUpdatePending, prepareDataForUpdate } from '@/lib/backup';
+import {
+  isOtaFileComplete,
+  otaApkFileName,
+  shouldDeleteOtaAfterInstall,
+  shouldReuseOtaFile,
+} from '@/lib/otaApk';
 
 export type UpdateProgress = {
   phase: 'backup' | 'permission' | 'download' | 'install' | 'done' | 'error';
@@ -12,8 +19,22 @@ export type UpdateProgress = {
 };
 
 const PKG = Constants.expoConfig?.android?.package || 'com.gasoiltracking.app';
-/** FLAG_GRANT_READ_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK */
-const INSTALL_FLAGS = 1 | 268435456;
+/** FLAG_GRANT_READ_URI_PERMISSION | FLAG_GRANT_PERSISTABLE_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK */
+const INSTALL_FLAGS = 1 | 64 | 268435456;
+
+function otaDir(): string {
+  const base = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+  if (!base) throw new Error('Stockage local indisponible');
+  return `${base}ota/`;
+}
+
+function otaPathFor(info: AppVersionInfo): string {
+  const vc =
+    info.versionCode != null && Number.isFinite(Number(info.versionCode))
+      ? Number(info.versionCode)
+      : 0;
+  return `${otaDir()}${otaApkFileName(info.version, vc)}`;
+}
 
 function resolveApkUrl(info: AppVersionInfo): string {
   const url = info.apkUrl || '';
@@ -69,12 +90,32 @@ async function launchApkInstaller(fileUri: string) {
   }
 }
 
+let otaInFlight: Promise<void> | null = null;
+
 /**
- * OTA Android in-app depuis gasoil-tracking.delhomme.ovh :
- * backup (local + cloud) → télécharge l’APK → installateur système.
- * Même package → AsyncStorage / session JWT conservés (pas de désinstall).
+ * OTA Android : cache interne (documentDirectory/ota, jamais Téléchargements).
+ * Réutilise le fichier si déjà complet — un abandon du menu système ne relance pas 45 Mo.
+ * Suppression seulement après que la nouvelle version tourne.
  */
 export async function performSafeApkUpdate(
+  info: AppVersionInfo,
+  onProgress?: (p: UpdateProgress) => void
+): Promise<void> {
+  if (otaInFlight) {
+    onProgress?.({
+      phase: 'download',
+      progress: 0.5,
+      message: 'Mise à jour déjà en cours…',
+    });
+    return otaInFlight;
+  }
+  otaInFlight = performSafeApkUpdateInner(info, onProgress).finally(() => {
+    otaInFlight = null;
+  });
+  return otaInFlight;
+}
+
+async function performSafeApkUpdateInner(
   info: AppVersionInfo,
   onProgress?: (p: UpdateProgress) => void
 ): Promise<void> {
@@ -82,6 +123,10 @@ export async function performSafeApkUpdate(
     throw new Error('Mise à jour APK disponible uniquement sur Android');
   }
   const apkUrl = resolveApkUrl(info);
+  const remoteVc =
+    info.versionCode != null && Number.isFinite(Number(info.versionCode))
+      ? Number(info.versionCode)
+      : 0;
 
   onProgress?.({
     phase: 'backup',
@@ -98,109 +143,135 @@ export async function performSafeApkUpdate(
       : 'Session locale sauvegardée (cloud hors ligne)',
   });
 
-  const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
-  if (!baseDir) {
-    throw new Error('Stockage local indisponible');
-  }
-  const dest = `${baseDir}gasoil-tracking-ota.apk`;
-  try {
-    const existing = await FileSystem.getInfoAsync(dest);
-    if (existing.exists) await FileSystem.deleteAsync(dest, { idempotent: true });
-  } catch {
-    /* ignore */
-  }
+  await FileSystem.makeDirectoryAsync(otaDir(), { intermediates: true }).catch(() => undefined);
+  const dest = otaPathFor(info);
 
-  onProgress?.({
-    phase: 'download',
-    progress: 0.1,
-    message: 'Téléchargement depuis le serveur…',
+  const existing = await FileSystem.getInfoAsync(dest).catch(() => ({ exists: false as const }));
+  const reuse = shouldReuseOtaFile({
+    exists: !!existing.exists,
+    actualSize: existing.exists ? existing.size : null,
+    expectedSize: info.apkSize,
+    fileVersionCode: remoteVc,
+    remoteVersionCode: remoteVc,
   });
 
-  const download = FileSystem.createDownloadResumable(
-    apkUrl,
-    dest,
-    {
-      headers: {
-        Accept: 'application/vnd.android.package-archive,*/*',
+  let uri = dest;
+  if (reuse) {
+    onProgress?.({
+      phase: 'download',
+      progress: 0.88,
+      message: 'APK déjà téléchargée — ouverture de l’installateur…',
+    });
+  } else {
+    if (existing.exists) {
+      await FileSystem.deleteAsync(dest, { idempotent: true }).catch(() => undefined);
+    }
+    onProgress?.({
+      phase: 'download',
+      progress: 0.1,
+      message: 'Téléchargement depuis le serveur…',
+    });
+
+    const download = FileSystem.createDownloadResumable(
+      apkUrl,
+      dest,
+      {
+        headers: {
+          Accept: 'application/vnd.android.package-archive,*/*',
+        },
       },
-    },
-    (evt) => {
-      const total = evt.totalBytesExpectedToWrite || 0;
-      const written = evt.totalBytesWritten || 0;
-      const pct = total > 0 ? written / total : 0;
-      onProgress?.({
-        phase: 'download',
-        progress: 0.1 + pct * 0.75,
-        message:
-          total > 0
-            ? `Téléchargement… ${Math.round(pct * 100)} %`
-            : 'Téléchargement en cours…',
-      });
+      (evt) => {
+        const total = evt.totalBytesExpectedToWrite || info.apkSize || 0;
+        const written = evt.totalBytesWritten || 0;
+        const pct = total > 0 ? written / total : 0;
+        onProgress?.({
+          phase: 'download',
+          progress: 0.1 + pct * 0.75,
+          message:
+            total > 0
+              ? `Téléchargement… ${Math.round(pct * 100)} %`
+              : 'Téléchargement en cours…',
+        });
+      }
+    );
+
+    const result = await download.downloadAsync();
+    if (!result?.uri) {
+      throw new Error('Échec du téléchargement OTA');
     }
-  );
-
-  const result = await download.downloadAsync();
-  if (!result?.uri) {
-    throw new Error('Échec du téléchargement OTA');
+    uri = result.uri;
   }
 
-  const infoFile = await FileSystem.getInfoAsync(result.uri);
-  if (!infoFile.exists || (infoFile.size != null && infoFile.size < 1_000_000)) {
-    throw new Error('APK téléchargée invalide ou trop petite');
-  }
-  if (info.apkSize != null && infoFile.size != null) {
-    const delta = Math.abs(infoFile.size - info.apkSize);
-    if (delta > 64 * 1024) {
-      throw new Error(
-        `APK incomplète (${infoFile.size} o ≠ ${info.apkSize} o). Réessayez la mise à jour.`
-      );
-    }
+  const infoFile = await FileSystem.getInfoAsync(uri);
+  if (!isOtaFileComplete(infoFile.exists ? infoFile.size : null, info.apkSize)) {
+    await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
+    throw new Error('APK téléchargée invalide ou incomplète. Réessayez.');
   }
 
-  // Magique ZIP (APK) — évite d’ouvrir un HTML d’erreur → « package non validé ».
   try {
-    const head = await FileSystem.readAsStringAsync(result.uri, {
+    const head = await FileSystem.readAsStringAsync(uri, {
       encoding: 'base64' as FileSystem.EncodingType,
       length: 4,
       position: 0,
     });
-    // "PK\x03\x04" in base64 starts with "UEsD"
     if (!head.startsWith('UEs')) {
+      await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
       throw new Error('Fichier téléchargé n’est pas un APK (réseau / cache).');
     }
   } catch (e) {
     if (e instanceof Error && e.message.includes('APK')) throw e;
-    /* lecture partielle non supportée sur certaines implémentations — ignore */
   }
 
   onProgress?.({
     phase: 'install',
     progress: 0.92,
-    message: 'Ouverture de l’installateur…',
+    message: 'Ouverture de l’installateur Android…',
   });
 
   try {
-    await launchApkInstaller(result.uri);
+    await launchApkInstaller(uri);
   } catch (e) {
     throw new Error(
       (e instanceof Error ? e.message : 'Installation impossible') +
-        ' Si Android dit que le package n’a pas pu être validé : réessayez la mise à jour (APK incomplète) ou contactez le support si le versionCode est trop bas.'
+        ' Le fichier reste en cache interne : « Réessayer » n’aura pas à tout retélécharger. Si Android refuse le package : version trop ancienne ou installation annulée.'
     );
   }
 
   onProgress?.({
     phase: 'done',
     progress: 1,
-    message: 'Validez l’installation Android — votre connexion sera conservée.',
+    message: 'Validez l’installation. En cas d’annulation, réessayez sans nouveau téléchargement.',
   });
 }
 
-/** Ouvre la page / le lien de téléchargement (web, iOS PWA ou APK). */
+/** Supprime les APK OTA internes une fois l’app à jour (pas le dossier Téléchargements). */
+export async function cleanupOtaApkIfUpdated(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const localVc = getLocalVersionCode();
+  const dir = otaDir();
+  try {
+    const entries = await FileSystem.readDirectoryAsync(dir);
+    for (const name of entries) {
+      const m = /vc(\d+)\.apk$/i.exec(name);
+      const cachedVc = m ? Number(m[1]) : 0;
+      if (shouldDeleteOtaAfterInstall(localVc, cachedVc) || !m) {
+        await FileSystem.deleteAsync(`${dir}${name}`, { idempotent: true }).catch(() => undefined);
+      }
+    }
+  } catch {
+    /* pas de dossier ota */
+  }
+}
+
+/** Ouvre la page d’install (web / iOS). Android : jamais le lien APK brut (Téléchargements). */
 export async function openExternalDownload(info: AppVersionInfo) {
+  if (Platform.OS === 'android') {
+    throw new Error('Sur Android, utilisez l’installateur in-app (pas Téléchargements).');
+  }
   const url =
     Platform.OS === 'ios'
-      ? info.iosInstallUrl || info.downloadPage || info.webUrl || info.apkUrl
-      : info.apkUrl || info.downloadPage || info.webUrl;
+      ? info.iosInstallUrl || info.downloadPage || info.webUrl
+      : info.downloadPage || info.webUrl;
   if (url) await Linking.openURL(url);
 }
 

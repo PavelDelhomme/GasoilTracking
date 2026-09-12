@@ -12,8 +12,8 @@ import nodemailer from 'nodemailer';
 import Database from 'better-sqlite3';
 import multer from 'multer';
 import QRCode from 'qrcode';
-import { execFileSync } from 'child_process';
 import { compareSemver, pickLatestRelease } from './semver.js';
+import { assertApkIdentity } from './apkMeta.js';
 
 const PORT = Number(process.env.PORT || 4000);
 const DATA_DIR = process.env.DATA_DIR || './data';
@@ -1387,8 +1387,8 @@ function unlinkQuiet(p) {
   }
 }
 
-/** Refuse un faux APK (HTML, truncature) — cause « package n’a pas pu être validé » sur Nothing/Android. */
-function assertValidApkFile(filePath) {
+/** Refuse un faux APK (HTML, truncature, versionCode EAS remote) — « package non validé » Android. */
+function assertValidApkFile(filePath, expected = {}) {
   const st = fs.statSync(filePath);
   if (st.size < 5_000_000) {
     throw new Error(`APK trop petit (${st.size} o) — upload incomplet`);
@@ -1404,29 +1404,13 @@ function assertValidApkFile(filePath) {
   const buf = Buffer.alloc(4);
   fs.readSync(fd, buf, 0, 4, 0);
   fs.closeSync(fd);
-  // ZIP local file header
   if (buf[0] !== 0x50 || buf[1] !== 0x4b) {
     throw new Error('Fichier non-APK (magique ZIP manquante)');
   }
-  // Détecte les ABI émulateur / 32-bit dans le zip (sans aapt).
-  try {
-    const listing = execFileSync('unzip', ['-Z1', filePath], {
-      encoding: 'utf8',
-      maxBuffer: 20_000_000,
-    });
-    if (/^lib\/(x86|x86_64|armeabi-v7a)\//m.test(listing)) {
-      throw new Error(
-        'APK multi-ABI détecté (x86/armeabi) — republier un APK arm64-v8a uniquement'
-      );
-    }
-    if (!/^lib\/arm64-v8a\//m.test(listing)) {
-      throw new Error('APK sans lib/arm64-v8a — incompatible téléphones cibles');
-    }
-  } catch (e) {
-    if (e instanceof Error && /multi-ABI|arm64-v8a|trop /.test(e.message)) throw e;
-    /* unzip absent : la limite de taille reste la garde principale */
-  }
-  return st.size;
+  // Lit le versionCode DANS le binaire — EAS remote a déjà publié un APK vc137
+  // alors que l’API annonçait 146, et Android refuse l’install.
+  const meta = assertApkIdentity(filePath, expected);
+  return meta.size || st.size;
 }
 
 function saveRelease({ version, notes, force, file, versionCode }) {
@@ -1462,7 +1446,11 @@ function saveRelease({ version, notes, force, file, versionCode }) {
       };
     }
     try {
-      apkSize = assertValidApkFile(file.path);
+      apkSize = assertValidApkFile(file.path, {
+        packageName: 'com.gasoiltracking.app',
+        versionName: version,
+        versionCode: vc,
+      });
     } catch (e) {
       unlinkQuiet(file.path);
       return {

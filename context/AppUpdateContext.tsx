@@ -16,7 +16,7 @@ import {
   type AppVersionInfo,
 } from '@/lib/api';
 import { followsProductionOta } from '@/lib/appFlavor';
-import { openExternalDownload, performSafeApkUpdate, performWebHardReload, webReloadAlreadyTried, type UpdateProgress } from '@/lib/appUpdate';
+import { openExternalDownload, performSafeApkUpdate, performWebHardReload, webReloadAlreadyTried, cleanupOtaApkIfUpdated, type UpdateProgress } from '@/lib/appUpdate';
 
 const SNOOZE_KEY = 'gasoil_update_snooze_v1';
 /** Soft prompt : reporter longtemps (répétable). */
@@ -149,6 +149,7 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
   const checkNow = useCallback(
     async (opts?: { ignoreSnooze?: boolean }) => {
       try {
+        void cleanupOtaApkIfUpdated();
         // Variantes qa/admin/dev/preprod/feat : packages distincts — ne pas forcer
         // l’APK prod utilisateurs (mauvais applicationId).
         if (!followsProductionOta() && opts?.ignoreSnooze !== true) {
@@ -265,16 +266,17 @@ export function AppUpdateProvider({ children }: { children: React.ReactNode }) {
   }, [force, busy, snoozeLater]);
 
   const openManualInstall = useCallback(async () => {
+    if (Platform.OS === 'android') {
+      await startUpdate();
+      return;
+    }
     const remote = info || (await fetchAppVersion().catch(() => null));
     if (remote) {
       setInfo(remote);
       await openExternalDownload(remote);
       return;
     }
-    if (typeof window !== 'undefined') {
-      /* fallback */
-    }
-  }, [info]);
+  }, [info, startUpdate]);
 
   const value = useMemo(
     () => ({

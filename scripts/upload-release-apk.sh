@@ -34,6 +34,13 @@ if [[ "$SIZE" -gt 80000000 ]]; then
   exit 2
 fi
 
+if command -v python3 >/dev/null 2>&1; then
+  python3 "$ROOT/scripts/verify-release-apk.py" "$APK" \
+    --package com.gasoiltracking.app \
+    --version-code "$VERSION_CODE" \
+    --version-name "$VERSION"
+fi
+
 echo "==> Upload $APK (v$VERSION vc$VERSION_CODE force=$FORCE)"
 curl -sf -X POST "https://gasoil-tracking.delhomme.ovh/api/ci/releases" \
   -H "x-release-token: $RELEASE_UPLOAD_TOKEN" \
