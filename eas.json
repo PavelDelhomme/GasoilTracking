@@ -27,12 +27,13 @@
     },
     "production": {
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease -PreactNativeArchitectures=arm64-v8a"
       },
       "ios": {
         "resourceClass": "m-medium"
       },
-      "autoIncrement": true,
+      "autoIncrement": false,
       "channel": "production"
     }
   },

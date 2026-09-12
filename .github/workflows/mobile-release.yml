@@ -58,7 +58,9 @@ jobs:
           if [ -z "$V" ]; then
             V=$(node -p "require('./app.json').expo.version")
           fi
+          VC=$(node -p "require('./app.json').expo.android.versionCode")
           echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "versionCode=$VC" >> "$GITHUB_OUTPUT"
 
       - name: Announce build pending (API)
         env:
@@ -71,22 +73,28 @@ jobs:
             -d "{\"version\":\"$VERSION\",\"releaseNotes\":\"Mise à jour en préparation\",\"sha\":\"$GITHUB_SHA\"}" \
             || echo "Annonce pending échouée — on continue"
 
-      - name: Build Android APK (EAS local, sans quota cloud)
+      - name: Build Android APK (EAS local, arm64, sans quota cloud)
         env:
           EAS_BUILD_NO_EXPO_GO_WARNING: 'true'
-          # eas --local n’exporte pas toujours EAS_BUILD au prebuild/gradle
           EAS_BUILD: 'true'
           CI: 'true'
+          ORG_GRADLE_PROJECT_reactNativeArchitectures: 'arm64-v8a'
         run: |
           eas build --platform android --profile production \
             --non-interactive --local --output /tmp/gasoil.apk
           ls -lh /tmp/gasoil.apk
           test -s /tmp/gasoil.apk || { echo "Pas d'APK produit"; exit 1; }
+          SIZE=$(wc -c < /tmp/gasoil.apk)
+          if [ "$SIZE" -gt 80000000 ]; then
+            echo "APK trop gros ($SIZE) — probablement multi-ABI, refusé"
+            exit 1
+          fi
 
       - name: Upload to Gasoil API (prod)
         env:
           TOKEN: ${{ secrets.RELEASE_UPLOAD_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
+          VERSION_CODE: ${{ steps.ver.outputs.versionCode }}
         run: |
           set -euo pipefail
           LIVE=$(curl -fsS "https://gasoil-tracking.delhomme.ovh/api/version" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).version||''")
@@ -95,12 +103,17 @@ jobs:
             const cmp=(a,b)=>{const pa=String(a||'0').split('.').map(x=>parseInt(x,10)||0);const pb=String(b||'0').split('.').map(x=>parseInt(x,10)||0);for(let i=0;i<Math.max(pa.length,pb.length);i++){const d=(pa[i]||0)-(pb[i]||0);if(d) return d;}return 0;};
             if (live && cmp(v, live) < 0) { console.log('Skip upload: '+v+' < live '+live); process.exit(42); }
           " "$LIVE" "$VERSION" || { echo "Skip older build"; exit 0; }
-          curl -fsS -X POST "https://gasoil-tracking.delhomme.ovh/api/ci/releases" \
+          HTTP=$(curl -sS -o /tmp/rel.json -w "%{http_code}" -X POST "https://gasoil-tracking.delhomme.ovh/api/ci/releases" \
             -H "X-Release-Token: $TOKEN" \
             -F "version=$VERSION" \
+            -F "versionCode=$VERSION_CODE" \
             -F "forceUpdate=1" \
-            -F "releaseNotes=Améliorations trajets, navigation et stabilité — version $VERSION." \
-            -F "apk=@/tmp/gasoil.apk"
-          echo "APK $VERSION publié"
+            -F "releaseNotes=Suivi libre GPS corrigé — les km s’enregistrent à nouveau (v$VERSION)." \
+            -F "apk=@/tmp/gasoil.apk")
+          cat /tmp/rel.json
+          echo
+          echo "HTTP $HTTP"
+          test "$HTTP" = "201" || exit 1
+          echo "APK $VERSION vc$VERSION_CODE publié"
           curl -sf "https://gasoil-tracking.delhomme.ovh/api/version" || true
           echo
