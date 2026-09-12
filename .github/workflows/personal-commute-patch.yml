@@ -1,0 +1,43 @@
+name: Patch commute perso (cloud)
+
+# One-shot : ajoute le trajet du 12/09 sur paveldelhomme@gmail.com via l’API.
+# Ne rebuild PAS l’APK. Déclenché seulement si le JSON de consigne change.
+
+on:
+  push:
+    branches: [prod]
+    paths:
+      - 'scripts/ci/personal-commute-once.json'
+      - '.github/workflows/personal-commute-patch.yml'
+  workflow_dispatch:
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Attendre l’API puis patcher le sync cloud
+        env:
+          TOKEN: ${{ secrets.RELEASE_UPLOAD_TOKEN }}
+        run: |
+          set -euo pipefail
+          BODY="$(cat scripts/ci/personal-commute-once.json)"
+          URL="https://gasoil-tracking.delhomme.ovh/api/ci/personal-commute"
+          for i in $(seq 1 30); do
+            HTTP=$(curl -sS -o /tmp/patch.json -w "%{http_code}" -X POST "$URL" \
+              -H "X-Release-Token: $TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "$BODY" || true)
+            echo "try $i → HTTP $HTTP"
+            cat /tmp/patch.json || true
+            echo
+            if [ "$HTTP" = "200" ]; then
+              node -e "const j=JSON.parse(require('fs').readFileSync('/tmp/patch.json','utf8')); if(!j.ok) process.exit(1); console.log('OK', j.already?'already':'added', 'vcFuel', j.estimatedFuelLiters, 'km', j.odometerKm, 'trip', j.tripId, 'dist', j.distanceKm);"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "Échec après retries"
+          exit 1
