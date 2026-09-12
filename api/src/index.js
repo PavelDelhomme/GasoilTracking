@@ -14,7 +14,7 @@ import multer from 'multer';
 import QRCode from 'qrcode';
 import { compareSemver, pickLatestRelease } from './semver.js';
 import { assertApkIdentity } from './apkMeta.js';
-import { applyPersonalCommute, fetchCommuteRoute } from './personalCommute.js';
+import { applyPersonalCommute, applyPersonalFillUp, fetchCommuteRoute } from './personalCommute.js';
 
 const PORT = Number(process.env.PORT || 4000);
 const DATA_DIR = process.env.DATA_DIR || './data';
@@ -1577,7 +1577,10 @@ app.post('/api/ci/personal-commute', async (req, res) => {
     console.warn('personal-commute OSRM', e);
     route = { distanceKm: 44.7, durationMinutes: 53, coordinates: [] };
   }
-  const result = applyPersonalCommute(snapshot, route, req.body || {});
+  const body = req.body || {};
+  const result = body.fillUp
+    ? applyPersonalFillUp(snapshot, route, body)
+    : applyPersonalCommute(snapshot, route, body);
   if (!result.ok) {
     return res.status(409).json(result);
   }
@@ -1588,6 +1591,48 @@ app.post('/api/ci/personal-commute', async (req, res) => {
   ).run(user.id, JSON.stringify(result.snapshot), now);
   const { snapshot: _omit, ...summary } = result;
   console.log('[personal-commute]', summary);
+  res.json({ ...summary, updatedAt: now });
+});
+
+/**
+ * Plein réel 206 (Intermarché La Guerche) + trajet du jour si absent.
+ * Idempotent. Ne remet pas la jauge à 1/4.
+ */
+app.post('/api/ci/personal-fillup', async (req, res) => {
+  if (!requireReleaseToken(req, res)) return;
+  const email = String(req.body?.email || 'paveldelhomme@gmail.com')
+    .toLowerCase()
+    .trim();
+  if (email !== 'paveldelhomme@gmail.com') {
+    return res.status(403).json({ error: 'Email non autorisé pour ce patch' });
+  }
+  const user = db.prepare('SELECT id, email FROM users WHERE email = ?').get(email);
+  if (!user) return res.status(404).json({ error: 'Compte introuvable' });
+  const row = db.prepare('SELECT payload FROM sync_data WHERE user_id = ?').get(user.id);
+  let snapshot = { vehicles: [], trips: [], places: [], fillUps: [] };
+  try {
+    snapshot = row?.payload ? JSON.parse(row.payload) : snapshot;
+  } catch {
+    return res.status(500).json({ error: 'Payload sync illisible' });
+  }
+  let route;
+  try {
+    route = await fetchCommuteRoute();
+  } catch (e) {
+    console.warn('personal-fillup OSRM', e);
+    route = { distanceKm: 44.7, durationMinutes: 53, coordinates: [] };
+  }
+  const result = applyPersonalFillUp(snapshot, route, req.body || {});
+  if (!result.ok) {
+    return res.status(409).json(result);
+  }
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO sync_data (user_id, payload, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`
+  ).run(user.id, JSON.stringify(result.snapshot), now);
+  const { snapshot: _omit, ...summary } = result;
+  console.log('[personal-fillup]', summary);
   res.json({ ...summary, updatedAt: now });
 });
 
