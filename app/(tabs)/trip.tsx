@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -113,7 +113,7 @@ import { TripHistoryCard } from '@/components/TripHistoryCard';
 import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
 import { evaluateGpsSample } from '@/lib/gpsTracking';
 import { formatDateSlash, formatRelativeDay } from '@/lib/dates';
-import { downsampleRoute } from '@/lib/routeGeometry';
+import { parseTripNavParams } from '@/lib/tripNavParams';
 import { preloadHistoryMaps } from '@/lib/tripMapCache';
 import {
   getRecentDestinations,
@@ -288,6 +288,7 @@ export default function TripScreen() {
     /** Nonce pour forcer un reset même si reset=1 inchangé (2ᵉ appui FAB Accueil). */
     r?: string;
   }>();
+  const incomingNav = parseTripNavParams(params);
   const { activeVehicle, activeTrip, refresh, vehicles, selectVehicle } = useApp();
   const { colors } = useTheme();
   const { showToast } = useToast();
@@ -295,11 +296,14 @@ export default function TripScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<TripMapRef>(null);
   const autoStartDone = useRef(false);
+  const appliedNavKeyRef = useRef(incomingNav.destKey);
   const resetHandledRef = useRef<string | null>(null);
   const [tab, setTab] = useState<TripTab>('live');
-  const [startMode, setStartMode] = useState<StartMode>('free');
-  const [destination, setDestination] = useState('');
-  const [destCoords, setDestCoords] = useState<GeoCoords | null>(null);
+  const [startMode, setStartMode] = useState<StartMode>(
+    incomingNav.mode === 'nav' ? 'nav' : 'free'
+  );
+  const [destination, setDestination] = useState(incomingNav.dest);
+  const [destCoords, setDestCoords] = useState<GeoCoords | null>(incomingNav.destCoords);
   const [places, setPlaces] = useState<Place[]>([]);
   const [plannedRoute, setPlannedRoute] = useState<GeoCoords[]>([]);
   const [routeOptions, setRouteOptions] = useState<DrivingRoute[]>([]);
@@ -439,15 +443,48 @@ export default function TripScreen() {
   useEffect(() => {
     void (async () => {
       try {
-        const mode = await AsyncStorage.getItem(START_MODE_KEY);
-        if (mode === 'free' || mode === 'nav') setStartMode(mode);
+        const parsed = parseTripNavParams(params);
+        if (parsed.mode === 'nav' || parsed.destKey) {
+          setStartMode('nav');
+          void AsyncStorage.setItem(START_MODE_KEY, 'nav');
+        } else {
+          const mode = await AsyncStorage.getItem(START_MODE_KEY);
+          if (parsed.mode === 'free') setStartMode('free');
+          else if (mode === 'free' || mode === 'nav') setStartMode(mode);
+        }
         const dismissed = await AsyncStorage.getItem(SMART_DISMISS_KEY);
         setSmartDismissed(dismissed === smartWindowKey());
       } catch {
         /* ignore */
       }
     })();
+    // Params lus une fois au montage ; les changements Maps → Trajet passent par useLayoutEffect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useLayoutEffect(() => {
+    const parsed = parseTripNavParams(params);
+    if (parsed.autoStartFree) {
+      setStartMode('free');
+      return;
+    }
+    if (!parsed.destKey) return;
+    if (appliedNavKeyRef.current === parsed.destKey) return;
+    appliedNavKeyRef.current = parsed.destKey;
+    autoStartDone.current = false;
+    setStartMode('nav');
+    if (parsed.dest) setDestination(parsed.dest);
+    if (parsed.destCoords) setDestCoords(parsed.destCoords);
+    setTab('live');
+    void AsyncStorage.setItem(START_MODE_KEY, 'nav');
+  }, [
+    params.mode,
+    params.dest,
+    params.destLat,
+    params.destLon,
+    params.autoStart,
+    params.prepare,
+  ]);
 
   /** Panneau maxspeed OSM (Overpass) pendant un trajet actif. */
   useEffect(() => {
@@ -472,6 +509,8 @@ export default function TripScreen() {
     setStartMode(mode);
     void AsyncStorage.setItem(START_MODE_KEY, mode);
     if (mode === 'free') {
+      const parsed = parseTripNavParams(params);
+      if (parsed.destKey) appliedNavKeyRef.current = parsed.destKey;
       setDestination('');
       setDestCoords(null);
       setTripStops([]);
@@ -481,7 +520,7 @@ export default function TripScreen() {
       setSelectedRouteId(null);
       setNearDestination(false);
     }
-  }, []);
+  }, [params.mode, params.dest, params.destLat, params.destLon]);
 
   const dismissSmartSuggestions = useCallback(() => {
     setSmartDismissed(true);
@@ -494,18 +533,20 @@ export default function TripScreen() {
       if (activeTrip && !activeTrip.isPaused) {
         void startBackgroundTracking();
       }
-      const dest = typeof params.dest === 'string' ? params.dest.trim() : '';
-      if (dest) {
-        setDestination(dest);
+      const parsed = parseTripNavParams(params);
+      if (parsed.autoStartFree) {
+        setStartMode('free');
+      } else if (parsed.destKey && appliedNavKeyRef.current !== parsed.destKey) {
+        appliedNavKeyRef.current = parsed.destKey;
+        autoStartDone.current = false;
+        setDestination(parsed.dest);
         setStartMode('nav');
         setTab('live');
-        const lat = params.destLat ? Number(params.destLat) : NaN;
-        const lon = params.destLon ? Number(params.destLon) : NaN;
-        if (Number.isFinite(lat) && Number.isFinite(lon)) {
-          setDestCoords({ latitude: lat, longitude: lon });
-        }
+        if (parsed.destCoords) setDestCoords(parsed.destCoords);
+        void AsyncStorage.setItem(START_MODE_KEY, 'nav');
+      } else if (parsed.mode === 'nav') {
+        setStartMode('nav');
       }
-      if (params.mode === 'nav') setStartMode('nav');
       if (params.tab === 'live' || params.tab === 'history') {
         setTab(params.tab);
       }
@@ -1226,19 +1267,14 @@ export default function TripScreen() {
     }
   };
 
-  // Prépare destination + itinéraires (Accueil / suggestions) — ne démarre PAS.
+  // Prépare destination + itinéraires (Maps / suggestions) — ne démarre PAS.
   // Exception : autoStart=1 + mode=free → démarrage réel (effet suivant).
   useEffect(() => {
-    if (params.autoStart === '1' && params.mode === 'free') return;
-    const wantPrepare =
-      params.prepare === '1' || params.autoStart === '1' || params.autoStart === 'prepare';
-    if (!wantPrepare || autoStartDone.current) return;
+    const parsed = parseTripNavParams(params);
+    if (parsed.autoStartFree) return;
+    if (!parsed.prepareNav || autoStartDone.current) return;
     if (!activeVehicle || activeTrip) return;
-    if (!destination.trim()) return;
-    const lat = params.destLat ? Number(params.destLat) : NaN;
-    const lon = params.destLon ? Number(params.destLon) : NaN;
-    const hasParamCoords = Number.isFinite(lat) && Number.isFinite(lon);
-    if (hasParamCoords && !destCoords) return;
+    if (!destCoords) return;
 
     autoStartDone.current = true;
     persistStartMode('nav');
@@ -1262,6 +1298,7 @@ export default function TripScreen() {
     params.prepare,
     params.autoStart,
     params.mode,
+    params.dest,
     params.destLat,
     params.destLon,
     destination,
@@ -1276,7 +1313,8 @@ export default function TripScreen() {
 
   // Maps : démarrer vraiment le suivi libre (GPS + trajet actif)
   useEffect(() => {
-    if (params.autoStart !== '1' || params.mode !== 'free') return;
+    const parsed = parseTripNavParams(params);
+    if (!parsed.autoStartFree) return;
     if (autoStartDone.current) return;
     if (!activeVehicle || activeTrip) return;
     autoStartDone.current = true;
@@ -1287,7 +1325,7 @@ export default function TripScreen() {
     }, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handleStartTrip recreates each render
-  }, [params.autoStart, params.mode, activeVehicle?.id, activeTrip?.id, persistStartMode]);
+  }, [params.autoStart, params.mode, params.dest, activeVehicle?.id, activeTrip?.id, persistStartMode]);
 
   const simAutoKey = useRef<string | null>(null);
   useEffect(() => {
@@ -3051,10 +3089,35 @@ export default function TripScreen() {
                 )}
 
                 <Card>
-                  <Text style={[styles.description, { color: colors.textSecondary }]}>
-                    Le suivi GPS continue en arrière-plan (notification).
-                  </Text>
+                  {startMode === 'nav' && (destination.trim() || destCoords) ? (
+                    <View
+                      style={{
+                        marginBottom: 12,
+                        padding: 10,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: colors.accent,
+                        backgroundColor: colors.accent + '14',
+                      }}
+                    >
+                      <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 13 }}>
+                        Navigation vers
+                      </Text>
+                      <Text style={{ color: colors.text, fontWeight: '700', marginTop: 4 }}>
+                        {destination.trim() || 'Lieu choisi'}
+                      </Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
+                        Choisissez l’itinéraire sur la carte (éco / rapide), ajoutez une étape si
+                        besoin, puis Démarrer.
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={[styles.description, { color: colors.textSecondary }]}>
+                      Le suivi GPS continue en arrière-plan (notification).
+                    </Text>
+                  )}
 
+                  {startMode !== 'nav' || !(destination.trim() || destCoords) ? (
                   <Pressable
                     onPress={() => persistStartMode('free')}
                     style={[
@@ -3073,7 +3136,9 @@ export default function TripScreen() {
                       même hors premier plan.
                     </Text>
                   </Pressable>
+                  ) : null}
 
+                  {startMode === 'nav' && (destination.trim() || destCoords) ? null : (
                   <Pressable
                     onPress={() => persistStartMode('nav')}
                     style={[
@@ -3092,6 +3157,7 @@ export default function TripScreen() {
                       Indiquez une arrivée ; ouvre Maps pour naviguer + suit le GPS dans l’app.
                     </Text>
                   </Pressable>
+                  )}
 
                   {startMode === 'nav' && (
                     <View style={{ marginTop: 12 }}>
@@ -3243,6 +3309,19 @@ export default function TripScreen() {
                       />
                     </View>
                   )}
+
+                  {startMode === 'nav' && (destination.trim() || destCoords) ? (
+                    <Pressable
+                      onPress={() => persistStartMode('free')}
+                      style={{ paddingVertical: 10, marginTop: 4 }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Passer en suivi libre"
+                    >
+                      <Text style={{ color: colors.textSecondary, fontWeight: '700', fontSize: 13 }}>
+                        Plutôt un suivi libre, sans destination
+                      </Text>
+                    </Pressable>
+                  ) : null}
                 </Card>
 
                 {startMode === 'nav' && destinationHabit && destinationHabit.count >= 1 && (

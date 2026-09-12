@@ -110,7 +110,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: 'nav',
         title: 'Navigation vers une destination',
         body:
-          'Depuis Maps : barre de recherche en haut. Les suggestions n’apparaissent qu’après une courte pause (le clavier ne saute plus à chaque lettre). Photon + OpenStreetMap : « parc des expo Nantes » trouve le Parc des expositions. L’itinéraire proposé par défaut est l’éco. Astuce : « Intermarché » n’est plus confondu avec le lieu Travail.',
+          'Depuis Maps : barre de recherche en haut. Les suggestions n’apparaissent qu’après une courte pause (le clavier ne saute plus à chaque lettre). Photon + OpenStreetMap : « parc des expo Nantes » trouve le Parc des expositions. En choisissant un lieu, l’écran Trajet s’ouvre déjà en « destination / navigation » avec l’adresse et les itinéraires (éco / rapide) — il ne reste qu’à valider. Astuce : « Intermarché » n’est plus confondu avec le lieu Travail.',
       },
       {
         id: 'waypoints',

@@ -154,7 +154,8 @@ export default function MapsScreen() {
           dest: hit.label || q,
           destLat: String(hit.latitude),
           destLon: String(hit.longitude),
-          autoStart: '1',
+          autoStart: 'prepare',
+          prepare: '1',
         },
       });
     } catch {
@@ -242,13 +243,14 @@ export default function MapsScreen() {
           dest: label,
           destLat: String(lat),
           destLon: String(lon),
-          autoStart: '1',
+          autoStart: 'prepare',
+          prepare: '1',
         },
       });
     } else {
       router.push({
         pathname: '/(tabs)/trip',
-        params: { mode: 'nav', dest: label, autoStart: '1' },
+        params: { mode: 'nav', dest: label, autoStart: 'prepare', prepare: '1' },
       });
     }
   };
