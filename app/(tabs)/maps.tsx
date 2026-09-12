@@ -35,6 +35,7 @@ import {
   type RecentDestination,
 } from '@/lib/recentDestinations';
 import { searchAddressSuggestions, type SuggestHit } from '@/lib/placeSuggest';
+import { tripHistoryNav } from '@/lib/tripHistoryNav';
 import type { Place } from '@/types';
 
 export default function MapsScreen() {
@@ -476,7 +477,12 @@ export default function MapsScreen() {
             title="Historique"
             variant="outline"
             onPress={() =>
-              router.push({ pathname: '/(tabs)/trip', params: { tab: 'history' } })
+              router.push(
+                tripHistoryNav({
+                  filter: 'today',
+                  vehicleId: activeVehicle?.id,
+                }) as never
+              )
             }
             style={{ flex: 1 }}
           />
