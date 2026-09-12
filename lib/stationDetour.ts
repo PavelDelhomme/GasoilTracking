@@ -104,3 +104,72 @@ export function rankStationsForDetour(opts: {
 export function fuelKeyForVehicle(fuel: FuelType) {
   return fuelPriceKey(fuel);
 }
+
+/** Marge dénivelé / bouchon pour « encore joignable ». */
+export const STATION_REACH_MARGIN = 1.15;
+
+export function estimatedRangeKm(vehicle: Vehicle, liters: number): number {
+  const l100 = Math.max(3, Number(vehicle.consumptionPer100) || 7);
+  const learn =
+    Number(vehicle.consumptionLearnFactor) > 0.5 ? Number(vehicle.consumptionLearnFactor) : 1;
+  const L = Math.max(0, liters);
+  return Math.round(((L * 100) / (l100 * learn)) * 10) / 10;
+}
+
+export function fuelLitersToDriveKm(vehicle: Vehicle, distanceKm: number): number {
+  const l100 = Math.max(3, Number(vehicle.consumptionPer100) || 7);
+  const learn =
+    Number(vehicle.consumptionLearnFactor) > 0.5 ? Number(vehicle.consumptionLearnFactor) : 1;
+  return Math.round((distanceKm / 100) * l100 * learn * 100) / 100;
+}
+
+export type CheapestReachableStation = FuelStationPrice & {
+  pricePerL: number;
+  fuelKey: string;
+  fuelToReachL: number;
+  rangeKm: number;
+};
+
+/**
+ * Stations encore joignables avec le niveau actuel, triées du litre le moins cher.
+ */
+export function pickCheapestReachableStations(opts: {
+  stations: FuelStationPrice[];
+  vehicle: Vehicle;
+  litersRemaining: number;
+  limit?: number;
+}): CheapestReachableStation[] {
+  const remaining = Math.max(0, opts.litersRemaining);
+  const rangeKm = estimatedRangeKm(opts.vehicle, remaining);
+  const maxKm = rangeKm / STATION_REACH_MARGIN;
+  const out: CheapestReachableStation[] = [];
+  for (const s of opts.stations) {
+    const pick = cheapestStationFuelPrice(s.prices, opts.vehicle.fuelType);
+    if (!pick) continue;
+    const distanceKm = Number(s.distanceKm);
+    if (!Number.isFinite(distanceKm) || distanceKm < 0) continue;
+    const fuelToReachL = fuelLitersToDriveKm(opts.vehicle, distanceKm);
+    if (distanceKm > maxKm + 0.05) continue;
+    if (fuelToReachL * STATION_REACH_MARGIN > remaining) continue;
+    out.push({
+      ...s,
+      distanceKm,
+      pricePerL: pick.price,
+      fuelKey: pick.key,
+      fuelToReachL,
+      rangeKm,
+    });
+  }
+  return out
+    .sort(
+      (a, b) =>
+        a.pricePerL - b.pricePerL || (a.distanceKm ?? 99) - (b.distanceKm ?? 99)
+    )
+    .slice(0, opts.limit ?? 3);
+}
+
+/** Rayon de recherche open-data (plafond API 30 km). */
+export function stationSearchRadiusKm(rangeKm: number): number {
+  if (!Number.isFinite(rangeKm) || rangeKm <= 0) return 12;
+  return Math.min(30, Math.max(8, Math.round(rangeKm * 0.9)));
+}

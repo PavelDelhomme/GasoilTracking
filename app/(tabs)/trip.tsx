@@ -135,102 +135,107 @@ import {
   fetchCheapestStations,
   isFrenchFuelOpenDataAvailable,
 } from '@/lib/fuelPrices';
-import { rankStationsForDetour } from '@/lib/stationDetour';
+import { rankStationsForDetour, pickCheapestReachableStations, estimatedRangeKm, stationSearchRadiusKm } from '@/lib/stationDetour';
 import { useLocale } from '@/context/LocaleContext';
 import type { Vehicle } from '@/types';
 
-/** Propose stations intéressantes (prix + détour + conso) si niveau bas — refus possible. */
+type StationOfferResult =
+  | { action: 'continue' }
+  | { action: 'abort' }
+  | { action: 'station'; latitude: number; longitude: number; label: string };
+
+/** Avant démarrage (libre ou destination) : jauge basse → station la moins chère encore joignable. */
 async function offerDetourStations(opts: {
   vehicle: Vehicle;
   liters: number;
   origin: { latitude: number; longitude: number } | null;
   countryCode: string;
-  onPickVia: (via: { latitude: number; longitude: number; label: string }) => void;
-}): Promise<'continue' | 'abort'> {
+  destKm?: number | null;
+}): Promise<StationOfferResult> {
   const tone = fuelRemainingTone({
     litersRemaining: opts.liters,
     tankCapacity: opts.vehicle.tankCapacity,
     lowLitersThreshold: opts.vehicle.lowFuelThresholdLiters,
     vehicle: opts.vehicle,
   });
-  if (tone !== 'critical' && tone !== 'warn') return 'continue';
+  const rangeKm = estimatedRangeKm(opts.vehicle, opts.liters);
+  const destTooFar =
+    opts.destKm != null &&
+    Number.isFinite(opts.destKm) &&
+    opts.destKm > 0 &&
+    opts.destKm * 1.1 > rangeKm;
+  if (tone !== 'critical' && tone !== 'warn' && !destTooFar) {
+    return { action: 'continue' };
+  }
   if (!isFrenchFuelOpenDataAvailable(opts.countryCode) || !opts.origin) {
-    return await new Promise<'continue' | 'abort'>((resolve) => {
+    return await new Promise<StationOfferResult>((resolve) => {
       confirm(
-        'Niveau bas',
-        `Réservoir ~${opts.liters.toFixed(1)} L — démarrer quand même ?`,
-        () => resolve('continue'),
+        'Niveau carburant bas',
+        `Il reste ~${opts.liters.toFixed(1)} L (autonomie ~${rangeKm.toFixed(0)} km). Démarrer quand même ?`,
+        () => resolve({ action: 'continue' }),
         'Démarrer',
-        () => resolve('abort')
+        () => resolve({ action: 'abort' })
       );
     });
   }
-
-  // Étape 1 : pouvoir refuser clairement (sans être coincé dans la liste stations)
-  const wantStations = await new Promise<'stations' | 'continue' | 'abort'>((resolve) => {
-    Alert.alert(
-      'Essence basse',
-      `Il reste ~${opts.liters.toFixed(1)} L. Voir des stations (prix + détour + conso), ou démarrer sans détour ?`,
-      [
-        {
-          text: 'Démarrer sans station',
-          onPress: () => resolve('continue'),
-        },
-        {
-          text: 'Voir 3 stations',
-          onPress: () => resolve('stations'),
-        },
-        { text: 'Annuler', style: 'cancel', onPress: () => resolve('abort') },
-      ]
-    );
-  });
-  if (wantStations !== 'stations') return wantStations;
 
   try {
     const stations = await fetchCheapestStations({
       latitude: opts.origin.latitude,
       longitude: opts.origin.longitude,
-      radiusKm: 22,
+      radiusKm: stationSearchRadiusKm(rangeKm),
       fuel: opts.vehicle.fuelType,
-      limit: 20,
+      limit: 25,
       countryCode: opts.countryCode,
     });
-    const top = rankStationsForDetour({
+    const reachable = pickCheapestReachableStations({
       stations,
       vehicle: opts.vehicle,
       litersRemaining: opts.liters,
-      limit: 3,
+      limit: 1,
     });
-    if (!top.length) {
-      notify('Stations', 'Aucune station intéressante à portée — démarrage sans détour.');
-      return 'continue';
+    const best = reachable[0];
+    const destHint = destTooFar
+      ? `\nLa destination (~${opts.destKm!.toFixed(0)} km) dépasse l’autonomie.`
+      : '';
+
+    if (!best) {
+      return await new Promise<StationOfferResult>((resolve) => {
+        Alert.alert(
+          'Niveau carburant bas',
+          `Il reste ~${opts.liters.toFixed(1)} L (~${rangeKm.toFixed(0)} km). Aucune station joignable avec cette réserve.${destHint}`,
+          [
+            { text: 'Annuler', style: 'cancel', onPress: () => resolve({ action: 'abort' }) },
+            { text: 'Démarrer quand même', onPress: () => resolve({ action: 'continue' }) },
+          ]
+        );
+      });
     }
-    return await new Promise<'continue' | 'abort'>((resolve) => {
+
+    const grade =
+      opts.vehicle.fuelType === 'essence' ? ` ${best.fuelKey.toUpperCase()}` : '';
+    return await new Promise<StationOfferResult>((resolve) => {
       Alert.alert(
-        'Meilleures stations',
-        'Classées par intérêt (économie nette après détour + litres pour y aller).',
+        'Niveau carburant bas',
+        `Il reste ~${opts.liters.toFixed(1)} L (autonomie ~${rangeKm.toFixed(0)} km).${destHint}\n\nMoins chère encore joignable : ${best.name}${best.city ? ` (${best.city})` : ''} · ${best.pricePerL.toFixed(3)} €/L${grade} · ${best.distanceKm!.toFixed(1)} km (~${best.fuelToReachL.toFixed(1)} L pour y aller).`,
         [
-          ...top.map((s) => ({
-            text: s.label.length > 48 ? `${s.name} · ${s.pricePerL.toFixed(3)}€ · ${s.detourKm.toFixed(1)}km` : s.label,
-            onPress: () => {
-              opts.onPickVia({
-                latitude: s.latitude,
-                longitude: s.longitude,
-                label: s.name,
-              });
-              resolve('continue');
-            },
-          })),
+          { text: 'Annuler', style: 'cancel', onPress: () => resolve({ action: 'abort' }) },
+          { text: 'Démarrer sans station', onPress: () => resolve({ action: 'continue' }) },
           {
-            text: 'Sans détour',
-            onPress: () => resolve('continue'),
+            text: `Aller à ${best.name}`.slice(0, 38),
+            onPress: () =>
+              resolve({
+                action: 'station',
+                latitude: best.latitude,
+                longitude: best.longitude,
+                label: best.name,
+              }),
           },
-          { text: 'Annuler', style: 'cancel' as const, onPress: () => resolve('abort') },
         ]
       );
     });
   } catch {
-    return 'continue';
+    return { action: 'continue' };
   }
 }
 type TripTab = 'live' | 'history';
@@ -876,10 +881,11 @@ export default function TripScreen() {
       return;
     }
     const mode = override?.mode ?? startMode;
-    const destLabel =
+    let destLabel =
       override?.destinationLabel?.trim() || destination.trim();
     const coordsOverride =
       override && 'dest' in override ? override.dest : destCoords;
+    let effectiveMode: StartMode = mode;
 
     if (mode === 'nav' && !destLabel) {
       notify('Destination', 'Indiquez une destination, ou choisissez « Suivi libre ».');
@@ -902,6 +908,7 @@ export default function TripScreen() {
     let mapsOrigin: GeoCoords | null = null;
     let mapsLabel = destLabel;
     let stationViaLocal: GeoCoords | null = fuelStopVia;
+    let goStationFromFree = false;
 
     try {
       // Toujours valider la jauge (nav + suivi libre) — même demi-cercle qu’à l’accueil.
@@ -942,28 +949,45 @@ export default function TripScreen() {
         setUserLocation(mapsOrigin);
       }
 
-      if (mode === 'nav' && startFuel != null) {
+      if (startFuel != null) {
+        const destKm = routeForNav?.distanceKm ?? null;
         const stationChoice = await offerDetourStations({
           vehicle: activeVehicle,
           liters: startFuel,
           origin: mapsOrigin,
           countryCode,
-          onPickVia: (via) => {
-            stationViaLocal = { latitude: via.latitude, longitude: via.longitude };
-            setFuelStopVia(stationViaLocal);
-            notify('Détour station', via.label);
-          },
+          destKm: mode === 'nav' ? destKm : null,
         });
-        if (stationChoice === 'abort') {
+        if (stationChoice.action === 'abort') {
           startingRef.current = false;
           setIsStarting(false);
           return;
         }
+        if (stationChoice.action === 'station') {
+          const via = {
+            latitude: stationChoice.latitude,
+            longitude: stationChoice.longitude,
+          };
+          if (mode === 'free') {
+            effectiveMode = 'nav';
+            goStationFromFree = true;
+            destLabel = stationChoice.label;
+            mapsDest = via;
+            mapsLabel = stationChoice.label;
+            setDestination(stationChoice.label);
+            setDestCoords(via);
+            persistStartMode('nav');
+          } else {
+            stationViaLocal = via;
+            setFuelStopVia(via);
+          }
+          notify('Station', stationChoice.label);
+        }
       }
 
       let resolvedDest: GeoCoords | null = null;
-      if (mode === 'nav') {
-        resolvedDest = coordsOverride ?? null;
+      if (effectiveMode === 'nav') {
+        resolvedDest = coordsOverride ?? mapsDest ?? null;
         if (!resolvedDest && destLabel) {
           const geo = await forwardGeocode(destLabel).catch(() => null);
           if (geo) {
@@ -1003,17 +1027,20 @@ export default function TripScreen() {
                   alts.find((a) => a.kind === 'fastest') ||
                   alts[0];
                 if (preferred) {
+                  routeForNav = preferred;
                   setSelectedRouteId(preferred.id);
                   setNavSteps(preferred.steps);
                   setPlannedRoute(downsampleRoute(preferred.coordinates, 120));
                 }
-                notify(
-                  'Itinéraire',
-                  'Plusieurs trajets possibles — choisissez éco / rapide / alternatif, puis Démarrer.'
-                );
-                startingRef.current = false;
-                setIsStarting(false);
-                return;
+                if (!goStationFromFree) {
+                  notify(
+                    'Itinéraire',
+                    'Plusieurs trajets possibles — choisissez éco / rapide / alternatif, puis Démarrer.'
+                  );
+                  startingRef.current = false;
+                  setIsStarting(false);
+                  return;
+                }
               }
             }
           } catch {
@@ -1040,7 +1067,7 @@ export default function TripScreen() {
           'Position de départ'
         : undefined;
 
-      const destName = mode === 'nav' ? destLabel : undefined;
+      const destName = effectiveMode === 'nav' ? destLabel : undefined;
 
       const tripId = await createTrip({
         vehicleId: activeVehicle.id,
@@ -1057,13 +1084,14 @@ export default function TripScreen() {
         status: 'confirmed',
         source: 'gps',
         fillUpId: null,
-        note: mode === 'free'
+        note: effectiveMode === 'free'
           ? isWeb
             ? 'Suivi GPS web (onglet ouvert)'
             : 'Suivi GPS libre (arrière-plan)'
           : [
               startFuel != null ? `Jauge départ ~${startFuel.toFixed(1)} L` : null,
               routeForNav ? `Itinéraire ${routeForNav.label}` : null,
+              mapsLabel && mode === 'free' ? `Plein d’abord · ${mapsLabel}` : null,
             ]
               .filter(Boolean)
               .join(' · ') || undefined,
@@ -1102,7 +1130,7 @@ export default function TripScreen() {
     // faire croire que le trajet a échoué, ni tuer le GPS). Destination seule
     // : pas d’arrêt intermédiaire. Petit délai pour laisser l’UI se stabiliser.
     try {
-      if (mode === 'nav' && mapsLabel && mapsDest) {
+      if (effectiveMode === 'nav' && mapsLabel && mapsDest) {
         void pushRecentDestination({
           label: mapsLabel,
           latitude: mapsDest.latitude,

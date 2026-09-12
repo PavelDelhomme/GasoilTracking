@@ -163,7 +163,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: 'low-fuel',
         title: 'Essence basse au démarrage',
         body:
-          'Si le niveau est bas, l’app propose d’abord de démarrer sans station, ou de voir 3 stations classées (prix + détour + litres pour y aller). Vous pouvez toujours refuser et démarrer quand même.',
+          'Si le niveau est bas (ou si la destination dépasse l’autonomie), l’app prévient avant de démarrer — suivi libre comme navigation. Elle propose la station la moins chère encore joignable avec le carburant restant. Vous pouvez y aller, démarrer sans, ou annuler.',
       },
     ],
   },
