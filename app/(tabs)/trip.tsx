@@ -111,11 +111,15 @@ import { notify, confirm } from '@/lib/notify';
 import { TripHistoryCard } from '@/components/TripHistoryCard';
 import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
 import { evaluateGpsSample } from '@/lib/gpsTracking';
-import { formatDateSlash, formatRelativeDay } from '@/lib/dates';
+import { currentMonthKey, formatDateSlash, formatRelativeDay, toLocalYmd } from '@/lib/dates';
+import { TripHistoryCalendar } from '@/components/TripHistoryCalendar';
 import {
+  collectTripYmds,
+  filterTripsByHistory,
+  historyDateChipLabel,
   parseHistoryFilter,
   parseVehicleIdParam,
-  tripIsToday,
+  parseYmdParam,
   type TripHistoryFilter,
 } from '@/lib/tripHistoryNav';
 import { downsampleRoute } from '@/lib/routeGeometry';
@@ -283,6 +287,8 @@ export default function TripScreen() {
     purgeFirst?: string;
     tab?: string;
     filter?: string;
+    from?: string;
+    to?: string;
     vehicleId?: string;
     reset?: string;
     /** Nonce pour forcer un reset même si reset=1 inchangé (2ᵉ appui FAB Accueil). */
@@ -340,6 +346,11 @@ export default function TripScreen() {
   const [pending, setPending] = useState<Trip[]>([]);
   const [sinceFill, setSinceFill] = useState<SinceLastFillStats | null>(null);
   const [historyFilter, setHistoryFilter] = useState<TripHistoryFilter>('all');
+  const [historyFrom, setHistoryFrom] = useState<string | null>(null);
+  const [historyTo, setHistoryTo] = useState<string | null>(null);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [rangeMode, setRangeMode] = useState(false);
+  const [calMonth, setCalMonth] = useState(() => currentMonthKey());
   /** null = Toutes ; sinon filtre véhicule (aligné selectVehicle pour un id précis) */
   const [historyAllVehicles, setHistoryAllVehicles] = useState(false);
   const [recentDests, setRecentDests] = useState<RecentDestination[]>([]);
@@ -368,16 +379,17 @@ export default function TripScreen() {
   const [liveOriginLabel, setLiveOriginLabel] = useState('');
   const [liveDestLabel, setLiveDestLabel] = useState('');
   const lastMapGps = useRef<RoutePoint | null>(null);
-  const filteredHistory = useMemo(() => {
-    const fillDate = sinceFill?.lastFill?.date;
-    if (historyFilter === 'today') {
-      return history.filter((t) => tripIsToday(t.startTime));
-    }
-    if (historyFilter === 'sinceFill' && fillDate) {
-      return history.filter((t) => t.startTime >= fillDate);
-    }
-    return history;
-  }, [history, historyFilter, sinceFill?.lastFill?.date]);
+  const filteredHistory = useMemo(
+    () =>
+      filterTripsByHistory(history, {
+        filter: historyFilter,
+        fillDate: sinceFill?.lastFill?.date,
+        from: historyFrom,
+        to: historyTo,
+      }),
+    [history, historyFilter, sinceFill?.lastFill?.date, historyFrom, historyTo]
+  );
+  const historyTripYmds = useMemo(() => collectTripYmds(history), [history]);
 
   const isWeb = Platform.OS === 'web';
 
@@ -398,7 +410,7 @@ export default function TripScreen() {
       activeVehicle ? getSinceLastFillStats(activeVehicle.id) : Promise.resolve(null),
       getPlaces(),
     ]);
-    const hist = trips.filter((t) => !t.isActive).slice(0, 80);
+    const hist = trips.filter((t) => !t.isActive);
     setHistory(hist);
     setPending(pend);
     setSinceFill(since);
@@ -507,6 +519,15 @@ export default function TripScreen() {
       }
       const nextFilter = parseHistoryFilter(params.filter);
       if (nextFilter) setHistoryFilter(nextFilter);
+      const fromYmd = parseYmdParam(params.from);
+      const toYmd = parseYmdParam(params.to);
+      if (fromYmd) setHistoryFrom(fromYmd);
+      if (toYmd) setHistoryTo(toYmd);
+      if (nextFilter === 'date' || nextFilter === 'range') {
+        setCalendarOpen(true);
+        setRangeMode(nextFilter === 'range');
+        if (fromYmd) setCalMonth(fromYmd.slice(0, 7));
+      }
       const vid = parseVehicleIdParam(params.vehicleId);
       if (vid != null) {
         setHistoryAllVehicles(false);
@@ -541,6 +562,9 @@ export default function TripScreen() {
       params.destLat,
       params.destLon,
       params.tab,
+      params.filter,
+      params.from,
+      params.to,
       params.reset,
       params.r,
     ])
@@ -3491,7 +3515,10 @@ export default function TripScreen() {
                   return (
                     <Pressable
                       key={chip.id}
-                      onPress={() => setHistoryFilter(chip.id)}
+                      onPress={() => {
+                        setHistoryFilter(chip.id);
+                        setCalendarOpen(false);
+                      }}
                       accessibilityRole="button"
                       accessibilityState={{ selected: on }}
                       accessibilityLabel={`Filtrer ${chip.label}`}
@@ -3515,7 +3542,63 @@ export default function TripScreen() {
                     </Pressable>
                   );
                 })}
+                {(() => {
+                  const on = historyFilter === 'date' || historyFilter === 'range';
+                  const label = historyDateChipLabel(historyFrom, historyTo);
+                  return (
+                    <Pressable
+                      onPress={() => {
+                        setCalendarOpen((v) => !v);
+                        if (!historyFrom) {
+                          const today = toLocalYmd(new Date());
+                          setHistoryFrom(today);
+                          setHistoryTo(today);
+                          setHistoryFilter('date');
+                          setCalMonth(today.slice(0, 7));
+                        } else if (!on) {
+                          setHistoryFilter(historyFrom !== historyTo ? 'range' : 'date');
+                        }
+                      }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                      accessibilityLabel="Filtrer par date sélectionnée"
+                      style={[
+                        styles.filterChip,
+                        {
+                          borderColor: on ? colors.accent : colors.border,
+                          backgroundColor: on ? colors.accent + '22' : colors.card,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          color: on ? colors.accent : colors.text,
+                          fontWeight: '700',
+                          fontSize: 13,
+                        }}
+                      >
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })()}
               </View>
+              {calendarOpen ? (
+                <TripHistoryCalendar
+                  monthYm={calMonth}
+                  onMonthChange={setCalMonth}
+                  tripYmds={historyTripYmds}
+                  from={historyFrom}
+                  to={historyTo}
+                  rangeMode={rangeMode}
+                  onRangeModeChange={setRangeMode}
+                  onSelect={(next) => {
+                    setHistoryFrom(next.from);
+                    setHistoryTo(next.to);
+                    setHistoryFilter(next.filter);
+                  }}
+                />
+              ) : null}
               <Text style={[styles.hint, { color: colors.textSecondary }]}>
                 Adresses · durée · touchez pour le détail (carte + vitesses).
               </Text>
@@ -3533,6 +3616,10 @@ export default function TripScreen() {
                       ? 'Aucun trajet aujourd’hui.'
                       : historyFilter === 'sinceFill'
                       ? 'Aucun trajet depuis le dernier plein.'
+                      : historyFilter === 'date'
+                      ? 'Aucun trajet ce jour-là.'
+                      : historyFilter === 'range'
+                      ? 'Aucun trajet sur cette plage.'
                       : 'Aucun trajet terminé.'}
                   </Text>
                   <Button title="Démarrer un trajet" onPress={() => setTab('live')} />
