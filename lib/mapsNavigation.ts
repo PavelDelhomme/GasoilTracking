@@ -1,6 +1,6 @@
 /**
  * Lance la navigation externe (Google Maps / Apple Maps).
- * Les waypoints `via:` biaisent l’itinéraire sans créer d’arrêt — toujours encodés.
+ * Destination = coords GPS. Pas de via: éco (ça casse Maps : « Impossible de s’y rendre »).
  */
 import { ActionSheetIOS, Alert, Linking, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -8,9 +8,11 @@ import { buildViaWaypoints, samplePassThroughViasFromRoute } from '@/lib/routeVi
 import {
   buildAppleMapsUrl,
   buildGoogleMapsDirUrl as buildDirUrlPure,
+  buildGoogleNavigationIntent,
   formatDestinationParam,
   formatViaPassThrough,
   fmtLatLng,
+  isValidMapsLatLng,
   type MapsLatLng,
   type MapsWaypointMode,
 } from '@/lib/mapsUrl';
@@ -23,6 +25,7 @@ export {
   samplePassThroughViasFromRoute,
   formatViaPassThrough,
   formatDestinationParam,
+  isValidMapsLatLng,
 };
 
 const MAPS_PREF_KEY = 'gasoil_maps_app_pref_v1';
@@ -43,7 +46,7 @@ export function buildGoogleMapsDirUrl(opts: {
   return buildDirUrlPure({ ...opts, platform: Platform.OS });
 }
 
-export { buildAppleMapsUrl };
+export { buildAppleMapsUrl, buildGoogleNavigationIntent };
 
 async function tryOpen(url: string): Promise<boolean> {
   try {
@@ -132,82 +135,61 @@ async function openGoogleMaps(opts: {
   waypointMode?: MapsWaypointMode;
   label?: string | null;
 }): Promise<boolean> {
+  if (!isValidMapsLatLng(opts.destination)) return false;
   const dest = fmt(opts.destination);
+  const origin = isValidMapsLatLng(opts.origin) ? opts.origin : null;
   const stopMode = opts.waypointMode === 'stop';
-  const wps = (opts.waypoints || []).slice(0, stopMode ? 8 : 2);
-  const hasVia = wps.length > 0;
-  const label = opts.label;
-  const wpMode: MapsWaypointMode | undefined = hasVia
-    ? stopMode
-      ? 'stop'
-      : 'via'
-    : undefined;
+  const wps = stopMode ? (opts.waypoints || []).filter(isValidMapsLatLng).slice(0, 8) : [];
+  const hasStops = wps.length > 0;
 
   if (Platform.OS === 'android') {
-    // Avec waypoints : directions HTTPS (intent navigation ignore les étapes).
-    if (hasVia) {
+    if (hasStops) {
       const pathUrl = buildGoogleMapsDirUrl({
         destination: opts.destination,
-        origin: opts.origin,
+        origin,
         waypoints: wps,
-        waypointMode: wpMode,
+        waypointMode: 'stop',
         navigate: false,
-        destinationLabel: label,
       });
       if (await tryOpen(pathUrl)) return true;
     }
-    // Sans via : intent navigation natif (origin = GPS Maps courant — ne pas forcer HTTPS).
-    if (await tryOpen(`google.navigation:q=${dest}&mode=d`)) {
+    // Destination seule : intent natif (GPS Maps = origine). HTTPS ensuite.
+    if (await tryOpen(buildGoogleNavigationIntent(opts.destination))) {
       return true;
     }
     const classic = buildGoogleMapsDirUrl({
       destination: opts.destination,
-      origin: opts.origin,
+      origin,
       navigate: false,
-      destinationLabel: label,
     });
     if (await tryOpen(classic)) return true;
-    const q = label?.trim()
-      ? encodeURIComponent(`${label.trim()}@${dest}`)
-      : dest;
-    return tryOpen(`geo:0,0?q=${q}`);
+    return tryOpen(`geo:0,0?q=${dest}`);
   }
 
   if (Platform.OS === 'ios') {
-    if (hasVia) {
+    if (hasStops) {
       const pathUrl = buildGoogleMapsDirUrl({
         destination: opts.destination,
-        origin: opts.origin,
+        origin,
         waypoints: wps,
-        waypointMode: wpMode,
+        waypointMode: 'stop',
         navigate: true,
-        destinationLabel: label,
       });
       if (await tryOpen(pathUrl)) return true;
     }
-    const gmaps = hasVia
-      ? buildGoogleMapsDirUrl({
-          destination: opts.destination,
-          origin: opts.origin,
-          waypoints: wps,
-          waypointMode: wpMode,
-          navigate: true,
-          destinationLabel: label,
-        })
-      : opts.origin
-        ? `comgooglemaps://?saddr=${fmt(opts.origin)}&daddr=${dest}&directionsmode=driving`
-        : `comgooglemaps://?daddr=${dest}&directionsmode=driving`;
+    const gmaps = origin
+      ? `comgooglemaps://?saddr=${fmt(origin)}&daddr=${dest}&directionsmode=driving`
+      : `comgooglemaps://?daddr=${dest}&directionsmode=driving`;
     if (await tryOpen(gmaps)) return true;
   }
 
   return tryOpen(
     buildGoogleMapsDirUrl({
       destination: opts.destination,
-      origin: opts.origin,
-      waypoints: hasVia ? wps : undefined,
-      waypointMode: wpMode,
+      origin,
+      waypoints: hasStops ? wps : undefined,
+      waypointMode: hasStops ? 'stop' : undefined,
       navigate: true,
-      destinationLabel: label,
     })
   );
 }
@@ -230,9 +212,13 @@ export async function launchGoogleMapsNavigation(opts: {
   label?: string;
   preferGoogle?: boolean;
 }): Promise<boolean> {
-  const wps = opts.waypoints || [];
+  if (!isValidMapsLatLng(opts.destination)) return false;
+  const stopWps =
+    opts.waypointMode === 'stop'
+      ? (opts.waypoints || []).filter(isValidMapsLatLng)
+      : [];
   const app =
-    opts.preferGoogle || wps.length > 0
+    opts.preferGoogle || stopWps.length > 0
       ? 'google'
       : await resolveMapsApp();
   if (app === 'apple' && Platform.OS === 'ios') {
@@ -241,7 +227,11 @@ export async function launchGoogleMapsNavigation(opts: {
       origin: opts.origin,
     });
   }
-  return openGoogleMaps(opts);
+  return openGoogleMaps({
+    ...opts,
+    waypoints: stopWps,
+    waypointMode: stopWps.length ? 'stop' : undefined,
+  });
 }
 
 export const launchMapsNavigation = launchGoogleMapsNavigation;

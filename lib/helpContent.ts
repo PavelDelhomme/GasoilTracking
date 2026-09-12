@@ -341,7 +341,7 @@ export const HELP_KNOWN: KnownIssue[] = [
     kind: 'tip',
     title: 'Guidage in-app vs Google Maps',
     body:
-      'Le guidage dans l’app est volontairement simple (OSRM). Pour un turn-by-turn ultra détaillé, ouvrez Google Maps depuis le trajet (bouton « Ouvrir Maps ») : le suivi conso continue dans Gasoil Tracking. Les étapes que vous ajoutez sont des arrêts réels dans Maps, pas des points de passage invisibles.',
+      'Le guidage dans l’app est volontairement simple (OSRM). Pour un turn-by-turn ultra détaillé, ouvrez Google Maps depuis le trajet (bouton « Ouvrir Maps ») : le suivi conso continue dans Gasoil Tracking. Google Maps reçoit les coordonnées GPS du lieu (pas un nom@coords ni des points « éco » hors route — ça affichait « Impossible de s’y rendre »). Les étapes que vous ajoutez sont des arrêts réels.',
   },
   {
     id: 'sync-conflict',

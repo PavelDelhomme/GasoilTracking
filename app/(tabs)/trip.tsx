@@ -64,7 +64,7 @@ import {
   clearLiveTripBuffer,
   readLiveTripBuffer,
 } from '@/lib/liveTripBuffer';
-import { buildViaWaypoints, launchGoogleMapsNavigation } from '@/lib/mapsNavigation';
+import { launchGoogleMapsNavigation } from '@/lib/mapsNavigation';
 import {
   appendRoutePoint,
   calculateRouteDistance,
@@ -253,12 +253,6 @@ function smartWindowKey(): string {
 }
 
 type GeoCoords = { latitude: number; longitude: number };
-
-/** Via OSRM explicite / géométrie — seulement éco & alternatif (écart significatif). */
-function mapsWaypointsForRoute(route: DrivingRoute | null | undefined): GeoCoords[] {
-  if (!route) return [];
-  return buildViaWaypoints(route.coordinates, route.via, { kind: route.kind });
-}
 
 function stopCoords(stops: TripStop[]): GeoCoords[] {
   return stops
@@ -929,27 +923,18 @@ export default function TripScreen() {
       dest: GeoCoords,
       origin: GeoCoords | null | undefined,
       label: string,
-      route: DrivingRoute | null | undefined,
+      _route?: DrivingRoute | null,
       extraStop?: GeoCoords | null
     ) => {
       const stops = [
         ...(extraStop ? [extraStop] : []),
         ...stopCoords(tripStopsRef.current),
-      ];
-      if (stops.length) {
-        return launchGoogleMapsNavigation({
-          destination: dest,
-          origin: origin ?? null,
-          waypoints: stops,
-          waypointMode: 'stop',
-          label,
-        });
-      }
+      ].filter((s) => Number.isFinite(s.latitude) && Number.isFinite(s.longitude));
       return launchGoogleMapsNavigation({
         destination: dest,
         origin: origin ?? null,
-        waypoints: mapsWaypointsForRoute(route),
-        waypointMode: 'via',
+        waypoints: stops.length ? stops : undefined,
+        waypointMode: stops.length ? 'stop' : undefined,
         label,
       });
     },
