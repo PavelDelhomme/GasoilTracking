@@ -114,6 +114,7 @@ import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
 import { evaluateGpsSample } from '@/lib/gpsTracking';
 import { formatDateSlash, formatRelativeDay } from '@/lib/dates';
 import { parseTripNavParams, firstSearchParam } from '@/lib/tripNavParams';
+import { startFreeGpsTrip } from '@/lib/startFreeTrip';
 import { preloadHistoryMaps } from '@/lib/tripMapCache';
 import {
   getRecentDestinations,
@@ -998,6 +999,32 @@ export default function TripScreen() {
     }
     const mode = override?.mode ?? startMode;
     const skipPrompts = override?.skipPrompts === true || mode === 'free';
+
+    if (mode === 'free') {
+      persistStartMode('free');
+      startingRef.current = true;
+      setIsStarting(true);
+      setTab('live');
+      try {
+        const r = await startFreeGpsTrip({ vehicle: activeVehicle, refresh });
+        if (!r.ok) {
+          notify('Trajet', r.error);
+        } else if (!r.trackingStarted) {
+          notify(
+            'Permission requise',
+            isWeb
+              ? 'Autorisez la localisation dans le navigateur (Safari / Chrome) pour enregistrer le trajet.'
+              : 'Autorisez la localisation « toujours » / arrière-plan pour tracer même hors premier plan.'
+          );
+        }
+        await loadLists();
+      } finally {
+        startingRef.current = false;
+        setIsStarting(false);
+      }
+      return;
+    }
+
     let destLabel =
       override?.destinationLabel?.trim() || destination.trim();
     const coordsOverride =

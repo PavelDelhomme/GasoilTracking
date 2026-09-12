@@ -103,7 +103,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: 'free',
         title: 'Suivi libre (recommandé au quotidien)',
         body:
-          'Pas de destination : l’app enregistre le GPS tout de suite (sans jauge ni alerte station au démarrage). Sur la carte : panneau de limitation (si connu) + niveau d’essence en direct. Boutons : Plein, Pause, Terminer — puis les stats, et « Suivi en cours » en bas.',
+          'Maps → « Démarrer suivi libre » : le GPS part tout de suite sur cet écran (bandeau km). Pas besoin d’attendre une jauge. Pause / Terminer : bandeau « Détail » ou l’écran Trajet. La notif « arrière-plan » est normale — le trajet doit aussi s’afficher sur Maps.',
         link: { label: 'Ouvrir Maps', href: '/(tabs)/maps' },
       },
       {

@@ -20,10 +20,10 @@ import { useTheme } from '@/hooks/useTheme';
 import { useApp } from '@/context/AppContext';
 import TripMap from '@/components/TripMap';
 import type { TripMapRef } from '@/components/TripMap.types';
-import { getCurrentLocation } from '@/lib/locationService';
+import { getCurrentLocation, peekLiveRouteTail } from '@/lib/locationService';
 import { fetchSpeedLimitNear, type SpeedLimitInfo } from '@/lib/roadSpeedLimits';
 import { forwardGeocode } from '@/lib/geocode';
-import { formatSpeedKmh } from '@/lib/calculations';
+import { calculateRouteDistance, formatDistance, formatSpeedKmh } from '@/lib/calculations';
 import { Button } from '@/components/Button';
 import { TutorialAnchor } from '@/components/TutorialAnchor';
 import { MapsSearchHeader } from '@/components/MapsSearchHeader';
@@ -34,12 +34,12 @@ import {
 } from '@/lib/recentDestinations';
 import { searchAddressSuggestions, type SuggestHit } from '@/lib/placeSuggest';
 import type { Place } from '@/types';
-import { freeTrackNavParams } from '@/lib/tripNavParams';
+import { startFreeGpsTrip } from '@/lib/startFreeTrip';
 import { useToast } from '@/context/ToastContext';
 
 export default function MapsScreen() {
   const { colors } = useTheme();
-  const { activeTrip, activeVehicle } = useApp();
+  const { activeTrip, activeVehicle, refresh } = useApp();
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
@@ -54,6 +54,8 @@ export default function MapsScreen() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [places, setPlaces] = useState<Place[]>([]);
   const [recentDests, setRecentDests] = useState<RecentDestination[]>([]);
+  const [startingFree, setStartingFree] = useState(false);
+  const [liveKm, setLiveKm] = useState(0);
   const searchSeq = useRef(0);
   const queryRef = useRef(query);
   queryRef.current = query;
@@ -233,17 +235,52 @@ export default function MapsScreen() {
     });
   }, [navigation, insets.top, onDebouncedQuery, onSubmitSearch, onSearchFocusChange]);
 
-  const goFreeTrack = () => {
-    if (activeTrip) {
-      showToast('Trajet déjà en cours — ouverture du suivi');
-      router.navigate({ pathname: '/(tabs)/trip', params: { tab: 'live' } });
+  useEffect(() => {
+    if (!activeTrip?.isActive) {
+      setLiveKm(0);
       return;
     }
-    showToast('Démarrage du suivi GPS…');
-    router.navigate({
-      pathname: '/(tabs)/trip',
-      params: { ...freeTrackNavParams(), tab: 'live' },
-    });
+    const tick = () => {
+      const tail = peekLiveRouteTail(200);
+      if (tail && tail.length >= 2) {
+        setLiveKm(calculateRouteDistance(tail));
+      } else {
+        setLiveKm(Number(activeTrip.distanceKm) || 0);
+      }
+    };
+    tick();
+    const id = setInterval(tick, 2500);
+    return () => clearInterval(id);
+  }, [activeTrip?.id, activeTrip?.isActive, activeTrip?.distanceKm]);
+
+  const openLiveTrip = useCallback(() => {
+    router.navigate({ pathname: '/(tabs)/trip', params: { tab: 'live' } });
+  }, []);
+
+  const goFreeTrack = async () => {
+    if (!activeVehicle) {
+      router.push('/(tabs)/vehicles');
+      return;
+    }
+    if (activeTrip?.isActive) {
+      openLiveTrip();
+      return;
+    }
+    setStartingFree(true);
+    try {
+      const r = await startFreeGpsTrip({ vehicle: activeVehicle, refresh });
+      if (!r.ok) {
+        showToast(r.error);
+        return;
+      }
+      if (!r.trackingStarted) {
+        showToast('Trajet créé — autorisez la localisation pour tracer.');
+      } else {
+        showToast('Suivi GPS démarré — restez sur Maps, le km s’affiche ici.');
+      }
+    } finally {
+      setStartingFree(false);
+    }
   };
 
   const goToPlace = (label: string, lat?: number | null, lon?: number | null) => {
@@ -375,19 +412,26 @@ export default function MapsScreen() {
           </View>
         ) : null}
 
-        {activeTrip ? (
+        {activeTrip?.isActive ? (
           <Pressable
-            onPress={() => router.push('/(tabs)/trip')}
+            onPress={openLiveTrip}
             style={[
               styles.activeBanner,
               { borderColor: colors.accent, backgroundColor: colors.accent + '18' },
             ]}
           >
-            <Ionicons name="navigate" size={18} color={colors.accent} />
-            <Text style={{ color: colors.text, fontWeight: '700', flex: 1 }}>
-              Trajet en cours — ouvrir le guidage
-            </Text>
-            <Ionicons name="chevron-forward" size={18} color={colors.accent} />
+            <Ionicons name="navigate" size={22} color={colors.accent} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>
+                Suivi GPS en cours
+                {activeTrip.isPaused ? ' · pause' : ''}
+              </Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 2 }}>
+                {formatDistance(liveKm || activeTrip.distanceKm || 0)}
+                {activeTrip.originName ? ` · ${activeTrip.originName}` : ''}
+              </Text>
+            </View>
+            <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 13 }}>Détail</Text>
           </Pressable>
         ) : null}
 
@@ -444,16 +488,19 @@ export default function MapsScreen() {
             title={
               !activeVehicle
                 ? 'Choisir un véhicule'
-                : activeTrip
-                  ? 'Trajet en cours'
-                  : 'Démarrer suivi libre'
+                : startingFree
+                  ? 'Démarrage…'
+                  : activeTrip?.isActive
+                    ? 'Voir le suivi'
+                    : 'Démarrer suivi libre'
             }
+            loading={startingFree}
             onPress={() => {
               if (!activeVehicle) {
                 router.push('/(tabs)/vehicles');
                 return;
               }
-              goFreeTrack();
+              void goFreeTrack();
             }}
             style={{ flex: 1 }}
           />
