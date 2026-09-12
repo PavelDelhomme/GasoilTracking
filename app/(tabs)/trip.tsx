@@ -112,6 +112,12 @@ import { TripHistoryCard } from '@/components/TripHistoryCard';
 import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
 import { evaluateGpsSample } from '@/lib/gpsTracking';
 import { formatDateSlash, formatRelativeDay } from '@/lib/dates';
+import {
+  parseHistoryFilter,
+  parseVehicleIdParam,
+  tripIsToday,
+  type TripHistoryFilter,
+} from '@/lib/tripHistoryNav';
 import { downsampleRoute } from '@/lib/routeGeometry';
 import { preloadHistoryMaps } from '@/lib/tripMapCache';
 import {
@@ -277,6 +283,7 @@ export default function TripScreen() {
     purgeFirst?: string;
     tab?: string;
     filter?: string;
+    vehicleId?: string;
     reset?: string;
     /** Nonce pour forcer un reset même si reset=1 inchangé (2ᵉ appui FAB Accueil). */
     r?: string;
@@ -332,7 +339,7 @@ export default function TripScreen() {
   const [historyRefreshing, setHistoryRefreshing] = useState(false);
   const [pending, setPending] = useState<Trip[]>([]);
   const [sinceFill, setSinceFill] = useState<SinceLastFillStats | null>(null);
-  const [historyFilter, setHistoryFilter] = useState<'all' | 'sinceFill'>('all');
+  const [historyFilter, setHistoryFilter] = useState<TripHistoryFilter>('all');
   /** null = Toutes ; sinon filtre véhicule (aligné selectVehicle pour un id précis) */
   const [historyAllVehicles, setHistoryAllVehicles] = useState(false);
   const [recentDests, setRecentDests] = useState<RecentDestination[]>([]);
@@ -363,6 +370,9 @@ export default function TripScreen() {
   const lastMapGps = useRef<RoutePoint | null>(null);
   const filteredHistory = useMemo(() => {
     const fillDate = sinceFill?.lastFill?.date;
+    if (historyFilter === 'today') {
+      return history.filter((t) => tripIsToday(t.startTime));
+    }
     if (historyFilter === 'sinceFill' && fillDate) {
       return history.filter((t) => t.startTime >= fillDate);
     }
@@ -495,10 +505,14 @@ export default function TripScreen() {
       if (params.tab === 'live' || params.tab === 'history') {
         setTab(params.tab);
       }
-      if (params.filter === 'sinceFill') {
-        setHistoryFilter('sinceFill');
-      } else if (params.filter === 'all') {
-        setHistoryFilter('all');
+      const nextFilter = parseHistoryFilter(params.filter);
+      if (nextFilter) setHistoryFilter(nextFilter);
+      const vid = parseVehicleIdParam(params.vehicleId);
+      if (vid != null) {
+        setHistoryAllVehicles(false);
+        if (activeVehicle?.id !== vid) {
+          void selectVehicle(vid);
+        }
       }
       const resetFlag = Array.isArray(params.reset) ? params.reset[0] : params.reset;
       const resetNonce = Array.isArray(params.r) ? params.r[0] : params.r;
@@ -3466,48 +3480,41 @@ export default function TripScreen() {
 
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Trajets réalisés</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-                <Pressable
-                  onPress={() => setHistoryFilter('all')}
-                  style={[
-                    styles.filterChip,
-                    {
-                      borderColor: historyFilter === 'all' ? colors.accent : colors.border,
-                      backgroundColor:
-                        historyFilter === 'all' ? colors.accent + '22' : colors.card,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={{
-                      color: historyFilter === 'all' ? colors.accent : colors.text,
-                      fontWeight: '700',
-                      fontSize: 13,
-                    }}
-                  >
-                    Tout
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setHistoryFilter('sinceFill')}
-                  style={[
-                    styles.filterChip,
-                    {
-                      borderColor: historyFilter === 'sinceFill' ? colors.accent : colors.border,
-                      backgroundColor:
-                        historyFilter === 'sinceFill' ? colors.accent + '22' : colors.card,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={{
-                      color: historyFilter === 'sinceFill' ? colors.accent : colors.text,
-                      fontWeight: '700',
-                      fontSize: 13,
-                    }}
-                  >
-                    Depuis le dernier plein
-                  </Text>
-                </Pressable>
+                {(
+                  [
+                    { id: 'today' as const, label: 'Aujourd’hui' },
+                    { id: 'sinceFill' as const, label: 'Depuis le dernier plein' },
+                    { id: 'all' as const, label: 'Tout' },
+                  ] as const
+                ).map((chip) => {
+                  const on = historyFilter === chip.id;
+                  return (
+                    <Pressable
+                      key={chip.id}
+                      onPress={() => setHistoryFilter(chip.id)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                      accessibilityLabel={`Filtrer ${chip.label}`}
+                      style={[
+                        styles.filterChip,
+                        {
+                          borderColor: on ? colors.accent : colors.border,
+                          backgroundColor: on ? colors.accent + '22' : colors.card,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          color: on ? colors.accent : colors.text,
+                          fontWeight: '700',
+                          fontSize: 13,
+                        }}
+                      >
+                        {chip.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
               <Text style={[styles.hint, { color: colors.textSecondary }]}>
                 Adresses · durée · touchez pour le détail (carte + vitesses).
@@ -3522,7 +3529,9 @@ export default function TripScreen() {
               {!historyLoading && filteredHistory.length === 0 && (
                 <Card style={{ marginTop: 12 }}>
                   <Text style={{ color: colors.textSecondary, textAlign: 'center', marginBottom: 12 }}>
-                    {historyFilter === 'sinceFill'
+                    {historyFilter === 'today'
+                      ? 'Aucun trajet aujourd’hui.'
+                      : historyFilter === 'sinceFill'
                       ? 'Aucun trajet depuis le dernier plein.'
                       : 'Aucun trajet terminé.'}
                   </Text>
