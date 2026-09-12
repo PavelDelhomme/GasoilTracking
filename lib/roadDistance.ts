@@ -255,29 +255,37 @@ function dedupeRoutes(collected: RawRoute[], max = 6): RawRoute[] {
 export async function fetchDrivingRouteAlternatives(
   from: Geo,
   to: Geo,
-  opts?: { vias?: Geo[] }
+  opts?: { vias?: Geo[]; /** Étapes ordonnées (arrêt) : from → stops → to */ stops?: Geo[] }
 ): Promise<DrivingRoute[]> {
   const bird = haversineDistance(from.latitude, from.longitude, to.latitude, to.longitude);
   let collected: RawRoute[] = [];
+  const stops = (opts?.stops || []).filter(
+    (s) => Number.isFinite(s.latitude) && Number.isFinite(s.longitude)
+  );
 
   try {
-    const direct = await osrmRoute([from, to], 3);
-    collected.push(...direct);
+    if (stops.length) {
+      const chained = await osrmRoute([from, ...stops, to], 1);
+      for (const r of chained) collected.push({ ...r, via: stops });
+    } else {
+      const direct = await osrmRoute([from, to], 3);
+      collected.push(...direct);
 
-    // Via explicites (caller) uniquement — jamais de villes en dur
-    for (const via of opts?.vias || []) {
-      const viaRoutes = await osrmRoute([from, via, to], 0);
-      for (const r of viaRoutes) collected.push({ ...r, via: [via] });
-    }
-
-    // Si OSRM ne donne qu’1–2 routes, explorer des corridors décalés (générique)
-    if (dedupeRoutes(collected).length < 3 && bird >= 10) {
-      for (const via of corridorOffsetVias(from, to)) {
+      // Via explicites (caller) uniquement — jamais de villes en dur
+      for (const via of opts?.vias || []) {
         const viaRoutes = await osrmRoute([from, via, to], 0);
-        for (const r of viaRoutes) {
-          collected.push({ ...r, via: [via] });
+        for (const r of viaRoutes) collected.push({ ...r, via: [via] });
+      }
+
+      // Si OSRM ne donne qu’1–2 routes, explorer des corridors décalés (générique)
+      if (dedupeRoutes(collected).length < 3 && bird >= 10) {
+        for (const via of corridorOffsetVias(from, to)) {
+          const viaRoutes = await osrmRoute([from, via, to], 0);
+          for (const r of viaRoutes) {
+            collected.push({ ...r, via: [via] });
+          }
+          if (dedupeRoutes(collected).length >= 4) break;
         }
-        if (dedupeRoutes(collected).length >= 4) break;
       }
     }
   } catch {

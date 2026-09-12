@@ -6,9 +6,11 @@ import {
   updateBudget,
   updateFillUp,
   updateVehicle,
+  createFillUp,
   deactivateVehicleScopedBudgets,
 } from '@/lib/database';
 import { litersFromTicket } from '@/lib/fuelPrices';
+import { hasMatchingFillUp, INTERMARCHE_GUERCHE_FILL } from '@/lib/intermarcheFillUp';
 
 /** Gazole TotalEnergies Thorigné-Fouillard (open data ~2,250 €/L, maj août 2026). */
 export const TOTAL_THORIGNE_GAZOLE_EUR = 2.25;
@@ -186,6 +188,51 @@ export async function repairFillUpVehiclesAndBudgets(): Promise<{
       ...distPatch,
     });
     pricesFixed += 1;
+  }
+
+  // Plein 206 Intermarché La Guerche 12/09 (saisie utilisateur, idempotent)
+  if (v206) {
+    fills = await getFillUps();
+    if (!hasMatchingFillUp(fills, v206.id, INTERMARCHE_GUERCHE_FILL)) {
+      const spec = INTERMARCHE_GUERCHE_FILL;
+      const prev = fills
+        .filter((f) => f.vehicleId === v206.id)
+        .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+      let distanceSinceLastKm: number | null = null;
+      try {
+        const trips = await getTrips(v206.id);
+        const from = prev?.date || '';
+        const km = trips
+          .filter(
+            (t) =>
+              t.status !== 'rejected' &&
+              (!from || String(t.startTime) >= from) &&
+              String(t.startTime).slice(0, 10) <= spec.day
+          )
+          .reduce((s, t) => s + (t.distanceKm || 0), 0);
+        if (km > 0.5) distanceSinceLastKm = Math.round(km * 10) / 10;
+      } catch {
+        /* ignore */
+      }
+      await createFillUp({
+        vehicleId: v206.id,
+        date: `${spec.day}T12:50:00+02:00`,
+        liters: spec.liters,
+        pricePerLiter: spec.pricePerLiter,
+        totalCost: spec.totalCost,
+        odometer: v206.hasOdometer ? v206.currentOdometer : null,
+        distanceSinceLastKm,
+        isFull: true,
+        note: `Plein ${spec.stationName} — ${spec.liters.toFixed(2)} L · ${spec.totalCost.toFixed(2)} €`,
+        tripId: null,
+      });
+      fillUpsFixed += 1;
+      await updateVehicle(v206.id, {
+        estimatedFuelLiters: v206.tankCapacity,
+        defaultFuelPrice: spec.pricePerLiter,
+      });
+      levelsFixed += 1;
+    }
   }
 
   // Prix défaut diesel + niveaux après dernier plein marqué « complet »

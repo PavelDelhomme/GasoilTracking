@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildGoogleMapsDirUrl, formatViaPassThrough } from '@/lib/mapsUrl';
+import {
+  buildGoogleMapsDirUrl,
+  buildGoogleNavigationIntent,
+  formatDestinationParam,
+  formatViaPassThrough,
+  isValidMapsLatLng,
+} from '@/lib/mapsUrl';
 import {
   buildViaWaypoints,
   samplePassThroughViasFromRoute,
@@ -11,25 +17,57 @@ describe('buildGoogleMapsDirUrl', () => {
   const destination = { latitude: 48.2, longitude: -1.5 };
   const via = { latitude: 48.15, longitude: -1.6 };
 
-  it('encode les waypoints via: (pas de via: littéral brut dans l’URL)', () => {
+  it('destination = coords seules (pas Nom@lat,lng — casse Google Maps)', () => {
+    const url = buildGoogleMapsDirUrl({
+      destination,
+      origin,
+      destinationLabel: 'Exponantes - Parc des expositions de la Beaujoire',
+    });
+    expect(url).toContain(`destination=${encodeURIComponent('48.200000,-1.500000')}`);
+    expect(url).not.toContain('Exponantes');
+    expect(decodeURIComponent(url)).not.toContain('@48.200000');
+    expect(formatDestinationParam(destination, 'Maison')).toBe('48.200000,-1.500000');
+  });
+
+  it('ignore les waypoints via: éco (Impossible de s’y rendre)', () => {
     const url = buildGoogleMapsDirUrl({
       destination,
       origin,
       waypoints: [via],
+      waypointMode: 'via',
     });
-    expect(url).toContain('waypoints=');
-    expect(url).not.toMatch(/waypoints=via:/);
-    expect(url).toContain(encodeURIComponent(formatViaPassThrough(via)));
-    expect(url).toContain(`origin=${encodeURIComponent('48.110000,-1.680000')}`);
-    expect(url).toContain('destination=');
+    expect(url).not.toContain('waypoints=');
+    expect(url).toContain(`destination=${encodeURIComponent('48.200000,-1.500000')}`);
   });
 
-  it('accepte un label destination humain', () => {
+  it('étapes avec arrêt : coords nues, pas via:', () => {
+    const stopA = { latitude: 47.22, longitude: -1.55 };
+    const stopB = { latitude: 47.25, longitude: -1.53 };
     const url = buildGoogleMapsDirUrl({
       destination,
-      destinationLabel: 'Maison',
+      origin,
+      waypoints: [stopA, stopB],
+      waypointMode: 'stop',
     });
-    expect(url).toContain(encodeURIComponent('Maison@48.200000,-1.500000'));
+    const decoded = decodeURIComponent(url);
+    expect(decoded).toContain('waypoints=47.220000,-1.550000|47.250000,-1.530000');
+    expect(decoded).not.toContain('via:47.220000');
+  });
+
+  it('intent Android : coords + mode driving', () => {
+    expect(buildGoogleNavigationIntent(destination)).toBe(
+      'google.navigation:q=48.200000,-1.500000&mode=d'
+    );
+  });
+
+  it('rejette 0,0 et coords invalides', () => {
+    expect(isValidMapsLatLng({ latitude: 0, longitude: 0 })).toBe(false);
+    expect(isValidMapsLatLng({ latitude: 47.25, longitude: -1.53 })).toBe(true);
+    expect(isValidMapsLatLng({ latitude: NaN, longitude: -1.53 })).toBe(false);
+  });
+
+  it('encode encore via: pour le helper legacy', () => {
+    expect(formatViaPassThrough(via)).toBe('via:48.150000,-1.600000');
   });
 });
 

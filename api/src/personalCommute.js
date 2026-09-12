@@ -159,21 +159,29 @@ export function applyPersonalCommute(snapshot, route, extra = {}) {
 
   const tank = Number(vehicle.tankCapacity) > 0 ? Number(vehicle.tankCapacity) : 50;
   const liters = Math.round(tank * opts.fuelFraction * 10) / 10;
-  vehicle.estimatedFuelLiters = liters;
-  vehicle.currentOdometer = opts.odometerKm;
+  if (opts.odometerKm != null) {
+    vehicle.currentOdometer = opts.odometerKm;
+  }
   const vi = vehicles.findIndex((v) => v.id === vehicle.id);
   vehicles[vi] = vehicle;
 
   const { places, created: placesCreated } = ensurePlaces(data, opts);
 
   if (alreadyHasCommute(trips, vehicle.id, opts.day)) {
+    const existing = trips.find(
+      (t) =>
+        Number(t.vehicleId) === Number(vehicle.id) &&
+        String(t.startTime || '').slice(0, 10) === opts.day &&
+        /guerche|inter/i.test(`${t.destinationName || ''}${t.originName || ''}`)
+    );
     return {
       ok: true,
       already: true,
       reason: 'trip-already-present',
       vehicleId: vehicle.id,
+      tripId: existing?.id,
       odometerKm: vehicle.currentOdometer,
-      estimatedFuelLiters: liters,
+      estimatedFuelLiters: vehicle.estimatedFuelLiters,
       fuelFraction: opts.fuelFraction,
       placesCreated,
       snapshot: {
@@ -215,6 +223,12 @@ export function applyPersonalCommute(snapshot, route, extra = {}) {
   };
   trips.push(trip);
 
+  const skipFuelReset = opts.skipFuelReset === true || Boolean(extra.fillUp);
+  if (!skipFuelReset) {
+    vehicle.estimatedFuelLiters = liters;
+    vehicles[vi] = vehicle;
+  }
+
   return {
     ok: true,
     already: false,
@@ -223,7 +237,7 @@ export function applyPersonalCommute(snapshot, route, extra = {}) {
     distanceKm,
     durationMinutes: durationMin,
     odometerKm: vehicle.currentOdometer,
-    estimatedFuelLiters: liters,
+    estimatedFuelLiters: vehicle.estimatedFuelLiters,
     fuelFraction: opts.fuelFraction,
     placesCreated,
     snapshot: {
@@ -233,6 +247,171 @@ export function applyPersonalCommute(snapshot, route, extra = {}) {
       vehicles,
       trips,
       places,
+    },
+  };
+}
+
+function alreadyHasFillUp(fillUps, vehicleId, day, liters, totalCost) {
+  return (fillUps || []).some((f) => {
+    if (Number(f.vehicleId) !== Number(vehicleId)) return false;
+    if (String(f.date || '').slice(0, 10) !== day) return false;
+    const sameL = Math.abs(Number(f.liters) - Number(liters)) < 0.05;
+    const sameEur = Math.abs(Number(f.totalCost) - Number(totalCost)) < 0.05;
+    return sameL && sameEur;
+  });
+}
+
+function lastFillForVehicle(fillUps, vehicleId) {
+  return (
+    (fillUps || [])
+      .filter((f) => Number(f.vehicleId) === Number(vehicleId))
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0] || null
+  );
+}
+
+function tripKmSince(trips, vehicleId, sinceIso) {
+  return (trips || [])
+    .filter((t) => Number(t.vehicleId) === Number(vehicleId))
+    .filter((t) => t && t.isActive !== true && t.status !== 'rejected')
+    .filter((t) => !sinceIso || String(t.startTime) >= sinceIso)
+    .reduce((acc, t) => acc + (Number(t.distanceKm) || 0), 0);
+}
+
+/**
+ * Plein réel 206 + trajet domicile → Intermarché si absent.
+ * Ne remet jamais la jauge à 1/4.
+ */
+export function applyPersonalFillUp(snapshot, route, extra = {}) {
+  const fill = extra.fillUp && typeof extra.fillUp === 'object' ? extra.fillUp : extra;
+  const liters = Number(fill.liters);
+  const totalCost = Number(fill.totalCost);
+  if (!(liters > 0) || !(totalCost > 0)) {
+    return { ok: false, reason: 'fillup-invalid', snapshot };
+  }
+  const commute = applyPersonalCommute(snapshot, route, {
+    ...extra,
+    skipFuelReset: true,
+  });
+  if (!commute.ok) return commute;
+
+  const data = commute.snapshot;
+  const vehicles = Array.isArray(data.vehicles) ? data.vehicles.map((v) => ({ ...v })) : [];
+  const trips = Array.isArray(data.trips) ? [...data.trips] : [];
+  const fillUps = Array.isArray(data.fillUps) ? [...data.fillUps] : [];
+  const vehicle =
+    vehicles.find((v) => is206(v) && v.isActive !== false) || vehicles.find(is206);
+  if (!vehicle) {
+    return { ok: false, reason: 'vehicle-206-missing', snapshot: data };
+  }
+
+  const day = extra.day || DEFAULT_OPTS.day;
+  const isFull = fill.isFull !== false;
+  const pricePerLiter = Math.round((totalCost / liters) * 1000) / 1000;
+  const stationName =
+    fill.stationName || extra.destinationName || DEFAULT_OPTS.destinationName;
+  const tank = Number(vehicle.tankCapacity) > 0 ? Number(vehicle.tankCapacity) : 50;
+  const odometer =
+    extra.odometerKm != null ? Number(extra.odometerKm) : vehicle.currentOdometer ?? null;
+
+  const dayTrip =
+    trips.find(
+      (t) =>
+        Number(t.vehicleId) === Number(vehicle.id) &&
+        String(t.startTime || '').slice(0, 10) === day &&
+        /guerche|inter/i.test(`${t.destinationName || ''}`)
+    ) || null;
+
+  if (alreadyHasFillUp(fillUps, vehicle.id, day, liters, totalCost)) {
+    vehicle.estimatedFuelLiters = isFull ? tank : vehicle.estimatedFuelLiters;
+    vehicle.defaultFuelPrice = pricePerLiter;
+    const vi = vehicles.findIndex((v) => v.id === vehicle.id);
+    vehicles[vi] = vehicle;
+    return {
+      ok: true,
+      already: true,
+      reason: 'fillup-already-present',
+      vehicleId: vehicle.id,
+      tripId: dayTrip?.id ?? commute.tripId,
+      fillUpId: fillUps.find(
+        (f) =>
+          Number(f.vehicleId) === Number(vehicle.id) &&
+          String(f.date || '').slice(0, 10) === day
+      )?.id,
+      liters,
+      totalCost,
+      pricePerLiter,
+      estimatedFuelLiters: vehicle.estimatedFuelLiters,
+      odometerKm: vehicle.currentOdometer,
+      snapshot: {
+        ...data,
+        vehicles,
+        fillUps,
+        trips,
+        exportedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  const prevFill = lastFillForVehicle(fillUps, vehicle.id);
+  const distanceSinceLastKm =
+    Math.round(tripKmSince(trips, vehicle.id, prevFill?.date || null) * 10) / 10;
+
+  const fillDate = extra.fillUpAt || `${day}T12:50:00+02:00`;
+  const fillUp = {
+    id: nextId(fillUps),
+    vehicleId: vehicle.id,
+    date: fillDate,
+    liters,
+    pricePerLiter,
+    totalCost,
+    odometer,
+    distanceSinceLastKm: distanceSinceLastKm || dayTrip?.distanceKm || null,
+    isFull,
+    note: `Plein ${stationName} — ${liters.toFixed(2)} L · ${totalCost.toFixed(2)} €`,
+    tripId: dayTrip?.id ?? null,
+  };
+  fillUps.push(fillUp);
+
+  if (dayTrip && (dayTrip.fillUpId == null || dayTrip.fillUpId === null)) {
+    const ti = trips.findIndex((t) => t.id === dayTrip.id);
+    if (ti >= 0) trips[ti] = { ...trips[ti], fillUpId: fillUp.id };
+  }
+
+  vehicle.estimatedFuelLiters = isFull
+    ? tank
+    : Math.min(
+        tank,
+        Math.round(((Number(vehicle.estimatedFuelLiters) || 0) + liters) * 10) / 10
+      );
+  vehicle.defaultFuelPrice = pricePerLiter;
+  if (odometer != null) {
+    vehicle.currentOdometer = odometer;
+    vehicle.trackedKm = 0;
+  }
+  const vi = vehicles.findIndex((v) => v.id === vehicle.id);
+  vehicles[vi] = vehicle;
+
+  return {
+    ok: true,
+    already: false,
+    reason: commute.already ? 'trip-already-present' : 'trip-and-fillup-added',
+    vehicleId: vehicle.id,
+    tripId: dayTrip?.id ?? commute.tripId,
+    fillUpId: fillUp.id,
+    liters,
+    totalCost,
+    pricePerLiter,
+    distanceKm: dayTrip?.distanceKm ?? commute.distanceKm,
+    estimatedFuelLiters: vehicle.estimatedFuelLiters,
+    odometerKm: vehicle.currentOdometer,
+    snapshot: {
+      ...data,
+      schema: data.schema || 1,
+      exportedAt: new Date().toISOString(),
+      vehicles,
+      trips,
+      fillUps,
+      places: data.places,
     },
   };
 }

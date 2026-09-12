@@ -1,66 +1,23 @@
 /**
- * Suggestions d’adresses (Nominatim) + contacts téléphone.
+ * Suggestions d’adresses (Photon + Nominatim) + contacts téléphone.
  */
 import { Platform } from 'react-native';
 import * as Contacts from 'expo-contacts';
+import {
+  searchPlaces,
+  type PlaceBias,
+  type SuggestHit,
+} from '@/lib/placeSearch';
 
-export type SuggestHit = {
-  id: string;
-  label: string;
-  subtitle?: string;
-  source: 'geo' | 'contact' | 'place';
-  latitude?: number;
-  longitude?: number;
-};
+export type { SuggestHit, PlaceBias };
 
-/** Recherche multi-résultats Nominatim (FR). */
+/** Recherche multi-résultats : Photon (POI) puis Nominatim (FR). */
 export async function searchAddressSuggestions(
   query: string,
-  limit = 5
+  limit = 5,
+  bias?: PlaceBias | null
 ): Promise<SuggestHit[]> {
-  const q = query.trim();
-  if (q.length < 3) return [];
-  try {
-    const url =
-      `https://nominatim.openstreetmap.org/search?format=jsonv2` +
-      `&q=${encodeURIComponent(q)}&limit=${limit}&addressdetails=1&countrycodes=fr`;
-    const res = await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-        'User-Agent': 'GasoilTracking/1.4 (personal fuel app)',
-      },
-    });
-    if (!res.ok) return [];
-    const data = (await res.json()) as Array<{
-      place_id?: number;
-      lat?: string;
-      lon?: string;
-      display_name?: string;
-      name?: string;
-      address?: Record<string, string>;
-    }>;
-    return (data || [])
-      .filter((h) => h.lat && h.lon)
-      .map((h) => {
-        const a = h.address || {};
-        const road = a.road || a.pedestrian || a.residential;
-        const city = a.city || a.town || a.village || a.municipality;
-        const label =
-          h.name ||
-          (road && city ? `${road}, ${city}` : h.display_name?.split(',').slice(0, 3).join(',').trim()) ||
-          q;
-        return {
-          id: `geo-${h.place_id || `${h.lat},${h.lon}`}`,
-          label,
-          subtitle: h.display_name,
-          source: 'geo' as const,
-          latitude: Number(h.lat),
-          longitude: Number(h.lon),
-        };
-      });
-  } catch {
-    return [];
-  }
+  return searchPlaces(query, { limit, bias });
 }
 
 /** Contacts avec adresse postale (natif uniquement). */

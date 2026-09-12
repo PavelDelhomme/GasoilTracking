@@ -7,7 +7,6 @@ import {
   Text,
   StyleSheet,
   Pressable,
-  TextInput,
   ActivityIndicator,
   Keyboard,
   Platform,
@@ -21,14 +20,13 @@ import { useTheme } from '@/hooks/useTheme';
 import { useApp } from '@/context/AppContext';
 import TripMap from '@/components/TripMap';
 import type { TripMapRef } from '@/components/TripMap.types';
-import { getCurrentLocation } from '@/lib/locationService';
+import { getCurrentLocation, peekLiveRouteTail } from '@/lib/locationService';
 import { fetchSpeedLimitNear, type SpeedLimitInfo } from '@/lib/roadSpeedLimits';
 import { forwardGeocode } from '@/lib/geocode';
-import { formatSpeedKmh } from '@/lib/calculations';
+import { calculateRouteDistance, formatDistance, formatSpeedKmh } from '@/lib/calculations';
 import { Button } from '@/components/Button';
-import { DrawerMenuButton } from '@/components/DrawerMenuButton';
-import { HeaderActions } from '@/components/HeaderActions';
 import { TutorialAnchor } from '@/components/TutorialAnchor';
+import { MapsSearchHeader } from '@/components/MapsSearchHeader';
 import { getPlaces } from '@/lib/database';
 import {
   getRecentDestinations,
@@ -36,10 +34,13 @@ import {
 } from '@/lib/recentDestinations';
 import { searchAddressSuggestions, type SuggestHit } from '@/lib/placeSuggest';
 import type { Place } from '@/types';
+import { startFreeGpsTrip } from '@/lib/startFreeTrip';
+import { useToast } from '@/context/ToastContext';
 
 export default function MapsScreen() {
   const { colors } = useTheme();
-  const { activeTrip, activeVehicle } = useApp();
+  const { activeTrip, activeVehicle, refresh } = useApp();
+  const { showToast } = useToast();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const mapRef = useRef<TripMapRef>(null);
@@ -53,7 +54,13 @@ export default function MapsScreen() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [places, setPlaces] = useState<Place[]>([]);
   const [recentDests, setRecentDests] = useState<RecentDestination[]>([]);
-  const suggestDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [startingFree, setStartingFree] = useState(false);
+  const [liveKm, setLiveKm] = useState(0);
+  const searchSeq = useRef(0);
+  const queryRef = useRef(query);
+  queryRef.current = query;
+  const userRef = useRef(user);
+  userRef.current = user;
 
   const refreshLoc = useCallback(async () => {
     const loc = await getCurrentLocation({ fresh: true });
@@ -130,8 +137,8 @@ export default function MapsScreen() {
     };
   }, [user?.latitude, user?.longitude]);
 
-  const goSearch = useCallback(async () => {
-    const q = query.trim();
+  const goSearch = useCallback(async (raw?: string) => {
+    const q = (raw ?? queryRef.current).trim();
     if (q.length < 2) {
       setSearchError('Indiquez une adresse ou un lieu');
       return;
@@ -140,9 +147,9 @@ export default function MapsScreen() {
     setSearchError(null);
     Keyboard.dismiss();
     try {
-      const hit = await forwardGeocode(q);
+      const hit = await forwardGeocode(q, userRef.current);
       if (!hit) {
-        setSearchError('Lieu introuvable');
+        setSearchError('Lieu introuvable — essayez un nom plus complet (ex. parc des expositions Nantes)');
         return;
       }
       router.push({
@@ -152,7 +159,8 @@ export default function MapsScreen() {
           dest: hit.label || q,
           destLat: String(hit.latitude),
           destLon: String(hit.longitude),
-          autoStart: '1',
+          autoStart: 'prepare',
+          prepare: '1',
         },
       });
     } catch {
@@ -160,124 +168,119 @@ export default function MapsScreen() {
     } finally {
       setSearching(false);
     }
-  }, [query]);
+  }, []);
+
+  const onDebouncedQuery = useCallback((q: string) => {
+    setQuery(q);
+  }, []);
+
+  const onSubmitSearch = useCallback((q: string) => {
+    void goSearch(q);
+  }, [goSearch]);
+
+  const onSearchFocusChange = useCallback((focused: boolean) => {
+    setSearchFocused(focused);
+  }, []);
 
   useEffect(() => {
-    if (suggestDebounce.current) clearTimeout(suggestDebounce.current);
     const q = query.trim();
     if (q.length < 2) {
       setSearchHits([]);
       return;
     }
-    suggestDebounce.current = setTimeout(() => {
-      void (async () => {
-        const geo = await searchAddressSuggestions(q, 6);
-        const qn = q.toLowerCase();
-        const recentHits: SuggestHit[] = recentDests
-          .filter((r) => r.label.toLowerCase().includes(qn))
-          .slice(0, 4)
-          .map((r, i) => ({
-            id: `recent-${i}-${r.label}`,
-            label: r.label,
-            source: 'place' as const,
-            latitude: r.latitude ?? undefined,
-            longitude: r.longitude ?? undefined,
-            subtitle: 'Récent',
-          }));
-        const placeHits: SuggestHit[] = places
-          .filter((p) => {
-            const hay = `${p.name} ${p.address}`.toLowerCase();
-            return hay.includes(qn);
-          })
-          .slice(0, 4)
-          .map((p) => ({
-            id: `place-${p.id}`,
-            label: p.name,
-            subtitle: p.address || undefined,
-            source: 'place' as const,
-            latitude: p.latitude ?? undefined,
-            longitude: p.longitude ?? undefined,
-          }));
-        setSearchHits([...recentHits, ...placeHits, ...geo].slice(0, 10));
-      })();
-    }, 320);
-    return () => {
-      if (suggestDebounce.current) clearTimeout(suggestDebounce.current);
-    };
+    const seq = ++searchSeq.current;
+    void (async () => {
+      const geo = await searchAddressSuggestions(q, 8, userRef.current);
+      if (seq !== searchSeq.current) return;
+      const qn = q.toLowerCase();
+      const recentHits: SuggestHit[] = recentDests
+        .filter((r) => r.label.toLowerCase().includes(qn))
+        .slice(0, 4)
+        .map((r, i) => ({
+          id: `recent-${i}-${r.label}`,
+          label: r.label,
+          source: 'place' as const,
+          latitude: r.latitude ?? undefined,
+          longitude: r.longitude ?? undefined,
+          subtitle: 'Récent',
+        }));
+      const placeHits: SuggestHit[] = places
+        .filter((p) => {
+          const hay = `${p.name} ${p.address}`.toLowerCase();
+          return hay.includes(qn);
+        })
+        .slice(0, 4)
+        .map((p) => ({
+          id: `place-${p.id}`,
+          label: p.name,
+          subtitle: p.address || undefined,
+          source: 'place' as const,
+          latitude: p.latitude ?? undefined,
+          longitude: p.longitude ?? undefined,
+        }));
+      setSearchHits([...recentHits, ...placeHits, ...geo].slice(0, 10));
+    })();
   }, [query, places, recentDests]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
       header: () => (
-        <View
-          style={{
-            paddingTop: insets.top,
-            backgroundColor: colors.background,
-            borderBottomWidth: StyleSheet.hairlineWidth,
-            borderBottomColor: colors.border,
-          }}
-        >
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              height: 44,
-              paddingLeft: 2,
-              paddingRight: 4,
-              gap: 4,
-            }}
-          >
-            <DrawerMenuButton />
-            <View
-              style={{
-                flex: 1,
-                flexDirection: 'row',
-                alignItems: 'center',
-                height: 32,
-                borderWidth: StyleSheet.hairlineWidth,
-                borderColor: colors.border,
-                backgroundColor: colors.card,
-                borderRadius: 8,
-                paddingHorizontal: 8,
-              }}
-            >
-              <Ionicons name="search" size={14} color={colors.textSecondary} />
-              <TextInput
-                value={query}
-                onChangeText={setQuery}
-                onFocus={() => setSearchFocused(true)}
-                onBlur={() => setTimeout(() => setSearchFocused(false), 180)}
-                placeholder="Tapez une adresse…"
-                placeholderTextColor={colors.textSecondary}
-                style={{
-                  flex: 1,
-                  color: colors.text,
-                  paddingVertical: 0,
-                  paddingHorizontal: 6,
-                  fontSize: 13,
-                  height: 30,
-                  ...(Platform.OS === 'android' ? { includeFontPadding: false } : null),
-                }}
-                returnKeyType="search"
-                onSubmitEditing={() => void goSearch()}
-              />
-              {searching ? (
-                <ActivityIndicator size="small" color={colors.accent} />
-              ) : query.trim().length >= 2 ? (
-                <Pressable onPress={() => void goSearch()} hitSlop={8}>
-                  <Ionicons name="arrow-forward-circle" size={20} color={colors.accent} />
-                </Pressable>
-              ) : null}
-            </View>
-            <HeaderActions />
-          </View>
-        </View>
+        <MapsSearchHeader
+          insetsTop={insets.top}
+          onDebouncedQuery={onDebouncedQuery}
+          onSubmit={onSubmitSearch}
+          onFocusChange={onSearchFocusChange}
+        />
       ),
     });
-  }, [navigation, colors, query, searching, goSearch, insets.top]);
+  }, [navigation, insets.top, onDebouncedQuery, onSubmitSearch, onSearchFocusChange]);
 
-  const goFreeTrack = () => {
-    router.push({ pathname: '/(tabs)/trip', params: { mode: 'free', autoStart: '1' } });
+  useEffect(() => {
+    if (!activeTrip?.isActive) {
+      setLiveKm(0);
+      return;
+    }
+    const tick = () => {
+      const tail = peekLiveRouteTail(200);
+      if (tail && tail.length >= 2) {
+        setLiveKm(calculateRouteDistance(tail));
+      } else {
+        setLiveKm(Number(activeTrip.distanceKm) || 0);
+      }
+    };
+    tick();
+    const id = setInterval(tick, 2500);
+    return () => clearInterval(id);
+  }, [activeTrip?.id, activeTrip?.isActive, activeTrip?.distanceKm]);
+
+  const openLiveTrip = useCallback(() => {
+    router.navigate({ pathname: '/(tabs)/trip', params: { tab: 'live' } });
+  }, []);
+
+  const goFreeTrack = async () => {
+    if (!activeVehicle) {
+      router.push('/(tabs)/vehicles');
+      return;
+    }
+    if (activeTrip?.isActive) {
+      openLiveTrip();
+      return;
+    }
+    setStartingFree(true);
+    try {
+      const r = await startFreeGpsTrip({ vehicle: activeVehicle, refresh });
+      if (!r.ok) {
+        showToast(r.error);
+        return;
+      }
+      if (!r.trackingStarted) {
+        showToast('Trajet créé — autorisez la localisation pour tracer.');
+      } else {
+        showToast('Suivi GPS démarré — restez sur Maps, le km s’affiche ici.');
+      }
+    } finally {
+      setStartingFree(false);
+    }
   };
 
   const goToPlace = (label: string, lat?: number | null, lon?: number | null) => {
@@ -289,13 +292,14 @@ export default function MapsScreen() {
           dest: label,
           destLat: String(lat),
           destLon: String(lon),
-          autoStart: '1',
+          autoStart: 'prepare',
+          prepare: '1',
         },
       });
     } else {
       router.push({
         pathname: '/(tabs)/trip',
-        params: { mode: 'nav', dest: label, autoStart: '1' },
+        params: { mode: 'nav', dest: label, autoStart: 'prepare', prepare: '1' },
       });
     }
   };
@@ -351,6 +355,18 @@ export default function MapsScreen() {
       >
         {searchError ? (
           <Text style={{ color: colors.warning, fontSize: 12, marginBottom: 6 }}>{searchError}</Text>
+        ) : (
+          <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 8, lineHeight: 16 }}>
+            Tapez un lieu (ex. « parc des expo Nantes ») — les suggestions arrivent après une courte
+            pause, sans bloquer le clavier. Vous pourrez ajouter des étapes avant de démarrer.
+          </Text>
+        )}
+
+        {searching ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <ActivityIndicator size="small" color={colors.accent} />
+            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Recherche du lieu…</Text>
+          </View>
         ) : null}
 
         {(searchFocused || query.trim().length >= 2) && searchHits.length > 0 ? (
@@ -360,13 +376,11 @@ export default function MapsScreen() {
                 <Pressable
                   key={h.id}
                   onPress={() => {
-                    setQuery(h.label);
                     setSearchFocused(false);
                     if (h.latitude != null && h.longitude != null) {
                       goToPlace(h.label, h.latitude, h.longitude);
                     } else {
-                      setQuery(h.label);
-                      void goSearch();
+                      void goSearch(h.label);
                     }
                   }}
                   style={{
@@ -380,7 +394,9 @@ export default function MapsScreen() {
                       ? 'Récent'
                       : h.source === 'place'
                         ? 'Lieu'
-                        : 'Adresse'}
+                        : h.kind === 'poi'
+                          ? 'Lieu'
+                          : 'Adresse'}
                   </Text>
                   <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1}>
                     {h.label}
@@ -396,19 +412,26 @@ export default function MapsScreen() {
           </View>
         ) : null}
 
-        {activeTrip ? (
+        {activeTrip?.isActive ? (
           <Pressable
-            onPress={() => router.push('/(tabs)/trip')}
+            onPress={openLiveTrip}
             style={[
               styles.activeBanner,
               { borderColor: colors.accent, backgroundColor: colors.accent + '18' },
             ]}
           >
-            <Ionicons name="navigate" size={18} color={colors.accent} />
-            <Text style={{ color: colors.text, fontWeight: '700', flex: 1 }}>
-              Trajet en cours — ouvrir le guidage
-            </Text>
-            <Ionicons name="chevron-forward" size={18} color={colors.accent} />
+            <Ionicons name="navigate" size={22} color={colors.accent} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>
+                Suivi GPS en cours
+                {activeTrip.isPaused ? ' · pause' : ''}
+              </Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 2 }}>
+                {formatDistance(liveKm || activeTrip.distanceKm || 0)}
+                {activeTrip.originName ? ` · ${activeTrip.originName}` : ''}
+              </Text>
+            </View>
+            <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 13 }}>Détail</Text>
           </Pressable>
         ) : null}
 
@@ -462,13 +485,22 @@ export default function MapsScreen() {
 
         <View style={styles.actions}>
           <Button
-            title={activeVehicle ? 'Démarrer suivi libre' : 'Choisir un véhicule'}
+            title={
+              !activeVehicle
+                ? 'Choisir un véhicule'
+                : startingFree
+                  ? 'Démarrage…'
+                  : activeTrip?.isActive
+                    ? 'Voir le suivi'
+                    : 'Démarrer suivi libre'
+            }
+            loading={startingFree}
             onPress={() => {
               if (!activeVehicle) {
                 router.push('/(tabs)/vehicles');
                 return;
               }
-              goFreeTrack();
+              void goFreeTrack();
             }}
             style={{ flex: 1 }}
           />

@@ -71,8 +71,10 @@ export default function TabLayout() {
       <Tabs.Screen
         name="trip"
         options={{
-          href: null,
           title: 'Trajet',
+          href: '/(tabs)/trip',
+          tabBarButton: () => null,
+          tabBarItemStyle: { width: 0, overflow: 'hidden' },
         }}
       />
       <Tabs.Screen
