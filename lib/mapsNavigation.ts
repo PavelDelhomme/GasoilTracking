@@ -12,6 +12,7 @@ import {
   formatViaPassThrough,
   fmtLatLng,
   type MapsLatLng,
+  type MapsWaypointMode,
 } from '@/lib/mapsUrl';
 
 export type { MapsLatLng };
@@ -35,6 +36,7 @@ export function buildGoogleMapsDirUrl(opts: {
   destination: MapsLatLng;
   origin?: MapsLatLng | null;
   waypoints?: MapsLatLng[];
+  waypointMode?: MapsWaypointMode;
   navigate?: boolean;
   destinationLabel?: string | null;
 }): string {
@@ -127,20 +129,28 @@ async function openGoogleMaps(opts: {
   destination: MapsLatLng;
   origin?: MapsLatLng | null;
   waypoints?: MapsLatLng[];
+  waypointMode?: MapsWaypointMode;
   label?: string | null;
 }): Promise<boolean> {
   const dest = fmt(opts.destination);
-  const wps = (opts.waypoints || []).slice(0, 2);
+  const stopMode = opts.waypointMode === 'stop';
+  const wps = (opts.waypoints || []).slice(0, stopMode ? 8 : 2);
   const hasVia = wps.length > 0;
   const label = opts.label;
+  const wpMode: MapsWaypointMode | undefined = hasVia
+    ? stopMode
+      ? 'stop'
+      : 'via'
+    : undefined;
 
   if (Platform.OS === 'android') {
-    // Avec vias : directions HTTPS encodées (intent navigation ne gère pas les vias).
+    // Avec waypoints : directions HTTPS (intent navigation ignore les étapes).
     if (hasVia) {
       const pathUrl = buildGoogleMapsDirUrl({
         destination: opts.destination,
         origin: opts.origin,
         waypoints: wps,
+        waypointMode: wpMode,
         navigate: false,
         destinationLabel: label,
       });
@@ -169,6 +179,7 @@ async function openGoogleMaps(opts: {
         destination: opts.destination,
         origin: opts.origin,
         waypoints: wps,
+        waypointMode: wpMode,
         navigate: true,
         destinationLabel: label,
       });
@@ -179,6 +190,7 @@ async function openGoogleMaps(opts: {
           destination: opts.destination,
           origin: opts.origin,
           waypoints: wps,
+          waypointMode: wpMode,
           navigate: true,
           destinationLabel: label,
         })
@@ -193,6 +205,7 @@ async function openGoogleMaps(opts: {
       destination: opts.destination,
       origin: opts.origin,
       waypoints: hasVia ? wps : undefined,
+      waypointMode: wpMode,
       navigate: true,
       destinationLabel: label,
     })
@@ -213,6 +226,7 @@ export async function launchGoogleMapsNavigation(opts: {
   destination: MapsLatLng;
   origin?: MapsLatLng | null;
   waypoints?: MapsLatLng[];
+  waypointMode?: MapsWaypointMode;
   label?: string;
   preferGoogle?: boolean;
 }): Promise<boolean> {

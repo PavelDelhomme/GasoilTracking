@@ -31,6 +31,20 @@ describe('buildGoogleMapsDirUrl', () => {
     });
     expect(url).toContain(encodeURIComponent('Maison@48.200000,-1.500000'));
   });
+
+  it('étapes avec arrêt : coords nues, pas via:, jusqu’à 8 points', () => {
+    const stopA = { latitude: 47.22, longitude: -1.55 };
+    const stopB = { latitude: 47.25, longitude: -1.53 };
+    const url = buildGoogleMapsDirUrl({
+      destination,
+      origin,
+      waypoints: [stopA, stopB],
+      waypointMode: 'stop',
+    });
+    const decoded = decodeURIComponent(url);
+    expect(decoded).toContain('waypoints=47.220000,-1.550000|47.250000,-1.530000');
+    expect(decoded).not.toContain('via:47.220000');
+  });
 });
 
 describe('samplePassThroughViasFromRoute', () => {

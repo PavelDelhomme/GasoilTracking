@@ -23,11 +23,23 @@ export function formatDestinationParam(
   return `${name}@${coords}`;
 }
 
+/** Étape avec arrêt (coords nues — comme Maps / Waze). */
+export function formatStopWaypoint(p: MapsLatLng): string {
+  return fmtLatLng(p);
+}
+
+export type MapsWaypointMode = 'via' | 'stop';
+
+const MAX_VIA = 2;
+const MAX_STOP = 8;
+
 /** URL HTTPS directions — waypoints toujours encodés. */
 export function buildGoogleMapsDirUrl(opts: {
   destination: MapsLatLng;
   origin?: MapsLatLng | null;
   waypoints?: MapsLatLng[];
+  /** via = passage sans arrêt (éco) ; stop = étape réelle */
+  waypointMode?: MapsWaypointMode;
   navigate?: boolean;
   destinationLabel?: string | null;
   /** Platform.OS — évite import RN ici */
@@ -43,9 +55,12 @@ export function buildGoogleMapsDirUrl(opts: {
   if (opts.origin) {
     parts.push(`origin=${encodeURIComponent(fmtLatLng(opts.origin))}`);
   }
-  const wps = (opts.waypoints || []).slice(0, 2);
+  const stopMode = opts.waypointMode === 'stop';
+  const wps = (opts.waypoints || []).slice(0, stopMode ? MAX_STOP : MAX_VIA);
   if (wps.length) {
-    const raw = wps.map(formatViaPassThrough).join('|');
+    const raw = wps
+      .map((p) => (stopMode ? formatStopWaypoint(p) : formatViaPassThrough(p)))
+      .join('|');
     parts.push(`waypoints=${encodeURIComponent(raw)}`);
   }
   if (opts.navigate && opts.platform !== 'android') {

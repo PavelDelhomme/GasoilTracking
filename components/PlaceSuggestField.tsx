@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
 import { Input } from '@/components/Input';
 import type { Place, PlaceKind } from '@/types';
@@ -8,6 +8,7 @@ import {
   searchContactSuggestions,
   type SuggestHit,
 } from '@/lib/placeSuggest';
+import { PLACE_SEARCH_DEBOUNCE_MS } from '@/lib/placeSearch';
 import {
   getRecentDestinations,
   type RecentDestination,
@@ -50,8 +51,10 @@ type Props = {
   places: Place[];
   placeholder?: string;
   preferKinds?: PlaceKind[];
-  /** Active Nominatim + contacts */
+  /** Active Photon / Nominatim + contacts */
   enableRemoteSuggest?: boolean;
+  /** Biais GPS (meilleures suggestions autour de soi). */
+  bias?: { latitude: number; longitude: number } | null;
 };
 
 function expandAlias(text: string, places: Place[]): string {
@@ -77,12 +80,17 @@ export function PlaceSuggestField({
   placeholder,
   preferKinds = ['home', 'work'],
   enableRemoteSuggest = true,
+  bias,
 }: Props) {
   const { colors } = useTheme();
   const [focused, setFocused] = useState(false);
   const [remote, setRemote] = useState<SuggestHit[]>([]);
+  const [remoteLoading, setRemoteLoading] = useState(false);
   const [recents, setRecents] = useState<RecentDestination[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchSeq = useRef(0);
+  const biasRef = useRef(bias);
+  biasRef.current = bias;
 
   useEffect(() => {
     void getRecentDestinations(8).then(setRecents);
@@ -128,24 +136,28 @@ export function PlaceSuggestField({
 
   useEffect(() => {
     if (!enableRemoteSuggest || !focused) {
-      setRemote([]);
       return;
     }
     const q = value.trim();
     if (q.length < 3) {
       setRemote([]);
+      setRemoteLoading(false);
       return;
     }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
+      const seq = ++searchSeq.current;
+      setRemoteLoading(true);
       void (async () => {
         const [geo, contacts] = await Promise.all([
-          searchAddressSuggestions(q, 5),
+          searchAddressSuggestions(q, 6, biasRef.current),
           searchContactSuggestions(q),
         ]);
+        if (seq !== searchSeq.current) return;
         setRemote([...contacts, ...geo].slice(0, 8));
+        setRemoteLoading(false);
       })();
-    }, 380);
+    }, PLACE_SEARCH_DEBOUNCE_MS);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
@@ -183,7 +195,7 @@ export function PlaceSuggestField({
     setFocused(false);
   };
 
-  const showList = focused || value.length > 0;
+  const showList = focused;
 
   return (
     <View style={styles.wrap}>
@@ -205,7 +217,10 @@ export function PlaceSuggestField({
       />
 
       {showList &&
-        (placeSuggestions.length > 0 || recentHits.length > 0 || remote.length > 0) && (
+        (placeSuggestions.length > 0 ||
+          recentHits.length > 0 ||
+          remote.length > 0 ||
+          remoteLoading) && (
           <View style={[styles.list, { borderColor: colors.border, backgroundColor: colors.card }]}>
             {recentHits.map((r, i) => (
               <Pressable
@@ -249,7 +264,11 @@ export function PlaceSuggestField({
                 style={[styles.row, { borderBottomColor: colors.border }]}
               >
                 <Text style={{ color: colors.accent, fontSize: 11, fontWeight: '800' }}>
-                  {h.source === 'contact' ? 'Contact' : 'Adresse'}
+                  {h.source === 'contact'
+                    ? 'Contact'
+                    : h.kind === 'poi'
+                      ? 'Lieu'
+                      : 'Adresse'}
                 </Text>
                 <Text style={{ color: colors.text, fontWeight: '600' }}>{h.label}</Text>
                 {!!h.subtitle && (
@@ -259,6 +278,18 @@ export function PlaceSuggestField({
                 )}
               </Pressable>
             ))}
+            {remoteLoading ? (
+              <Text
+                style={{
+                  color: colors.textSecondary,
+                  fontSize: 12,
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                }}
+              >
+                Recherche…
+              </Text>
+            ) : null}
           </View>
         )}
     </View>

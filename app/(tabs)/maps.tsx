@@ -7,7 +7,6 @@ import {
   Text,
   StyleSheet,
   Pressable,
-  TextInput,
   ActivityIndicator,
   Keyboard,
   Platform,
@@ -26,9 +25,8 @@ import { fetchSpeedLimitNear, type SpeedLimitInfo } from '@/lib/roadSpeedLimits'
 import { forwardGeocode } from '@/lib/geocode';
 import { formatSpeedKmh } from '@/lib/calculations';
 import { Button } from '@/components/Button';
-import { DrawerMenuButton } from '@/components/DrawerMenuButton';
-import { HeaderActions } from '@/components/HeaderActions';
 import { TutorialAnchor } from '@/components/TutorialAnchor';
+import { MapsSearchHeader } from '@/components/MapsSearchHeader';
 import { getPlaces } from '@/lib/database';
 import {
   getRecentDestinations,
@@ -53,7 +51,11 @@ export default function MapsScreen() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [places, setPlaces] = useState<Place[]>([]);
   const [recentDests, setRecentDests] = useState<RecentDestination[]>([]);
-  const suggestDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchSeq = useRef(0);
+  const queryRef = useRef(query);
+  queryRef.current = query;
+  const userRef = useRef(user);
+  userRef.current = user;
 
   const refreshLoc = useCallback(async () => {
     const loc = await getCurrentLocation({ fresh: true });
@@ -130,8 +132,8 @@ export default function MapsScreen() {
     };
   }, [user?.latitude, user?.longitude]);
 
-  const goSearch = useCallback(async () => {
-    const q = query.trim();
+  const goSearch = useCallback(async (raw?: string) => {
+    const q = (raw ?? queryRef.current).trim();
     if (q.length < 2) {
       setSearchError('Indiquez une adresse ou un lieu');
       return;
@@ -140,9 +142,9 @@ export default function MapsScreen() {
     setSearchError(null);
     Keyboard.dismiss();
     try {
-      const hit = await forwardGeocode(q);
+      const hit = await forwardGeocode(q, userRef.current);
       if (!hit) {
-        setSearchError('Lieu introuvable');
+        setSearchError('Lieu introuvable — essayez un nom plus complet (ex. parc des expositions Nantes)');
         return;
       }
       router.push({
@@ -160,121 +162,72 @@ export default function MapsScreen() {
     } finally {
       setSearching(false);
     }
-  }, [query]);
+  }, []);
+
+  const onDebouncedQuery = useCallback((q: string) => {
+    setQuery(q);
+  }, []);
+
+  const onSubmitSearch = useCallback((q: string) => {
+    void goSearch(q);
+  }, [goSearch]);
+
+  const onSearchFocusChange = useCallback((focused: boolean) => {
+    setSearchFocused(focused);
+  }, []);
 
   useEffect(() => {
-    if (suggestDebounce.current) clearTimeout(suggestDebounce.current);
     const q = query.trim();
     if (q.length < 2) {
       setSearchHits([]);
       return;
     }
-    suggestDebounce.current = setTimeout(() => {
-      void (async () => {
-        const geo = await searchAddressSuggestions(q, 6);
-        const qn = q.toLowerCase();
-        const recentHits: SuggestHit[] = recentDests
-          .filter((r) => r.label.toLowerCase().includes(qn))
-          .slice(0, 4)
-          .map((r, i) => ({
-            id: `recent-${i}-${r.label}`,
-            label: r.label,
-            source: 'place' as const,
-            latitude: r.latitude ?? undefined,
-            longitude: r.longitude ?? undefined,
-            subtitle: 'Récent',
-          }));
-        const placeHits: SuggestHit[] = places
-          .filter((p) => {
-            const hay = `${p.name} ${p.address}`.toLowerCase();
-            return hay.includes(qn);
-          })
-          .slice(0, 4)
-          .map((p) => ({
-            id: `place-${p.id}`,
-            label: p.name,
-            subtitle: p.address || undefined,
-            source: 'place' as const,
-            latitude: p.latitude ?? undefined,
-            longitude: p.longitude ?? undefined,
-          }));
-        setSearchHits([...recentHits, ...placeHits, ...geo].slice(0, 10));
-      })();
-    }, 320);
-    return () => {
-      if (suggestDebounce.current) clearTimeout(suggestDebounce.current);
-    };
+    const seq = ++searchSeq.current;
+    void (async () => {
+      const geo = await searchAddressSuggestions(q, 8, userRef.current);
+      if (seq !== searchSeq.current) return;
+      const qn = q.toLowerCase();
+      const recentHits: SuggestHit[] = recentDests
+        .filter((r) => r.label.toLowerCase().includes(qn))
+        .slice(0, 4)
+        .map((r, i) => ({
+          id: `recent-${i}-${r.label}`,
+          label: r.label,
+          source: 'place' as const,
+          latitude: r.latitude ?? undefined,
+          longitude: r.longitude ?? undefined,
+          subtitle: 'Récent',
+        }));
+      const placeHits: SuggestHit[] = places
+        .filter((p) => {
+          const hay = `${p.name} ${p.address}`.toLowerCase();
+          return hay.includes(qn);
+        })
+        .slice(0, 4)
+        .map((p) => ({
+          id: `place-${p.id}`,
+          label: p.name,
+          subtitle: p.address || undefined,
+          source: 'place' as const,
+          latitude: p.latitude ?? undefined,
+          longitude: p.longitude ?? undefined,
+        }));
+      setSearchHits([...recentHits, ...placeHits, ...geo].slice(0, 10));
+    })();
   }, [query, places, recentDests]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
       header: () => (
-        <View
-          style={{
-            paddingTop: insets.top,
-            backgroundColor: colors.background,
-            borderBottomWidth: StyleSheet.hairlineWidth,
-            borderBottomColor: colors.border,
-          }}
-        >
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              height: 44,
-              paddingLeft: 2,
-              paddingRight: 4,
-              gap: 4,
-            }}
-          >
-            <DrawerMenuButton />
-            <View
-              style={{
-                flex: 1,
-                flexDirection: 'row',
-                alignItems: 'center',
-                height: 32,
-                borderWidth: StyleSheet.hairlineWidth,
-                borderColor: colors.border,
-                backgroundColor: colors.card,
-                borderRadius: 8,
-                paddingHorizontal: 8,
-              }}
-            >
-              <Ionicons name="search" size={14} color={colors.textSecondary} />
-              <TextInput
-                value={query}
-                onChangeText={setQuery}
-                onFocus={() => setSearchFocused(true)}
-                onBlur={() => setTimeout(() => setSearchFocused(false), 180)}
-                placeholder="Tapez une adresse…"
-                placeholderTextColor={colors.textSecondary}
-                style={{
-                  flex: 1,
-                  color: colors.text,
-                  paddingVertical: 0,
-                  paddingHorizontal: 6,
-                  fontSize: 13,
-                  height: 30,
-                  ...(Platform.OS === 'android' ? { includeFontPadding: false } : null),
-                }}
-                returnKeyType="search"
-                onSubmitEditing={() => void goSearch()}
-              />
-              {searching ? (
-                <ActivityIndicator size="small" color={colors.accent} />
-              ) : query.trim().length >= 2 ? (
-                <Pressable onPress={() => void goSearch()} hitSlop={8}>
-                  <Ionicons name="arrow-forward-circle" size={20} color={colors.accent} />
-                </Pressable>
-              ) : null}
-            </View>
-            <HeaderActions />
-          </View>
-        </View>
+        <MapsSearchHeader
+          insetsTop={insets.top}
+          onDebouncedQuery={onDebouncedQuery}
+          onSubmit={onSubmitSearch}
+          onFocusChange={onSearchFocusChange}
+        />
       ),
     });
-  }, [navigation, colors, query, searching, goSearch, insets.top]);
+  }, [navigation, insets.top, onDebouncedQuery, onSubmitSearch, onSearchFocusChange]);
 
   const goFreeTrack = () => {
     router.push({ pathname: '/(tabs)/trip', params: { mode: 'free', autoStart: '1' } });
@@ -351,6 +304,18 @@ export default function MapsScreen() {
       >
         {searchError ? (
           <Text style={{ color: colors.warning, fontSize: 12, marginBottom: 6 }}>{searchError}</Text>
+        ) : (
+          <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 8, lineHeight: 16 }}>
+            Tapez un lieu (ex. « parc des expo Nantes ») — les suggestions arrivent après une courte
+            pause, sans bloquer le clavier. Vous pourrez ajouter des étapes avant de démarrer.
+          </Text>
+        )}
+
+        {searching ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <ActivityIndicator size="small" color={colors.accent} />
+            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Recherche du lieu…</Text>
+          </View>
         ) : null}
 
         {(searchFocused || query.trim().length >= 2) && searchHits.length > 0 ? (
@@ -360,13 +325,11 @@ export default function MapsScreen() {
                 <Pressable
                   key={h.id}
                   onPress={() => {
-                    setQuery(h.label);
                     setSearchFocused(false);
                     if (h.latitude != null && h.longitude != null) {
                       goToPlace(h.label, h.latitude, h.longitude);
                     } else {
-                      setQuery(h.label);
-                      void goSearch();
+                      void goSearch(h.label);
                     }
                   }}
                   style={{
@@ -380,7 +343,9 @@ export default function MapsScreen() {
                       ? 'Récent'
                       : h.source === 'place'
                         ? 'Lieu'
-                        : 'Adresse'}
+                        : h.kind === 'poi'
+                          ? 'Lieu'
+                          : 'Adresse'}
                   </Text>
                   <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1}>
                     {h.label}

@@ -30,6 +30,7 @@ import { Button } from '@/components/Button';
 import TripMap from '@/components/TripMap';
 import type { TripMapRef } from '@/components/TripMap.types';
 import { PlaceSuggestField } from '@/components/PlaceSuggestField';
+import { TripStopsEditor, newTripStopId, type TripStop } from '@/components/TripStopsEditor';
 import type { Place, Trip } from '@/types';
 import {
   createTrip,
@@ -259,6 +260,12 @@ function mapsWaypointsForRoute(route: DrivingRoute | null | undefined): GeoCoord
   return buildViaWaypoints(route.coordinates, route.via, { kind: route.kind });
 }
 
+function stopCoords(stops: TripStop[]): GeoCoords[] {
+  return stops
+    .filter((s) => Number.isFinite(s.latitude) && Number.isFinite(s.longitude))
+    .map((s) => ({ latitude: s.latitude, longitude: s.longitude }));
+}
+
 export default function TripScreen() {
   const params = useLocalSearchParams<{
     mode?: string;
@@ -307,6 +314,11 @@ export default function TripScreen() {
   /** Remonte la WebView carte après fin de trajet (évite carte blanche). */
   const [mapRemountKey, setMapRemountKey] = useState(0);
   const [fuelStopVia, setFuelStopVia] = useState<GeoCoords | null>(null);
+  const [tripStops, setTripStops] = useState<TripStop[]>([]);
+  const [addingLiveStop, setAddingLiveStop] = useState(false);
+  const [liveStopDraft, setLiveStopDraft] = useState('');
+  const tripStopsRef = useRef<TripStop[]>([]);
+  tripStopsRef.current = tripStops;
   const arrivalPromptedRef = useRef(false);
   const startingRef = useRef(false);
   /** Une alerte station mid-trajet par trajet (critique). */
@@ -462,6 +474,8 @@ export default function TripScreen() {
     if (mode === 'free') {
       setDestination('');
       setDestCoords(null);
+      setTripStops([]);
+      setAddingLiveStop(false);
       setPlannedRoute([]);
       setRouteOptions([]);
       setSelectedRouteId(null);
@@ -837,8 +851,11 @@ export default function TripScreen() {
     async (from: GeoCoords, to: GeoCoords) => {
       setRoutesLoading(true);
       fitOriginAndDest(from, to);
+      const stops = stopCoords(tripStopsRef.current);
       try {
-        const alts = await fetchDrivingRouteAlternatives(from, to);
+        const alts = await fetchDrivingRouteAlternatives(from, to, {
+          stops: stops.length ? stops : undefined,
+        });
         setRouteOptions(alts);
         // Défaut = éco (conso Gasoil) ; l’utilisateur peut encore choisir rapide / alt.
         const prefer =
@@ -865,6 +882,45 @@ export default function TripScreen() {
     },
     [applyRouteSelection, fitOriginAndDest]
   );
+
+  const mapsLaunchForNav = useCallback(
+    (
+      dest: GeoCoords,
+      origin: GeoCoords | null | undefined,
+      label: string,
+      route: DrivingRoute | null | undefined,
+      extraStop?: GeoCoords | null
+    ) => {
+      const stops = [
+        ...(extraStop ? [extraStop] : []),
+        ...stopCoords(tripStopsRef.current),
+      ];
+      if (stops.length) {
+        return launchGoogleMapsNavigation({
+          destination: dest,
+          origin: origin ?? null,
+          waypoints: stops,
+          waypointMode: 'stop',
+          label,
+        });
+      }
+      return launchGoogleMapsNavigation({
+        destination: dest,
+        origin: origin ?? null,
+        waypoints: mapsWaypointsForRoute(route),
+        waypointMode: 'via',
+        label,
+      });
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!destCoords || !userLocation) return;
+    void loadRouteAlternatives(userLocation, destCoords);
+    // Recalcul seulement quand la liste d’étapes change (dest déjà géré par applyDestination).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripStops]);
 
   const handleStartTrip = async (override?: {
     destinationLabel?: string;
@@ -1006,9 +1062,11 @@ export default function TripScreen() {
             if (routeForNav && routeForNav.coordinates.length >= 2) {
               setPlannedRoute(downsampleRoute(routeForNav.coordinates, 120));
             } else {
+              const startStops = stopCoords(tripStopsRef.current);
               const alts = await fetchDrivingRouteAlternatives(
                 { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
-                resolvedDest
+                resolvedDest,
+                { stops: startStops.length ? startStops : undefined }
               );
               setRouteOptions(alts);
               if (alts.length === 0) {
@@ -1054,6 +1112,7 @@ export default function TripScreen() {
         // Suivi libre : nettoyer toute destination / itinéraire résiduel
         setDestination('');
         setDestCoords(null);
+        setTripStops([]);
         setPlannedRoute([]);
         setRouteOptions([]);
         setSelectedRouteId(null);
@@ -1091,6 +1150,9 @@ export default function TripScreen() {
           : [
               startFuel != null ? `Jauge départ ~${startFuel.toFixed(1)} L` : null,
               routeForNav ? `Itinéraire ${routeForNav.label}` : null,
+              tripStopsRef.current.length
+                ? `${tripStopsRef.current.length} étape${tripStopsRef.current.length > 1 ? 's' : ''}`
+                : null,
               mapsLabel && mode === 'free' ? `Plein d’abord · ${mapsLabel}` : null,
             ]
               .filter(Boolean)
@@ -1127,8 +1189,8 @@ export default function TripScreen() {
     }
 
     // Maps APRÈS le suivi — hors du try principal (un échec Maps ne doit pas
-    // faire croire que le trajet a échoué, ni tuer le GPS). Destination seule
-    // : pas d’arrêt intermédiaire. Petit délai pour laisser l’UI se stabiliser.
+    // faire croire que le trajet a échoué, ni tuer le GPS). Étapes utilisateur
+    // = arrêts réels dans Google Maps. Petit délai pour laisser l’UI se stabiliser.
     try {
       if (effectiveMode === 'nav' && mapsLabel && mapsDest) {
         void pushRecentDestination({
@@ -1138,17 +1200,13 @@ export default function TripScreen() {
         }).then(() => getRecentDestinations(6).then(setRecentDests));
 
         await new Promise((r) => setTimeout(r, 400));
-        const routeVias = mapsWaypointsForRoute(routeForNav);
-        const waypoints = [
-          ...(stationViaLocal ? [stationViaLocal] : []),
-          ...routeVias,
-        ];
-        const opened = await launchGoogleMapsNavigation({
-          destination: mapsDest,
-          origin: mapsOrigin,
-          waypoints,
-          label: mapsLabel,
-        });
+        const opened = await mapsLaunchForNav(
+          mapsDest,
+          mapsOrigin,
+          mapsLabel,
+          routeForNav,
+          stationViaLocal
+        );
         if (!opened) {
           notify(
             'Navigation',
@@ -1474,6 +1532,8 @@ export default function TripScreen() {
       setLiveDestLabel('');
       setDestination('');
       setDestCoords(null);
+      setTripStops([]);
+      setAddingLiveStop(false);
       setPlannedRoute([]);
       setRouteOptions([]);
       setSelectedRouteId(null);
@@ -1572,6 +1632,8 @@ export default function TripScreen() {
       setLiveDestLabel('');
       setDestination('');
       setDestCoords(null);
+      setTripStops([]);
+      setAddingLiveStop(false);
       setPlannedRoute([]);
       setRouteOptions([]);
       setSelectedRouteId(null);
@@ -1817,36 +1879,33 @@ export default function TripScreen() {
   }, [activeTrip?.id, activeTrip?.isPaused, destCoords, checkArrivalProximity]);
 
   const handleOpenGoogleMaps = async () => {
-    // Suivi libre / pas de destination réelle → jamais d’itinéraire fantôme (~4 min)
-    const inFree =
-      startMode === 'free' ||
-      Boolean(activeTrip && !activeTrip.destinationName?.trim());
-    const label =
-      (inFree
-        ? activeTrip?.destinationName?.trim() || ''
-        : destination.trim() ||
-          activeTrip?.destinationName?.trim() ||
-          liveDestLabel?.trim() ||
-          '') || '';
-    const coordsForNav = inFree ? null : destCoords;
+    const destName =
+      destination.trim() ||
+      activeTrip?.destinationName?.trim() ||
+      liveDestLabel?.trim() ||
+      '';
+    const coordsForNav = destCoords;
+    const inFree = !coordsForNav && !destName;
 
-    if (inFree || (!coordsForNav && !label)) {
+    if (inFree) {
       notify(
         'Suivi libre',
-        'Pas de destination : le suivi GPS reste dans l’app. Choisissez « Avec destination » pour ouvrir un itinéraire Maps.'
+        'Pas de destination : le suivi GPS reste dans l’app. Ajoutez une destination ou une étape pour ouvrir un itinéraire Maps.'
       );
       return;
     }
 
+    const label = destName;
+
     let opened = false;
     try {
       if (coordsForNav) {
-        opened = await launchGoogleMapsNavigation({
-          destination: coordsForNav,
-          origin: userLocation,
-          waypoints: mapsWaypointsForRoute(selectedRoute),
-          label: label || 'Destination',
-        });
+        opened = await mapsLaunchForNav(
+          coordsForNav,
+          userLocation,
+          label || 'Destination',
+          selectedRoute
+        );
       } else if (label) {
         await Linking.openURL(openGoogleMapsSearch(label));
         opened = true;
@@ -2259,6 +2318,77 @@ export default function TripScreen() {
       }
     },
     [userLocation, loadRouteAlternatives, persistStartMode, fitOriginAndDest]
+  );
+
+  const handleLivePlacePick = useCallback(
+    async (c: { latitude: number; longitude: number; label: string }) => {
+      if (!Number.isFinite(c.latitude) || !Number.isFinite(c.longitude)) return;
+      const coords = { latitude: c.latitude, longitude: c.longitude };
+      const hasDest =
+        !!destCoords ||
+        !!destination.trim() ||
+        !!activeTrip?.destinationName?.trim();
+
+      if (!hasDest) {
+        persistStartMode('nav');
+        setDestination(c.label);
+        setDestCoords(coords);
+        setLiveDestLabel(c.label);
+        if (activeTrip?.id) {
+          await updateTrip(activeTrip.id, { destinationName: c.label });
+          await refresh();
+        }
+        const opened = await launchGoogleMapsNavigation({
+          destination: coords,
+          origin: userLocation,
+          label: c.label,
+        });
+        if (!opened) {
+          notify('Google Maps', 'Impossible d’ouvrir Maps. Le suivi GPS continue.');
+        } else {
+          showToast('Itinéraire ouvert dans Google Maps');
+        }
+      } else {
+        const next: TripStop[] = [
+          ...tripStopsRef.current,
+          { id: newTripStopId(), label: c.label, latitude: coords.latitude, longitude: coords.longitude },
+        ].slice(0, 8);
+        setTripStops(next);
+        const dest = destCoords;
+        if (dest) {
+          const opened = await launchGoogleMapsNavigation({
+            destination: dest,
+            origin: userLocation,
+            waypoints: next.map((s) => ({
+              latitude: s.latitude,
+              longitude: s.longitude,
+            })),
+            waypointMode: 'stop',
+            label: destination.trim() || liveDestLabel || c.label,
+          });
+          if (!opened) {
+            notify('Google Maps', 'Impossible d’ouvrir Maps. Le suivi GPS continue.');
+          } else {
+            showToast('Étape ajoutée — Google Maps mis à jour');
+          }
+        } else {
+          showToast('Étape ajoutée');
+        }
+      }
+      setAddingLiveStop(false);
+      setLiveStopDraft('');
+    },
+    [
+      destCoords,
+      destination,
+      activeTrip?.id,
+      activeTrip?.destinationName,
+      userLocation,
+      persistStartMode,
+      refresh,
+      showToast,
+      liveDestLabel,
+    ]
   );
 
   const isActiveDestChip = useCallback(
@@ -2702,6 +2832,84 @@ export default function TripScreen() {
                   </View>
                 )}
 
+                <View style={styles.activeBtnRow}>
+                  <Pressable
+                    onPress={() => {
+                      setLiveStopDraft('');
+                      setAddingLiveStop(true);
+                    }}
+                    style={[
+                      styles.activeBtn,
+                      { borderColor: colors.accent, backgroundColor: colors.accent + '14' },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Ajouter une étape"
+                  >
+                    <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 13 }}>
+                      {destCoords || activeTrip.destinationName
+                        ? 'Ajouter une étape'
+                        : 'Destination / étape'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => void handleOpenGoogleMaps()}
+                    style={[
+                      styles.activeBtn,
+                      { borderColor: colors.border, backgroundColor: colors.card },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Ouvrir Google Maps"
+                  >
+                    <Text style={{ color: colors.text, fontWeight: '800', fontSize: 13 }}>
+                      Ouvrir Maps
+                    </Text>
+                  </Pressable>
+                </View>
+
+                {addingLiveStop ? (
+                  <Card style={{ marginBottom: 10 }}>
+                    <PlaceSuggestField
+                      label={
+                        destCoords || activeTrip.destinationName
+                          ? 'Nouvelle étape (arrêt)'
+                          : 'Destination'
+                      }
+                      placeholder="Adresse, lieu, station…"
+                      value={liveStopDraft}
+                      onChangeText={setLiveStopDraft}
+                      places={places}
+                      bias={userLocation}
+                      onPickCoords={(c) => {
+                        if (Number.isFinite(c.latitude) && Number.isFinite(c.longitude)) {
+                          void handleLivePlacePick(c);
+                        }
+                      }}
+                    />
+                    <Button
+                      title="Annuler"
+                      variant="outline"
+                      onPress={() => {
+                        setAddingLiveStop(false);
+                        setLiveStopDraft('');
+                      }}
+                    />
+                  </Card>
+                ) : null}
+
+                {(tripStops.length > 0 || addingLiveStop) && (destCoords || activeTrip.destinationName) ? (
+                  <TripStopsEditor
+                    stops={tripStops}
+                    onChange={(next) => {
+                      setTripStops(next);
+                    }}
+                    places={places}
+                    bias={userLocation}
+                    adding={false}
+                    compact
+                    hideAdd
+                  />
+                ) : null}
+
                 <View style={styles.statsRow}>
                   <StatCard label="Distance" value={formatDistance(activeTrip.distanceKm)} />
                   <StatCard
@@ -2750,6 +2958,11 @@ export default function TripScreen() {
                       ? liveDestLabel
                       : 'Suivi libre (sans destination fixe)'}
                   </Text>
+                  {tripStops.length > 0 ? (
+                    <Text style={[styles.placeLine, { color: colors.textSecondary }]}>
+                      Étapes : {tripStops.map((s) => s.label).join(' → ')}
+                    </Text>
+                  ) : null}
                 </Card>
               </>
             ) : (
@@ -2884,8 +3097,9 @@ export default function TripScreen() {
                     <View style={{ marginTop: 12 }}>
                       <PlaceSuggestField
                         label="Destination"
-                        placeholder="Maison, adresse, contact…"
+                        placeholder="Maison, adresse, contact, parc expo…"
                         value={destination}
+                        bias={userLocation}
                         onChangeText={(t) => {
                           setDestination(t);
                           setDestCoords(null);
@@ -3021,6 +3235,12 @@ export default function TripScreen() {
                           </View>
                         </View>
                       )}
+                      <TripStopsEditor
+                        stops={tripStops}
+                        onChange={setTripStops}
+                        places={places}
+                        bias={userLocation}
+                      />
                     </View>
                   )}
                 </Card>

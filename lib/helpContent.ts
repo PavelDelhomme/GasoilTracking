@@ -110,13 +110,19 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: 'nav',
         title: 'Navigation vers une destination',
         body:
-          'Depuis Maps : barre « Tapez une adresse… » en haut, ou un lieu / récent. L’itinéraire proposé par défaut est l’éco (conso). Le guidage reste sur l’écran trajet. Astuce : « Intermarché » n’est plus confondu avec le lieu Travail.',
+          'Depuis Maps : barre de recherche en haut. Les suggestions n’apparaissent qu’après une courte pause (le clavier ne saute plus à chaque lettre). Photon + OpenStreetMap : « parc des expo Nantes » trouve le Parc des expositions. L’itinéraire proposé par défaut est l’éco. Astuce : « Intermarché » n’est plus confondu avec le lieu Travail.',
+      },
+      {
+        id: 'waypoints',
+        title: 'Étapes pendant un trajet (comme Maps / Waze)',
+        body:
+          'Avant de démarrer : mode destination → « Ajouter une étape » (arrêt réel, pas un simple passage). Pendant un trajet déjà lancé : bouton « Ajouter une étape » ou « Destination / étape » en suivi libre. L’app ouvre Google Maps avec origin GPS + étapes + arrivée ; le suivi conso continue ici.',
       },
       {
         id: 'maps-tab',
         title: 'Onglet Maps',
         body:
-          'Entrée principale navigation : recherche d’adresse à côté du menu, lieux Maison/Travail & récents, démarrage suivi libre. L’ancien onglet Trajet n’est plus dans la barre (écran conservé pour le guidage en cours et l’historique).',
+          'Entrée principale navigation : recherche d’adresse à côté du menu (suggestions stables, lieux / POI, ex. parc des expositions), lieux Maison/Travail & récents, démarrage suivi libre. L’ancien onglet Trajet n’est plus dans la barre (écran conservé pour le guidage en cours, les étapes et l’historique).',
         link: { label: 'Maps', href: '/(tabs)/maps' },
       },
       {
@@ -232,7 +238,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: 'tuto-4',
         title: 'Étape 4 — Premier trajet',
         body:
-          'Maps → tapez une adresse (autocomplétion + récents prioritaires) ou lancez un suivi libre. Choisissez l’itinéraire éco ou rapide sur la carte avant de démarrer. Terminer → récap, puis retour Maps.',
+          'Maps → tapez un lieu (suggestions après une pause, pour ne pas bloquer le clavier). Vous pouvez ajouter des étapes avant ou pendant le trajet, puis Google Maps s’ouvre avec les arrêts. Terminer → récap, puis retour Maps.',
         link: { label: 'Maps', href: '/(tabs)/maps' },
       },
       {
@@ -335,7 +341,7 @@ export const HELP_KNOWN: KnownIssue[] = [
     kind: 'tip',
     title: 'Guidage in-app vs Google Maps',
     body:
-      'Le guidage dans l’app est volontairement simple (OSRM). Pour un turn-by-turn ultra détaillé, ouvrez Google Maps depuis le trajet : le suivi conso continue dans Gasoil Tracking.',
+      'Le guidage dans l’app est volontairement simple (OSRM). Pour un turn-by-turn ultra détaillé, ouvrez Google Maps depuis le trajet (bouton « Ouvrir Maps ») : le suivi conso continue dans Gasoil Tracking. Les étapes que vous ajoutez sont des arrêts réels dans Maps, pas des points de passage invisibles.',
   },
   {
     id: 'sync-conflict',
