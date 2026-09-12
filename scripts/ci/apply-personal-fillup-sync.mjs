@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { applyPersonalFillUp, fetchCommuteRoute } from '../../api/src/personalCommute.js';
+import { applyPersonalFillUp, fetchAfternoonRoutes, fetchCommuteRoute } from '../../api/src/personalCommute.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const API = (process.env.API_URL || 'https://gasoil-tracking.delhomme.ovh').replace(/\/$/, '');
@@ -80,8 +80,17 @@ async function commuteRoute() {
   try {
     return await fetchCommuteRoute();
   } catch (e) {
-    console.warn('OSRM indispo, trajet fallback 44,7 km', e?.message || e);
-    return { distanceKm: 44.7, durationMinutes: 53, coordinates: [] };
+    console.warn('OSRM indispo, trajet fallback 49 km', e?.message || e);
+    return { distanceKm: 49, durationMinutes: 44, coordinates: [] };
+  }
+}
+
+async function afternoonRoutes() {
+  try {
+    return await fetchAfternoonRoutes();
+  } catch (e) {
+    console.warn('OSRM après-midi indispo', e?.message || e);
+    return {};
   }
 }
 
@@ -110,7 +119,8 @@ async function applyWithToken(token, via) {
   );
 
   const route = await commuteRoute();
-  const result = applyPersonalFillUp(snapshot, route, spec);
+  const afternoon = await afternoonRoutes();
+  const result = applyPersonalFillUp(snapshot, route, { ...spec, afternoonRoutes: afternoon });
   if (!result.ok) {
     throw new Error(`applyPersonalFillUp: ${result.reason || 'ko'}`);
   }
