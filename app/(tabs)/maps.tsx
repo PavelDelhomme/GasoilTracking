@@ -35,10 +35,12 @@ import {
 import { searchAddressSuggestions, type SuggestHit } from '@/lib/placeSuggest';
 import type { Place } from '@/types';
 import { freeTrackNavParams } from '@/lib/tripNavParams';
+import { useToast } from '@/context/ToastContext';
 
 export default function MapsScreen() {
   const { colors } = useTheme();
   const { activeTrip, activeVehicle } = useApp();
+  const { showToast } = useToast();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const mapRef = useRef<TripMapRef>(null);
@@ -233,13 +235,14 @@ export default function MapsScreen() {
 
   const goFreeTrack = () => {
     if (activeTrip) {
-      router.push({ pathname: '/(tabs)/trip', params: { tab: 'live' } });
+      showToast('Trajet déjà en cours — ouverture du suivi');
+      router.navigate({ pathname: '/(tabs)/trip', params: { tab: 'live' } });
       return;
     }
-    // push (pas replace) : change d’onglet. mode=free gagne même si dest merge.
-    router.push({
+    showToast('Démarrage du suivi GPS…');
+    router.navigate({
       pathname: '/(tabs)/trip',
-      params: freeTrackNavParams(),
+      params: { ...freeTrackNavParams(), tab: 'live' },
     });
   };
 
