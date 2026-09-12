@@ -103,7 +103,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: 'free',
         title: 'Suivi libre (recommandé au quotidien)',
         body:
-          'Pas de destination : l’app enregistre le GPS, la distance, la conso estimée. Sur la carte : panneau de limitation (si connu) + niveau d’essence en direct. Boutons : Plein, Pause, Terminer — puis les stats, et « Suivi en cours » en bas.',
+          'Pas de destination : l’app enregistre le GPS tout de suite (sans jauge ni alerte station au démarrage). Sur la carte : panneau de limitation (si connu) + niveau d’essence en direct. Boutons : Plein, Pause, Terminer — puis les stats, et « Suivi en cours » en bas.',
         link: { label: 'Ouvrir Maps', href: '/(tabs)/maps' },
       },
       {
@@ -129,7 +129,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: 'history',
         title: 'Historique des trajets',
         body:
-          'Menu ☰ → Historique des trajets, ou bouton Historique sur Maps. Depuis l’accueil, « Depuis le plein » ouvre l’historique filtré depuis le dernier plein.',
+          'Menu ☰ → Historique des trajets, ou bouton Historique sur Maps. Import : URL Google Maps, ou export Timeline (Google Maps → Chronologie → exporter) / Takeout. Depuis l’accueil, « Depuis le plein » ouvre l’historique filtré depuis le dernier plein.',
         link: { label: 'Ouvrir l’historique', href: '/(tabs)/trip?tab=history' },
       },
       {

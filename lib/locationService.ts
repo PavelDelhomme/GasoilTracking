@@ -417,28 +417,40 @@ export function clearLivePointsAfterFinish(): void {
 export async function getCurrentLocation(opts?: {
   /** Pour démarrer un trajet : frais + précis, pas last-known lâche. */
   fresh?: boolean;
+  /** Au-delà, renvoyer last-known / null pour ne pas bloquer le démarrage. */
+  timeoutMs?: number;
 }): Promise<Location.LocationObject | null> {
   const { status } = await Location.requestForegroundPermissionsAsync();
   if (status !== 'granted') return null;
 
-  if (!opts?.fresh) {
-    try {
-      const last = await Location.getLastKnownPositionAsync({
-        maxAge: 45_000,
-        requiredAccuracy: 80,
-      });
-      if (last && (last.coords.accuracy == null || last.coords.accuracy <= 80)) {
-        return last;
+  const locate = async () => {
+    if (!opts?.fresh) {
+      try {
+        const last = await Location.getLastKnownPositionAsync({
+          maxAge: 45_000,
+          requiredAccuracy: 80,
+        });
+        if (last && (last.coords.accuracy == null || last.coords.accuracy <= 80)) {
+          return last;
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
     }
-  }
 
-  return Location.getCurrentPositionAsync({
-    accuracy: opts?.fresh ? Location.Accuracy.High : Location.Accuracy.Balanced,
-    mayShowUserSettingsDialog: true,
-  });
+    return Location.getCurrentPositionAsync({
+      accuracy: opts?.fresh ? Location.Accuracy.High : Location.Accuracy.Balanced,
+      mayShowUserSettingsDialog: true,
+    });
+  };
+
+  if (opts?.timeoutMs && opts.timeoutMs > 0) {
+    return Promise.race([
+      locate(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), opts.timeoutMs)),
+    ]);
+  }
+  return locate();
 }
 
 /** Ouvre Google Maps pour la navigation vers une destination */

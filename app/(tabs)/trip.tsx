@@ -984,6 +984,8 @@ export default function TripScreen() {
     destinationLabel?: string;
     dest?: GeoCoords | null;
     mode?: StartMode;
+    /** Suivi libre : pas de jauge / station avant le GPS. */
+    skipPrompts?: boolean;
   }) => {
     if (startingRef.current || isStarting) return;
     if (activeTrip?.isActive) {
@@ -995,6 +997,7 @@ export default function TripScreen() {
       return;
     }
     const mode = override?.mode ?? startMode;
+    const skipPrompts = override?.skipPrompts === true || mode === 'free';
     let destLabel =
       override?.destinationLabel?.trim() || destination.trim();
     const coordsOverride =
@@ -1026,17 +1029,19 @@ export default function TripScreen() {
     let goStationFromFree = false;
 
     try {
-      // Toujours valider la jauge (nav + suivi libre) — même demi-cercle qu’à l’accueil.
+      // Suivi libre : GPS tout de suite (dernière jauge connue). Nav : jauge puis stations.
       let startFuel = activeVehicle.estimatedFuelLiters;
-      const gauge = await askFuelGaugeApprox(
-        activeVehicle,
-        'Niveau de carburant au départ',
-        'Réglez la jauge pour affiner la consommation estimée.',
-        { softSkip: true }
-      );
-      startFuel = gauge.skipped ? activeVehicle.estimatedFuelLiters : gauge.liters;
-      if (startFuel != null) {
-        await setFuelLiters(activeVehicle, startFuel);
+      if (!skipPrompts) {
+        const gauge = await askFuelGaugeApprox(
+          activeVehicle,
+          'Niveau de carburant au départ',
+          'Réglez la jauge pour affiner la consommation estimée.',
+          { softSkip: true }
+        );
+        startFuel = gauge.skipped ? activeVehicle.estimatedFuelLiters : gauge.liters;
+        if (startFuel != null) {
+          await setFuelLiters(activeVehicle, startFuel);
+        }
       }
       setTripStartFuelLiters(startFuel);
       criticalStationAlertedRef.current = false;
@@ -1044,7 +1049,10 @@ export default function TripScreen() {
       await stopBackgroundTracking();
       await clearLiveTripBuffer();
       await stopActiveTrips();
-      const loc = await getCurrentLocation({ fresh: true });
+      const loc = await getCurrentLocation({
+        fresh: !skipPrompts,
+        timeoutMs: skipPrompts ? 4000 : undefined,
+      });
       const startPoint = loc
         ? [
             {
@@ -1064,7 +1072,7 @@ export default function TripScreen() {
         setUserLocation(mapsOrigin);
       }
 
-      if (startFuel != null) {
+      if (startFuel != null && !skipPrompts) {
         const destKm = routeForNav?.distanceKm ?? null;
         const stationChoice = await offerDetourStations({
           vehicle: activeVehicle,
@@ -1344,7 +1352,7 @@ export default function TripScreen() {
     const t = setTimeout(() => {
       if (startIntentKeyRef.current === key) return;
       startIntentKeyRef.current = key;
-      void handleStartTrip({ mode: 'free', dest: null });
+      void handleStartTrip({ mode: 'free', dest: null, skipPrompts: true });
     }, 80);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handleStartTrip recreates each render
@@ -3509,7 +3517,11 @@ export default function TripScreen() {
                           : 'Démarrer + Maps'
                 }
                 onPress={() =>
-                  void handleStartTrip(startMode === 'free' ? { mode: 'free', dest: null } : undefined)
+                  void handleStartTrip(
+                    startMode === 'free'
+                      ? { mode: 'free', dest: null, skipPrompts: true }
+                      : undefined
+                  )
                 }
                 loading={isStarting}
                 disabled={
