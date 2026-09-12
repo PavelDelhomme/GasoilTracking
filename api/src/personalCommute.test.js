@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   applyPersonalCommute,
@@ -5,6 +8,13 @@ import {
   downsampleCoords,
   localDayIso,
 } from './personalCommute.js';
+
+const fillSpec = JSON.parse(
+  fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '../../scripts/ci/personal-fillup-once.json'),
+    'utf8'
+  )
+);
 
 const vehicle = {
   id: 3,
@@ -105,6 +115,21 @@ describe('applyPersonalFillUp', () => {
     expect(second.already).toBe(true);
     expect(second.snapshot.fillUps).toHaveLength(1);
     expect(second.estimatedFuelLiters).toBe(50);
+  });
+
+  it('applique le JSON CI (75,09 € / 34,62 L) sans vider la jauge', () => {
+    expect(fillSpec.fillUp.liters).toBe(34.62);
+    expect(fillSpec.fillUp.totalCost).toBe(75.09);
+    const r = applyPersonalFillUp(
+      { vehicles: [vehicle], trips: [], places: [], fillUps: [] },
+      route,
+      fillSpec
+    );
+    expect(r.ok).toBe(true);
+    expect(r.snapshot.trips[0].startTime).toBe('2026-09-12T11:55:00+02:00');
+    expect(r.snapshot.fillUps[0].date).toBe('2026-09-12T12:50:00+02:00');
+    expect(r.estimatedFuelLiters).toBe(50);
+    expect(r.snapshot.vehicles[0].estimatedFuelLiters).toBe(50);
   });
 });
 
