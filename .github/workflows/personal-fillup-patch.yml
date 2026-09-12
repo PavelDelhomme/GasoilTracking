@@ -1,8 +1,8 @@
 name: Patch plein perso (cloud)
 
-# One-shot : plein 206 Intermarché La Guerche + trajet du 12/09 si absent.
+# One-shot : plein 206 Intermarché La Guerche + trajets du 12/09 (49 + 82 + 3,5 km).
 # Écrit via login + GET/PUT /api/sync (routes déjà live). Idempotent.
-# Ne rebuild PAS l’APK.
+# Ne rebuild PAS l’APK. Relance après ajout du secret PERSONAL_PASSWORD.
 
 on:
   push:
