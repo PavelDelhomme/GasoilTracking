@@ -29,7 +29,9 @@ import {
   getCurrentLocation,
   startBackgroundTracking,
   stopBackgroundTracking,
+  seedLivePointsCache,
 } from '@/lib/locationService';
+import { seedLiveTripBuffer, clearLiveTripBuffer } from '@/lib/liveTripBuffer';
 import { launchGoogleMapsNavigation } from '@/lib/mapsNavigation';
 import { fuelLabel, isSaneFuelPricePerLiter } from '@/lib/fuelPrices';
 import { applyFillUpToFuelEstimate } from '@/lib/fuelLevel';
@@ -136,6 +138,7 @@ export default function StationTripScreen() {
     try {
       await stopActiveTrips();
       await stopBackgroundTracking();
+      await clearLiveTripBuffer();
 
       const loc = await getCurrentLocation({ fresh: true });
       const startPoint = loc
@@ -148,7 +151,7 @@ export default function StationTripScreen() {
           ]
         : [];
 
-      const id = await createTrip({
+      const tripId = await createTrip({
         vehicleId: activeVehicle.id,
         startTime: new Date().toISOString(),
         endTime: null,
@@ -165,10 +168,17 @@ export default function StationTripScreen() {
         fillUpId: null,
         note: `Station ${params.address || ''}`.trim(),
       });
-      setTripId(id);
+      setTripId(tripId);
       setDistanceKm('0');
 
-      const trackingPromise = startBackgroundTracking();
+      seedLivePointsCache(tripId, activeVehicle.id, startPoint);
+      await seedLiveTripBuffer({
+        tripId,
+        vehicleId: activeVehicle.id,
+        routePoints: JSON.stringify(startPoint),
+      });
+
+      const trackingPromise = startBackgroundTracking({ forceRestart: true });
       await launchGoogleMapsNavigation({
         destination: { latitude: lat, longitude: lon },
         origin: loc
@@ -181,7 +191,7 @@ export default function StationTripScreen() {
       if (loc) {
         void reverseGeocode(loc.coords.latitude, loc.coords.longitude)
           .then((name) => {
-            if (name) return updateTrip(id, { originName: name });
+            if (name) return updateTrip(tripId, { originName: name });
           })
           .catch(() => undefined);
       }
@@ -474,7 +484,7 @@ export default function StationTripScreen() {
                 }
                 const loc = await getCurrentLocation();
                 if (loc) {
-                  await startBackgroundTracking();
+                  await startBackgroundTracking({ forceRestart: true });
                 }
                 await refresh();
                 setPhase('go');

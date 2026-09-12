@@ -251,6 +251,18 @@ export async function purgeTinyTrips(vehicleId?: number): Promise<number> {
       t.endTime && t.startTime
         ? (new Date(t.endTime).getTime() - new Date(t.startTime).getTime()) / 60000
         : 99;
+    // Ne pas effacer un GPS réel trop court en km mais déjà un vrai trajet.
+    if (t.source === 'gps') {
+      const ptsLen = (() => {
+        try {
+          const parsed = JSON.parse(t.routePoints || '[]');
+          return Array.isArray(parsed) ? parsed.length : 0;
+        } catch {
+          return 0;
+        }
+      })();
+      if (ptsLen >= 2 || mins >= 5) continue;
+    }
     if (t.distanceKm < 0.25 && mins < 8) {
       await deleteTrip(t.id);
       n += 1;

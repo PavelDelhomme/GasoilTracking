@@ -53,8 +53,7 @@ async function flushPending() {
       const trip = await getActiveTrip();
       if (!trip || trip.isPaused || !trip.isActive) continue;
 
-      const vehicle = await getVehicleById(trip.vehicleId);
-      if (!vehicle) continue;
+      const vehicle = await getVehicleById(trip.vehicleId).catch(() => null);
 
       let routePoints = trip.routePoints;
       for (const pos of batch) {
@@ -76,16 +75,20 @@ async function flushPending() {
       routePoints = compactRoutePointsJson(routePoints);
       const distanceKm = calculateRouteDistance(routePoints);
       const pts = parseRoutePoints(routePoints);
-      const fuelUsed = estimateTripFuelLiters(vehicle, distanceKm, {
-        learnedFactor: vehicle.consumptionLearnFactor,
-        points: pts,
-        avgSpeedKmh: averageMovingSpeedKmh(distanceKm, pts),
-        idleRatio: idleRatioFromPoints(pts),
-        idleMinutes: idleMinutesFromPoints(pts),
-        accelFactor: accelAggressionFactor(pts),
-        stopGoFactor: stopAndGoFactor(pts),
-      });
-      const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
+      let fuelUsed = trip.estimatedFuelUsed || 0;
+      let cost = trip.estimatedCost || 0;
+      if (vehicle) {
+        fuelUsed = estimateTripFuelLiters(vehicle, distanceKm, {
+          learnedFactor: vehicle.consumptionLearnFactor,
+          points: pts,
+          avgSpeedKmh: averageMovingSpeedKmh(distanceKm, pts),
+          idleRatio: idleRatioFromPoints(pts),
+          idleMinutes: idleMinutesFromPoints(pts),
+          accelFactor: accelAggressionFactor(pts),
+          stopGoFactor: stopAndGoFactor(pts),
+        });
+        cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
+      }
 
       await updateTrip(trip.id, {
         routePoints,
@@ -124,7 +127,9 @@ export async function requestLocationPermissions(): Promise<boolean> {
   });
 }
 
-export async function startBackgroundTracking(): Promise<boolean> {
+export async function startBackgroundTracking(_opts?: {
+  forceRestart?: boolean;
+}): Promise<boolean> {
   if (typeof navigator === 'undefined' || !navigator.geolocation) return false;
   const ok = await requestLocationPermissions();
   if (!ok) return false;
@@ -162,6 +167,22 @@ export async function stopBackgroundTracking(): Promise<void> {
 /** Compat native : drain de la file d’écritures GPS. */
 export async function flushTripUpdates(): Promise<void> {
   await flushPending();
+}
+
+export async function persistLiveRoute(_tripId?: number): Promise<void> {
+  await flushPending();
+}
+
+export function seedLivePointsCache(
+  _tripId: number,
+  _vehicleId: number,
+  _points: { latitude: number; longitude: number; timestamp: number }[]
+): void {
+  /* web : pas de cache RAM FGS */
+}
+
+export function clearLivePointsAfterFinish(): void {
+  /* no-op */
 }
 
 export function peekLiveRouteTail(_max = 80): null {

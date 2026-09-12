@@ -101,19 +101,19 @@ function learnedFactorFromGauge(estimatedLitersBurned, gaugeDropLiters) {
   return Math.min(1.55, Math.max(0.85, raw));
 }
 
-const MAX_ACCURACY_M = 32;
+const MAX_ACCURACY_M = 85;
 const MIN_STEP_KM = 0.006;
 const MAX_SPEED_MPS = 50;
 const MIN_DT_MS = 600;
 const STATIONARY_SPEED_MPS = 0.8;
-const STATIONARY_MAX_STEP_KM = 0.025;
+const STATIONARY_MAX_STEP_KM = 0.012;
 
 function evaluateGpsSample(previous, raw, opts = {}) {
   if (!Number.isFinite(raw.latitude) || !Number.isFinite(raw.longitude)) {
     return { accept: false, reason: 'bad_coords' };
   }
   const acc = raw.accuracy;
-  const maxAcc = opts.isFirst || !previous ? 55 : MAX_ACCURACY_M;
+  const maxAcc = opts.isFirst || !previous ? 160 : MAX_ACCURACY_M;
   if (acc != null && Number.isFinite(acc) && acc > maxAcc) {
     return { accept: false, reason: 'bad_accuracy' };
   }
@@ -129,12 +129,13 @@ function evaluateGpsSample(previous, raw, opts = {}) {
     raw.longitude
   );
   if (distanceKm < MIN_STEP_KM) return { accept: false, reason: 'too_close' };
-  const deviceSpeed = raw.speed;
+  const deviceSpeed = raw.speed != null && raw.speed >= 0 ? raw.speed : null;
+  const impliedKmh = dt > 0 ? distanceKm / (dt / 3_600_000) : 0;
   if (
     deviceSpeed != null &&
-    deviceSpeed >= 0 &&
     deviceSpeed < STATIONARY_SPEED_MPS &&
-    distanceKm < STATIONARY_MAX_STEP_KM
+    distanceKm < STATIONARY_MAX_STEP_KM &&
+    impliedKmh < 8
   ) {
     return { accept: false, reason: 'stationary' };
   }
@@ -279,10 +280,21 @@ test('rejette mauvaise précision', () => {
     latitude: 48.14,
     longitude: -1.58,
     timestamp: 0,
-    accuracy: 120,
+    accuracy: 400,
   });
   assert.equal(r.accept, false);
   assert.equal(r.reason, 'bad_accuracy');
+});
+test('accepte précision 50 m en mouvement', () => {
+  const a = { latitude: 48.14, longitude: -1.58, timestamp: 0 };
+  const b = {
+    latitude: 48.1409,
+    longitude: -1.58,
+    timestamp: 5000,
+    accuracy: 50,
+    speed: 16,
+  };
+  assert.equal(evaluateGpsSample(a, b).accept, true);
 });
 
 console.log('\n=== 4. Simulateur trajet A/R ===');

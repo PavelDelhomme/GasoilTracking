@@ -50,11 +50,19 @@ import {
   startBackgroundTracking,
   stopBackgroundTracking,
   flushTripUpdates,
+  persistLiveRoute,
+  seedLivePointsCache,
+  clearLivePointsAfterFinish,
   getCurrentLocation,
   openGoogleMapsSearch,
   peekLiveRouteTail,
   peekLiveTripId,
 } from '@/lib/locationService';
+import {
+  seedLiveTripBuffer,
+  clearLiveTripBuffer,
+  readLiveTripBuffer,
+} from '@/lib/liveTripBuffer';
 import { buildViaWaypoints, launchGoogleMapsNavigation } from '@/lib/mapsNavigation';
 import {
   appendRoutePoint,
@@ -668,6 +676,19 @@ export default function TripScreen() {
             return;
           }
         }
+        const buf = await readLiveTripBuffer();
+        if (buf?.tripId === activeTrip.id) {
+          const pts = parseRoutePoints(buf.routePoints || '[]');
+          if (pts.length) {
+            const tail = pts.length > 80 ? pts.slice(-80) : pts;
+            setLiveMapTail(tail);
+            const last = tail[tail.length - 1];
+            if (last) {
+              setUserLocation({ latitude: last.latitude, longitude: last.longitude });
+            }
+            return;
+          }
+        }
         const full = await getTripById(activeTrip.id);
         if (cancelled || !full) return;
         const pts = parseRoutePoints(full.routePoints || '[]');
@@ -898,6 +919,8 @@ export default function TripScreen() {
       setTripStartFuelLiters(startFuel);
       criticalStationAlertedRef.current = false;
 
+      await stopBackgroundTracking();
+      await clearLiveTripBuffer();
       await stopActiveTrips();
       const loc = await getCurrentLocation({ fresh: true });
       const startPoint = loc
@@ -919,7 +942,7 @@ export default function TripScreen() {
         setUserLocation(mapsOrigin);
       }
 
-      if (startFuel != null) {
+      if (mode === 'nav' && startFuel != null) {
         const stationChoice = await offerDetourStations({
           vehicle: activeVehicle,
           liters: startFuel,
@@ -1019,7 +1042,7 @@ export default function TripScreen() {
 
       const destName = mode === 'nav' ? destLabel : undefined;
 
-      await createTrip({
+      const tripId = await createTrip({
         vehicleId: activeVehicle.id,
         startTime: new Date().toISOString(),
         endTime: null,
@@ -1046,10 +1069,17 @@ export default function TripScreen() {
               .join(' · ') || undefined,
       });
 
+      seedLivePointsCache(tripId, activeVehicle.id, startPoint);
+      await seedLiveTripBuffer({
+        tripId,
+        vehicleId: activeVehicle.id,
+        routePoints: JSON.stringify(startPoint),
+      });
+
       if (originName) setLiveOriginLabel(originName);
       if (destName) setLiveDestLabel(destName);
 
-      const trackingStarted = await startBackgroundTracking();
+      const trackingStarted = await startBackgroundTracking({ forceRestart: true });
       if (!trackingStarted) {
         notify(
           'Permission requise',
@@ -1243,7 +1273,7 @@ export default function TripScreen() {
   const handleResume = async () => {
     if (!activeTrip) return;
     await updateTrip(activeTrip.id, { isPaused: false });
-    const ok = await startBackgroundTracking();
+    const ok = await startBackgroundTracking({ forceRestart: true });
     await refresh();
     if (!ok) {
       notify('GPS', 'Vérifiez les permissions localisation.');
@@ -1267,16 +1297,33 @@ export default function TripScreen() {
         /* GPS déjà arrêté */
       }
       try {
+        await persistLiveRoute(finishedId);
         await flushTripUpdates();
       } catch {
         /* ignore */
       }
 
-      // Toujours lire la DB après drain GPS — le state React peut être en retard.
+      // Toujours lire la DB + tampon après drain GPS — le state React peut être en retard.
       const fresh = await getTripById(finishedId).catch(() => null);
-      const trip = fresh || activeTrip;
+      const buf = await readLiveTripBuffer().catch(() => null);
+      let trip = fresh || activeTrip;
+      if (buf && buf.tripId === finishedId) {
+        const bufPts = parseRoutePoints(buf.routePoints || '[]');
+        const dbPts = parseRoutePoints(trip.routePoints || '[]');
+        if (bufPts.length > dbPts.length || buf.distanceKm > (trip.distanceKm || 0)) {
+          trip = {
+            ...trip,
+            routePoints: buf.routePoints,
+            distanceKm: Math.max(trip.distanceKm || 0, buf.distanceKm),
+            estimatedFuelUsed: buf.estimatedFuelUsed ?? trip.estimatedFuelUsed,
+            estimatedCost: buf.estimatedCost ?? trip.estimatedCost,
+          };
+        }
+      }
 
-      if (shouldDeleteShortTrip(trip.distanceKm) && !opts?.keepShort) {
+      const durationMinutes =
+        (Date.now() - new Date(trip.startTime).getTime()) / 60000;
+      if (shouldDeleteShortTrip(trip.distanceKm, durationMinutes) && !opts?.keepShort) {
         setShortTripPrompt(true);
         setStopConfirm(false);
         return;
@@ -1393,6 +1440,8 @@ export default function TripScreen() {
       if (trip.distanceKm > 0) {
         await addTrackedKm(trip.vehicleId, trip.distanceKm).catch(() => undefined);
       }
+      await clearLiveTripBuffer();
+      clearLivePointsAfterFinish();
       setLiveOriginLabel('');
       setLiveDestLabel('');
       setDestination('');
@@ -1489,6 +1538,8 @@ export default function TripScreen() {
         /* ignore */
       }
       await deleteTrip(id);
+      await clearLiveTripBuffer();
+      clearLivePointsAfterFinish();
       setLiveOriginLabel('');
       setLiveDestLabel('');
       setDestination('');

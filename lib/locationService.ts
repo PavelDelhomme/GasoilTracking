@@ -3,7 +3,6 @@ import * as Location from 'expo-location';
 import { Platform } from 'react-native';
 import { BACKGROUND_LOCATION_TASK } from '@/constants/Colors';
 import {
-  getActiveTrip,
   getActiveTripLite,
   getTripById,
   getVehicleById,
@@ -19,17 +18,26 @@ import {
 import { estimateTripFuelLiters, accelAggressionFactor, stopAndGoFactor, idleRatioFromPoints, idleMinutesFromPoints, averageMovingSpeedKmh } from '@/lib/consumptionModel';
 import { evaluateGpsSample, type GpsSample } from '@/lib/gpsTracking';
 import { buildGoogleMapsDirUrl } from '@/lib/mapsNavigation';
+import {
+  readLiveTripBuffer,
+  writeLiveTripBuffer,
+  type LiveTripBuffer,
+} from '@/lib/liveTripBuffer';
 
 interface LocationTaskData {
   locations: Location.LocationObject[];
 }
+
+type LiveMeta = { id: number; vehicleId: number; isPaused: boolean; isActive: boolean };
 
 /** Sérialise les mises à jour trajet (évite last-write-wins). */
 let tripWriteChain: Promise<void> = Promise.resolve();
 /** Empêche plusieurs startLocationUpdatesAsync en parallèle (crash LocationTaskService). */
 let startInFlight: Promise<boolean> | null = null;
 /** Cache RAM des points live — évite parse/stringify O(n) à chaque fix GPS. */
-let livePointsCache: { tripId: number; points: RoutePoint[] } | null = null;
+let livePointsCache: { tripId: number; vehicleId: number; points: RoutePoint[] } | null = null;
+/** Watch premier plan : certains OEM n’envoient pas les callbacks FGS si l’app est ouverte. */
+let foregroundWatch: Location.LocationSubscription | null = null;
 
 function enqueueTripUpdate(fn: () => Promise<void>): Promise<void> {
   tripWriteChain = tripWriteChain.then(fn, fn);
@@ -56,6 +64,200 @@ export function peekLiveTripId(): number | null {
   return livePointsCache?.tripId ?? null;
 }
 
+/** Amorce le cache dès createTrip (avant le 1er fix FGS). */
+export function seedLivePointsCache(
+  tripId: number,
+  vehicleId: number,
+  points: RoutePoint[]
+): void {
+  livePointsCache = { tripId, vehicleId, points: points.slice() };
+}
+
+function pointFromLocation(loc: Location.LocationObject, prev: RoutePoint | null): RoutePoint | null {
+  const sample: GpsSample = {
+    latitude: loc.coords.latitude,
+    longitude: loc.coords.longitude,
+    timestamp: loc.timestamp || Date.now(),
+    accuracy: loc.coords.accuracy ?? undefined,
+    speed: loc.coords.speed ?? undefined,
+  };
+  const verdict = evaluateGpsSample(prev, sample, { isFirst: !prev });
+  if (!verdict.accept) return null;
+  const use = verdict.sample || sample;
+  const entry: RoutePoint = {
+    latitude: Math.round(use.latitude * 1e6) / 1e6,
+    longitude: Math.round(use.longitude * 1e6) / 1e6,
+    timestamp: use.timestamp,
+  };
+  if (use.speed != null && Number.isFinite(use.speed) && use.speed >= 0) {
+    entry.speed = Math.round(use.speed * 10) / 10;
+  }
+  const alt = loc.coords.altitude;
+  const altAcc = loc.coords.altitudeAccuracy;
+  if (
+    alt != null &&
+    Number.isFinite(alt) &&
+    Math.abs(alt) < 9000 &&
+    (altAcc == null || altAcc < 40)
+  ) {
+    entry.altitude = Math.round(alt);
+  }
+  return entry;
+}
+
+async function resolveLiveMeta(): Promise<LiveMeta | null> {
+  try {
+    const lite = await getActiveTripLite();
+    if (lite?.isActive && !lite.isPaused) {
+      return {
+        id: lite.id,
+        vehicleId: lite.vehicleId,
+        isPaused: false,
+        isActive: true,
+      };
+    }
+    if (lite && !lite.isActive) return null;
+  } catch (e) {
+    console.warn('[gps] getActiveTripLite failed', e);
+  }
+
+  const buf = await readLiveTripBuffer();
+  if (!buf) return null;
+  try {
+    const byId = await getTripById(buf.tripId);
+    if (byId && !byId.isActive) return null;
+    if (byId?.isActive && !byId.isPaused) {
+      return { id: byId.id, vehicleId: byId.vehicleId, isPaused: false, isActive: true };
+    }
+  } catch {
+    /* SQLite headless indisponible */
+  }
+  return { id: buf.tripId, vehicleId: buf.vehicleId, isPaused: false, isActive: true };
+}
+
+async function loadLivePoints(tripId: number): Promise<RoutePoint[]> {
+  if (livePointsCache?.tripId === tripId) return livePointsCache.points;
+  let fromDb: RoutePoint[] = [];
+  try {
+    const full = await getTripById(tripId);
+    fromDb = parseRoutePoints(full?.routePoints || '[]');
+  } catch {
+    /* ignore */
+  }
+  const buf = await readLiveTripBuffer();
+  const fromBuf = buf?.tripId === tripId ? parseRoutePoints(buf.routePoints) : [];
+  return fromBuf.length > fromDb.length ? fromBuf : fromDb;
+}
+
+async function persistLivePoints(
+  tripId: number,
+  vehicleId: number,
+  points: RoutePoint[]
+): Promise<void> {
+  const compacted = compactRoutePoints(points);
+  livePointsCache = { tripId, vehicleId, points: compacted };
+  const routePoints = JSON.stringify(compacted);
+  const distanceKm = calculateRouteDistance(routePoints);
+
+  let fuelUsed = 0;
+  let cost = 0;
+  try {
+    const vehicle = vehicleId ? await getVehicleById(vehicleId) : null;
+    if (vehicle) {
+      fuelUsed = estimateTripFuelLiters(vehicle, distanceKm, {
+        learnedFactor: vehicle.consumptionLearnFactor,
+        points: compacted,
+        avgSpeedKmh: averageMovingSpeedKmh(distanceKm, compacted),
+        idleRatio: idleRatioFromPoints(compacted),
+        idleMinutes: idleMinutesFromPoints(compacted),
+        accelFactor: accelAggressionFactor(compacted),
+        stopGoFactor: stopAndGoFactor(compacted),
+      });
+      cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
+    }
+  } catch {
+    /* conso optionnelle — ne pas bloquer le tracé */
+  }
+
+  const nextBuf: LiveTripBuffer = {
+    tripId,
+    vehicleId,
+    routePoints,
+    distanceKm,
+    estimatedFuelUsed: fuelUsed,
+    estimatedCost: cost,
+    updatedAt: Date.now(),
+    lastFixAt: Date.now(),
+    acceptedFixes: compacted.length,
+  };
+  try {
+    await writeLiveTripBuffer(nextBuf);
+  } catch (e) {
+    console.warn('[gps] buffer write failed', e);
+  }
+  try {
+    await updateTrip(tripId, {
+      routePoints,
+      distanceKm,
+      estimatedFuelUsed: fuelUsed,
+      estimatedCost: cost,
+    });
+  } catch (e) {
+    console.warn('[gps] sqlite update failed — tampon conservé', e);
+  }
+}
+
+async function applyGpsLocations(locations: Location.LocationObject[]): Promise<void> {
+  const batch = locations.length > 16 ? locations.slice(-16) : locations;
+  const meta = await resolveLiveMeta();
+  if (!meta || meta.isPaused || !meta.isActive) {
+    if (!meta) clearLivePointsCache();
+    return;
+  }
+
+  const points = await loadLivePoints(meta.id);
+  let changed = false;
+  for (const loc of batch) {
+    const prev = points.length > 0 ? points[points.length - 1] : null;
+    const entry = pointFromLocation(loc, prev);
+    if (!entry) continue;
+    points.push(entry);
+    changed = true;
+  }
+
+  livePointsCache = { tripId: meta.id, vehicleId: meta.vehicleId, points };
+  if (!changed) return;
+  await persistLivePoints(meta.id, meta.vehicleId, points);
+}
+
+/** Recopie cache RAM + tampon AsyncStorage vers SQLite (clôture trajet). */
+export async function persistLiveRoute(tripId?: number): Promise<void> {
+  await tripWriteChain;
+  const cache = livePointsCache;
+  const buf = await readLiveTripBuffer();
+  const id = tripId ?? cache?.tripId ?? buf?.tripId;
+  if (!id) return;
+
+  const cachePts = cache?.tripId === id ? cache.points : [];
+  const bufPts = buf?.tripId === id ? parseRoutePoints(buf.routePoints) : [];
+  let dbPts: RoutePoint[] = [];
+  try {
+    const full = await getTripById(id);
+    dbPts = parseRoutePoints(full?.routePoints || '[]');
+  } catch {
+    /* ignore */
+  }
+  const richest =
+    cachePts.length >= bufPts.length && cachePts.length >= dbPts.length
+      ? cachePts
+      : bufPts.length >= dbPts.length
+        ? bufPts
+        : dbPts;
+  if (richest.length === 0) return;
+  const vehicleId = cache?.vehicleId ?? buf?.vehicleId ?? 0;
+  await persistLivePoints(id, vehicleId, richest);
+}
+
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   if (error) {
     console.warn('[gps-bg] task error', error);
@@ -65,90 +267,9 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   const { locations } = (data || {}) as LocationTaskData;
   if (!locations || locations.length === 0) return;
 
-  // Limite batch : évite pics mémoire si l’OS envoie un paquet énorme
-  const batch = locations.length > 12 ? locations.slice(-12) : locations;
-
   await enqueueTripUpdate(async () => {
     try {
-      const lite = await getActiveTripLite();
-      if (!lite || lite.isPaused || !lite.isActive) {
-        clearLivePointsCache();
-        return;
-      }
-
-      const vehicle = await getVehicleById(lite.vehicleId);
-      if (!vehicle) return;
-
-      let points: RoutePoint[];
-      if (livePointsCache?.tripId === lite.id) {
-        points = livePointsCache.points;
-      } else {
-        // Hydrate une seule fois depuis la DB (miss cache), puis reste en RAM.
-        const full = (await getTripById(lite.id).catch(() => null)) || (await getActiveTrip());
-        points = parseRoutePoints(full?.routePoints || '[]');
-      }
-
-      let changed = false;
-      for (const loc of batch) {
-        const sample: GpsSample = {
-          latitude: loc.coords.latitude,
-          longitude: loc.coords.longitude,
-          timestamp: loc.timestamp || Date.now(),
-          accuracy: loc.coords.accuracy ?? undefined,
-          speed: loc.coords.speed ?? undefined,
-        };
-        const prev = points.length > 0 ? points[points.length - 1] : null;
-        const verdict = evaluateGpsSample(prev, sample, { isFirst: points.length === 0 });
-        if (!verdict.accept) continue;
-        const use = verdict.sample || sample;
-        const entry: RoutePoint = {
-          latitude: Math.round(use.latitude * 1e6) / 1e6,
-          longitude: Math.round(use.longitude * 1e6) / 1e6,
-          timestamp: use.timestamp,
-        };
-        if (use.speed != null && Number.isFinite(use.speed) && use.speed >= 0) {
-          entry.speed = Math.round(use.speed * 10) / 10;
-        }
-        const alt = loc.coords.altitude;
-        const altAcc = loc.coords.altitudeAccuracy;
-        if (
-          alt != null &&
-          Number.isFinite(alt) &&
-          Math.abs(alt) < 9000 &&
-          (altAcc == null || altAcc < 40)
-        ) {
-          entry.altitude = Math.round(alt);
-        }
-        points.push(entry);
-        changed = true;
-      }
-      if (!changed) {
-        livePointsCache = { tripId: lite.id, points };
-        return;
-      }
-
-      points = compactRoutePoints(points);
-      livePointsCache = { tripId: lite.id, points };
-      // Un seul stringify par batch (plus de parse/stringify par point).
-      const routePoints = JSON.stringify(points);
-      const distanceKm = calculateRouteDistance(routePoints);
-      const fuelUsed = estimateTripFuelLiters(vehicle, distanceKm, {
-        learnedFactor: vehicle.consumptionLearnFactor,
-        points,
-        avgSpeedKmh: averageMovingSpeedKmh(distanceKm, points),
-        idleRatio: idleRatioFromPoints(points),
-        idleMinutes: idleMinutesFromPoints(points),
-        accelFactor: accelAggressionFactor(points),
-        stopGoFactor: stopAndGoFactor(points),
-      });
-      const cost = estimateCost(fuelUsed, vehicle.defaultFuelPrice);
-
-      await updateTrip(lite.id, {
-        routePoints,
-        distanceKm,
-        estimatedFuelUsed: fuelUsed,
-        estimatedCost: cost,
-      });
+      await applyGpsLocations(locations);
     } catch (e) {
       console.warn('[gps-bg] update failed', e);
     }
@@ -165,26 +286,55 @@ export async function requestLocationPermissions(): Promise<boolean> {
   return background === 'granted';
 }
 
-async function isTrackingAlreadyOn(): Promise<boolean> {
+async function hasOsLocationUpdates(): Promise<boolean> {
   try {
-    if (await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK)) {
-      return true;
-    }
-  } catch {
-    /* older / web stub */
-  }
-  try {
-    return await TaskManager.isTaskRegisteredAsync(BACKGROUND_LOCATION_TASK);
+    return await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
   } catch {
     return false;
   }
 }
 
+async function ensureForegroundWatch(): Promise<void> {
+  if (Platform.OS === 'web' || foregroundWatch) return;
+  try {
+    foregroundWatch = await Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.Balanced,
+        timeInterval: 4000,
+        distanceInterval: 12,
+      },
+      (pos) => {
+        void enqueueTripUpdate(async () => {
+          try {
+            await applyGpsLocations([pos]);
+          } catch (e) {
+            console.warn('[gps-fg] apply failed', e);
+          }
+        });
+      }
+    );
+  } catch (e) {
+    console.warn('[gps-fg] watch failed', e);
+  }
+}
+
+async function stopForegroundWatch(): Promise<void> {
+  try {
+    foregroundWatch?.remove();
+  } catch {
+    /* ignore */
+  }
+  foregroundWatch = null;
+}
+
 /**
- * Démarre le suivi arrière-plan (une seule instance FGS).
- * Profil « stable » : pas BestForNavigation (trop lourd → OOM/ANR Nothing).
+ * Démarre le suivi (FGS + watch premier plan).
+ * Ne pas se fier à isTaskRegisteredAsync : defineTask l’enregistre au boot
+ * même si le FGS n’a jamais démarré → notif orpheline / 0 km.
  */
-export async function startBackgroundTracking(): Promise<boolean> {
+export async function startBackgroundTracking(opts?: {
+  forceRestart?: boolean;
+}): Promise<boolean> {
   if (startInFlight) return startInFlight;
 
   startInFlight = (async () => {
@@ -192,31 +342,43 @@ export async function startBackgroundTracking(): Promise<boolean> {
       const hasPermission = await requestLocationPermissions();
       if (!hasPermission) return false;
 
-      if (await isTrackingAlreadyOn()) {
-        return true;
+      if (opts?.forceRestart) {
+        try {
+          if (await hasOsLocationUpdates()) {
+            await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+          }
+        } catch {
+          /* ignore */
+        }
+        await stopForegroundWatch();
       }
 
-      await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-        // High suffit pour les km ; BestForNavigation + watch UI = double charge → crash
-        accuracy: Location.Accuracy.High,
-        timeInterval: 8000,
-        distanceInterval: 25,
-        deferredUpdatesInterval: 10000,
-        showsBackgroundLocationIndicator: true,
-        foregroundService: {
-          notificationTitle: 'Gasoil Tracking — trajet',
-          notificationBody: 'Suivi GPS en arrière-plan',
-          notificationColor: '#e94560',
-        },
-        pausesUpdatesAutomatically: false,
-        activityType: Location.ActivityType.AutomotiveNavigation,
-      });
+      if (!(await hasOsLocationUpdates())) {
+        await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+          accuracy: Location.Accuracy.High,
+          timeInterval: 4000,
+          distanceInterval: 12,
+          deferredUpdatesInterval: 4000,
+          showsBackgroundLocationIndicator: true,
+          foregroundService: {
+            notificationTitle: 'Gasoil Tracking — trajet',
+            notificationBody: 'Suivi GPS en arrière-plan',
+            notificationColor: '#e94560',
+          },
+          pausesUpdatesAutomatically: false,
+          activityType: Location.ActivityType.AutomotiveNavigation,
+        });
+      }
+
+      await ensureForegroundWatch();
       return true;
     } catch (e) {
       console.warn('[gps-bg] start failed', e);
-      // Si déjà démarré côté OS, on considère OK
       try {
-        if (await isTrackingAlreadyOn()) return true;
+        if (await hasOsLocationUpdates()) {
+          await ensureForegroundWatch();
+          return true;
+        }
       } catch {
         /* ignore */
       }
@@ -230,15 +392,26 @@ export async function startBackgroundTracking(): Promise<boolean> {
 }
 
 export async function stopBackgroundTracking(): Promise<void> {
+  await stopForegroundWatch();
   try {
-    if (await isTrackingAlreadyOn()) {
+    if (await hasOsLocationUpdates()) {
       await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
     }
   } catch (e) {
     console.warn('[gps-bg] stop failed', e);
-  } finally {
-    clearLivePointsCache();
   }
+  try {
+    await persistLiveRoute();
+  } catch (e) {
+    console.warn('[gps-bg] persist on stop failed', e);
+  } finally {
+    // Ne pas vider le cache ici : finishTripCore relit encore peek/persist.
+    // Le cache est vidé après flush explicite (clearLivePointsAfterFinish).
+  }
+}
+
+export function clearLivePointsAfterFinish(): void {
+  clearLivePointsCache();
 }
 
 export async function getCurrentLocation(opts?: {

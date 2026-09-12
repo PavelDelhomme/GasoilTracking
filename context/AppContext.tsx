@@ -16,6 +16,7 @@ import { getToken } from '@/lib/api';
 import { hasLocalUserData } from '@/lib/dataSnapshot';
 import { confirm, notify } from '@/lib/notify';
 import { flushTripUpdates, stopBackgroundTracking } from '@/lib/locationService';
+import { readLiveTripBuffer } from '@/lib/liveTripBuffer';
 import { reverseGeocode } from '@/lib/geocode';
 import { applyTripFuelBurn } from '@/lib/fuelLevel';
 import { refreshVehicleReminders } from '@/lib/reminders';
@@ -264,12 +265,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       void (async () => {
         try {
           const trip = await getActiveTripLite();
-          setActiveTrip(trip);
+          if (!trip) {
+            setActiveTrip(null);
+            return;
+          }
+          const buf = await readLiveTripBuffer();
+          if (buf && buf.tripId === trip.id && buf.distanceKm > trip.distanceKm) {
+            setActiveTrip({ ...trip, distanceKm: buf.distanceKm });
+          } else {
+            setActiveTrip(trip);
+          }
         } catch {
           /* ignore */
         }
       })();
-    }, 10000);
+    }, 4000);
 
     const full = setInterval(() => {
       void refresh();

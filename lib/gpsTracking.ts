@@ -25,9 +25,13 @@ function haversineKm(
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/** Précision max acceptée (m) — plus strict = km plus fiables. */
-export const MAX_ACCURACY_M = 32;
-export const MAX_ACCURACY_FIRST_M = 55;
+/**
+ * Précision max acceptée (m).
+ * 32 m était trop strict : le GPS Android en FGS / arrière-plan est souvent
+ * à 40–80 m → tous les points rejetés, notif allumée, 0 km enregistrés.
+ */
+export const MAX_ACCURACY_M = 85;
+export const MAX_ACCURACY_FIRST_M = 160;
 /** Distance min entre 2 points (km). */
 export const MIN_STEP_KM = 0.006; // 6 m
 /** Vitesse max ~180 km/h + marge GPS. */
@@ -35,7 +39,8 @@ export const MAX_SPEED_MPS = 50;
 export const MIN_DT_MS = 600;
 /** Sous cette vitesse device (m/s), on ignore les micro-déplacements. */
 export const STATIONARY_SPEED_MPS = 0.8;
-export const STATIONARY_MAX_STEP_KM = 0.025; // 25 m
+/** Jitter à l’arrêt (pas un vrai déplacement urbain lent). */
+export const STATIONARY_MAX_STEP_KM = 0.012; // 12 m
 
 export type GpsSample = {
   latitude: number;
@@ -128,14 +133,18 @@ export function evaluateGpsSample(
     return { accept: false, reason: 'too_close', sample };
   }
 
-  // À l’arrêt / embouteillage : le GPS bouge de 10–20 m sans vrai déplacement
-  const deviceSpeed = sample.speed;
+  // Vitesse device < 0 = indisponible (convention Android). Si le capteur dit
+  // 0 m/s mais le déplacement implique > ~8 km/h (fréquent en FGS), on accepte.
+  const deviceSpeed =
+    sample.speed != null && Number.isFinite(sample.speed) && sample.speed >= 0
+      ? sample.speed
+      : null;
+  const impliedKmh = dt > 0 ? distanceKm / (dt / 3_600_000) : 0;
   if (
     deviceSpeed != null &&
-    Number.isFinite(deviceSpeed) &&
-    deviceSpeed >= 0 &&
     deviceSpeed < STATIONARY_SPEED_MPS &&
-    distanceKm < STATIONARY_MAX_STEP_KM
+    distanceKm < STATIONARY_MAX_STEP_KM &&
+    impliedKmh < 8
   ) {
     return { accept: false, reason: 'stationary', sample, distanceKm };
   }

@@ -17,6 +17,12 @@ describe('shouldDeleteShortTrip', () => {
     expect(shouldDeleteShortTrip(1.2)).toBe(false);
   });
 
+  it('conserve un 0 km si le trajet a duré ≥ 5 min', () => {
+    expect(shouldDeleteShortTrip(0, 5)).toBe(false);
+    expect(shouldDeleteShortTrip(0.1, 20)).toBe(false);
+    expect(shouldDeleteShortTrip(0.2, 4.9)).toBe(true);
+  });
+
   it('refuse NaN', () => {
     expect(shouldDeleteShortTrip(Number.NaN)).toBe(false);
   });
