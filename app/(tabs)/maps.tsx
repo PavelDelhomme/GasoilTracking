@@ -34,6 +34,7 @@ import {
 } from '@/lib/recentDestinations';
 import { searchAddressSuggestions, type SuggestHit } from '@/lib/placeSuggest';
 import type { Place } from '@/types';
+import { freeTrackNavParams } from '@/lib/tripNavParams';
 
 export default function MapsScreen() {
   const { colors } = useTheme();
@@ -231,7 +232,15 @@ export default function MapsScreen() {
   }, [navigation, insets.top, onDebouncedQuery, onSubmitSearch, onSearchFocusChange]);
 
   const goFreeTrack = () => {
-    router.push({ pathname: '/(tabs)/trip', params: { mode: 'free', autoStart: '1' } });
+    if (activeTrip) {
+      router.push({ pathname: '/(tabs)/trip', params: { tab: 'live' } });
+      return;
+    }
+    // push (pas replace) : change d’onglet. mode=free gagne même si dest merge.
+    router.push({
+      pathname: '/(tabs)/trip',
+      params: freeTrackNavParams(),
+    });
   };
 
   const goToPlace = (label: string, lat?: number | null, lon?: number | null) => {
@@ -429,7 +438,13 @@ export default function MapsScreen() {
 
         <View style={styles.actions}>
           <Button
-            title={activeVehicle ? 'Démarrer suivi libre' : 'Choisir un véhicule'}
+            title={
+              !activeVehicle
+                ? 'Choisir un véhicule'
+                : activeTrip
+                  ? 'Trajet en cours'
+                  : 'Démarrer suivi libre'
+            }
             onPress={() => {
               if (!activeVehicle) {
                 router.push('/(tabs)/vehicles');

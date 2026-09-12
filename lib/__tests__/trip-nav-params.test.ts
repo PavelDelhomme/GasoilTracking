@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { firstSearchParam, parseTripNavParams } from '@/lib/tripNavParams';
+import {
+  firstSearchParam,
+  freeTrackNavParams,
+  parseTripNavParams,
+} from '@/lib/tripNavParams';
 
 describe('firstSearchParam', () => {
   it('accepte string, tableau expo-router, et vide', () => {
@@ -52,6 +56,44 @@ describe('parseTripNavParams', () => {
     expect(p.mode).toBe('free');
     expect(p.autoStartFree).toBe(true);
     expect(p.prepareNav).toBe(false);
+  });
+
+  it('mode=free gagne même si une dest précédente traîne dans l’URL', () => {
+    const p = parseTripNavParams({
+      mode: 'free',
+      autoStart: '1',
+      dest: 'Parc des expositions',
+      destLat: '47.25',
+      destLon: '-1.53',
+    });
+    expect(p.mode).toBe('free');
+    expect(p.autoStartFree).toBe(true);
+    expect(p.prepareNav).toBe(false);
+    expect(p.dest).toBe('');
+    expect(p.destCoords).toBeNull();
+    expect(p.destKey).toBe('');
+  });
+
+  it('mode=free gagne aussi si dest est un tableau expo-router (merge)', () => {
+    const p = parseTripNavParams({
+      mode: ['free'],
+      autoStart: ['1'],
+      dest: ['Parc des expositions', ''],
+      destLat: ['47.25', ''],
+      destLon: ['-1.53', ''],
+    });
+    expect(p.autoStartFree).toBe(true);
+    expect(p.prepareNav).toBe(false);
+    expect(p.dest).toBe('');
+    expect(p.destCoords).toBeNull();
+  });
+
+  it('freeTrackNavParams force le suivi libre avec un nonce', () => {
+    const p = parseTripNavParams(freeTrackNavParams(42));
+    expect(p.mode).toBe('free');
+    expect(p.autoStartFree).toBe(true);
+    expect(p.prepareNav).toBe(false);
+    expect(freeTrackNavParams(42).r).toBe('42');
   });
 
   it('destLat/destLon vides ne deviennent pas 0,0', () => {

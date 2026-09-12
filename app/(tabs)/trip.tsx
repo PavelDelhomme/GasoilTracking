@@ -113,7 +113,7 @@ import { TripHistoryCard } from '@/components/TripHistoryCard';
 import { reverseGeocode, tripPlaceLabel } from '@/lib/geocode';
 import { evaluateGpsSample } from '@/lib/gpsTracking';
 import { formatDateSlash, formatRelativeDay } from '@/lib/dates';
-import { parseTripNavParams } from '@/lib/tripNavParams';
+import { parseTripNavParams, firstSearchParam } from '@/lib/tripNavParams';
 import { preloadHistoryMaps } from '@/lib/tripMapCache';
 import {
   getRecentDestinations,
@@ -290,6 +290,7 @@ export default function TripScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<TripMapRef>(null);
   const autoStartDone = useRef(false);
+  const startIntentKeyRef = useRef('');
   const appliedNavKeyRef = useRef(incomingNav.destKey);
   const destTouchedRef = useRef(false);
   const resetHandledRef = useRef<string | null>(null);
@@ -460,7 +461,16 @@ export default function TripScreen() {
   useLayoutEffect(() => {
     const parsed = parseTripNavParams(params);
     if (parsed.autoStartFree) {
+      destTouchedRef.current = true;
+      autoStartDone.current = false;
       setStartMode('free');
+      setDestination('');
+      setDestCoords(null);
+      setTripStops([]);
+      setRouteOptions([]);
+      setSelectedRouteId(null);
+      setPlannedRoute([]);
+      setTab('live');
       return;
     }
     if (!parsed.destKey) return;
@@ -480,6 +490,7 @@ export default function TripScreen() {
     params.destLon,
     params.autoStart,
     params.prepare,
+    params.r,
   ]);
 
   /** Panneau maxspeed OSM (Overpass) pendant un trajet actif. */
@@ -531,7 +542,15 @@ export default function TripScreen() {
       }
       const parsed = parseTripNavParams(params);
       if (parsed.autoStartFree) {
+        destTouchedRef.current = true;
+        autoStartDone.current = false;
         setStartMode('free');
+        setDestination('');
+        setDestCoords(null);
+        setTripStops([]);
+        setRouteOptions([]);
+        setPlannedRoute([]);
+        setTab('live');
       } else if (parsed.destKey && appliedNavKeyRef.current !== parsed.destKey) {
         destTouchedRef.current = false;
         appliedNavKeyRef.current = parsed.destKey;
@@ -993,6 +1012,7 @@ export default function TripScreen() {
     }
 
     if (mode === 'nav') persistStartMode('nav');
+    if (mode === 'free') persistStartMode('free');
 
     startingRef.current = true;
     setIsStarting(true);
@@ -1309,21 +1329,33 @@ export default function TripScreen() {
     showToast,
   ]);
 
-  // Maps : démarrer vraiment le suivi libre (GPS + trajet actif)
+  // Maps : démarrer vraiment le suivi libre (GPS + trajet actif).
+  // La clé n’est posée qu’au fire du timeout : un cleanup (Strict Mode / params
+  // qui se stabilisent) ne doit pas bloquer le 2ᵉ essai.
   useEffect(() => {
     const parsed = parseTripNavParams(params);
     if (!parsed.autoStartFree) return;
-    if (autoStartDone.current) return;
     if (!activeVehicle || activeTrip) return;
+    const nonce = firstSearchParam(params.r) || firstSearchParam(params.autoStart);
+    const key = `free:${nonce}`;
+    if (startIntentKeyRef.current === key) return;
     autoStartDone.current = true;
-    persistStartMode('free');
     setTab('live');
     const t = setTimeout(() => {
-      void handleStartTrip({ mode: 'free' });
-    }, 350);
+      if (startIntentKeyRef.current === key) return;
+      startIntentKeyRef.current = key;
+      void handleStartTrip({ mode: 'free', dest: null });
+    }, 80);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handleStartTrip recreates each render
-  }, [params.autoStart, params.mode, params.dest, activeVehicle?.id, activeTrip?.id, persistStartMode]);
+  }, [
+    params.autoStart,
+    params.mode,
+    params.r,
+    params.dest,
+    activeVehicle?.id,
+    activeTrip?.id,
+  ]);
 
   const simAutoKey = useRef<string | null>(null);
   useEffect(() => {
@@ -3476,7 +3508,9 @@ export default function TripScreen() {
                           ? 'Choisissez un itinéraire'
                           : 'Démarrer + Maps'
                 }
-                onPress={handleStartTrip}
+                onPress={() =>
+                  void handleStartTrip(startMode === 'free' ? { mode: 'free', dest: null } : undefined)
+                }
                 loading={isStarting}
                 disabled={
                   startMode === 'nav' &&

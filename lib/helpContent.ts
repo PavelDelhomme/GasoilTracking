@@ -122,7 +122,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: 'maps-tab',
         title: 'Onglet Maps',
         body:
-          'Entrée principale navigation : recherche d’adresse à côté du menu (suggestions stables, lieux / POI, ex. parc des expositions), lieux Maison/Travail & récents, démarrage suivi libre. L’ancien onglet Trajet n’est plus dans la barre (écran conservé pour le guidage en cours, les étapes et l’historique).',
+          'Entrée principale navigation : recherche d’adresse à côté du menu (suggestions stables, lieux / POI, ex. parc des expositions), lieux Maison/Travail & récents, démarrage suivi libre (le GPS démarre même si une destination traînait après une recherche). L’ancien onglet Trajet n’est plus dans la barre (écran conservé pour le guidage en cours, les étapes et l’historique).',
         link: { label: 'Maps', href: '/(tabs)/maps' },
       },
       {
