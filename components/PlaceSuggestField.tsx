@@ -84,6 +84,7 @@ export function PlaceSuggestField({
 }: Props) {
   const { colors } = useTheme();
   const [focused, setFocused] = useState(false);
+  const [draft, setDraft] = useState(value);
   const [remote, setRemote] = useState<SuggestHit[]>([]);
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [recents, setRecents] = useState<RecentDestination[]>([]);
@@ -91,6 +92,10 @@ export function PlaceSuggestField({
   const searchSeq = useRef(0);
   const biasRef = useRef(bias);
   biasRef.current = bias;
+
+  useEffect(() => {
+    if (!focused) setDraft(value);
+  }, [value, focused]);
 
   useEffect(() => {
     void getRecentDestinations(8).then(setRecents);
@@ -108,8 +113,10 @@ export function PlaceSuggestField({
     return list.slice(0, 8);
   }, [places, preferKinds]);
 
+  const queryText = focused ? draft : value;
+
   const recentHits = useMemo(() => {
-    const q = value.trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+    const q = queryText.trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
     const scored = recents
       .map((r) => {
         const label = r.label.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
@@ -125,20 +132,20 @@ export function PlaceSuggestField({
       .slice(0, 5)
       .map((x) => x.r);
     return scored;
-  }, [recents, value]);
+  }, [recents, queryText]);
 
   const placeSuggestions = useMemo(() => {
-    const filtered = places.filter((p) => matchesQuery(p, value)).slice(0, 8);
+    const filtered = places.filter((p) => matchesQuery(p, queryText)).slice(0, 8);
     if (filtered.length) return filtered;
-    if (!value.trim()) return quick.slice(0, 6);
+    if (!queryText.trim()) return quick.slice(0, 6);
     return [];
-  }, [places, value, quick]);
+  }, [places, queryText, quick]);
 
   useEffect(() => {
     if (!enableRemoteSuggest || !focused) {
       return;
     }
-    const q = value.trim();
+    const q = queryText.trim();
     if (q.length < 3) {
       setRemote([]);
       setRemoteLoading(false);
@@ -161,16 +168,18 @@ export function PlaceSuggestField({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [value, focused, enableRemoteSuggest]);
+  }, [queryText, focused, enableRemoteSuggest]);
 
   const pickPlace = (p: Place) => {
-    onChangeText(placeLabel(p));
+    const next = placeLabel(p);
+    setDraft(next);
+    onChangeText(next);
     onPickPlace?.(p);
     if (p.latitude != null && p.longitude != null) {
       onPickCoords?.({
         latitude: p.latitude,
         longitude: p.longitude,
-        label: placeLabel(p),
+        label: next,
       });
     }
     setFocused(false);
@@ -178,6 +187,7 @@ export function PlaceSuggestField({
 
   const pickRemote = (h: SuggestHit) => {
     const labelText = h.subtitle && h.source === 'contact' ? `${h.label} — ${h.subtitle}` : h.label;
+    setDraft(labelText);
     onChangeText(labelText);
     if (h.latitude != null && h.longitude != null) {
       onPickCoords?.({ latitude: h.latitude, longitude: h.longitude, label: labelText });
@@ -188,11 +198,23 @@ export function PlaceSuggestField({
   };
 
   const pickRecent = (r: RecentDestination) => {
+    setDraft(r.label);
     onChangeText(r.label);
     if (r.latitude != null && r.longitude != null) {
       onPickCoords?.({ latitude: r.latitude, longitude: r.longitude, label: r.label });
     }
     setFocused(false);
+  };
+
+  const emitText = (t: string) => {
+    const expanded = expandAlias(t, places);
+    setDraft(expanded);
+    onChangeText(expanded);
+    if (expanded !== t) {
+      const match = places.find((p) => placeLabel(p) === expanded);
+      if (match) pickPlace(match);
+    }
+    setFocused(true);
   };
 
   const showList = focused;
@@ -201,16 +223,11 @@ export function PlaceSuggestField({
     <View style={styles.wrap}>
       <Input
         label={label}
-        value={value}
-        onChangeText={(t) => {
-          const expanded = expandAlias(t, places);
-          onChangeText(expanded);
-          if (expanded !== t) {
-            const match = places.find((p) => placeLabel(p) === expanded);
-            if (match) pickPlace(match);
-          }
-          setFocused(true);
-        }}
+        value={draft}
+        clearable
+        autoCorrect={false}
+        autoCapitalize="sentences"
+        onChangeText={emitText}
         placeholder={placeholder}
         onFocus={() => setFocused(true)}
         onBlur={() => setTimeout(() => setFocused(false), 220)}

@@ -21,6 +21,8 @@ interface InputProps extends TextInputProps {
   onRequestEdit?: () => void;
   /** Texte d’aide sous le champ */
   hint?: string;
+  /** Croix pour vider le champ */
+  clearable?: boolean;
 }
 
 export function Input({
@@ -32,6 +34,7 @@ export function Input({
   locked,
   onRequestEdit,
   hint,
+  clearable,
   ...props
 }: InputProps) {
   const { colors } = useTheme();
@@ -39,6 +42,9 @@ export function Input({
   const isPassword = Boolean(passwordToggle || secureTextEntry);
   const hide = isPassword && !visible;
   const showPencil = locked != null && onRequestEdit;
+  const text = typeof props.value === 'string' ? props.value : '';
+  const showClear = Boolean(clearable && text.length > 0 && !locked && !isPassword);
+  const hasRightIcon = isPassword || showPencil || showClear;
 
   return (
     <View style={styles.container}>
@@ -49,7 +55,7 @@ export function Input({
           editable={locked ? false : props.editable !== false}
           style={[
             styles.input,
-            (isPassword || showPencil) && styles.inputWithIcon,
+            hasRightIcon && styles.inputWithIcon,
             {
               backgroundColor: locked ? colors.border + '55' : colors.card,
               borderColor: error ? colors.danger : colors.border,
@@ -63,6 +69,16 @@ export function Input({
           autoCapitalize={isPassword ? 'none' : props.autoCapitalize}
           accessibilityLabel={props.accessibilityLabel ?? label}
         />
+        {showClear && (
+          <TouchableOpacity
+            style={styles.eye}
+            onPress={() => props.onChangeText?.('')}
+            accessibilityLabel="Effacer"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+        )}
         {isPassword && (
           <TouchableOpacity
             style={styles.eye}

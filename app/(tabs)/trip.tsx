@@ -291,6 +291,7 @@ export default function TripScreen() {
   const mapRef = useRef<TripMapRef>(null);
   const autoStartDone = useRef(false);
   const appliedNavKeyRef = useRef(incomingNav.destKey);
+  const destTouchedRef = useRef(false);
   const resetHandledRef = useRef<string | null>(null);
   const [tab, setTab] = useState<TripTab>('live');
   const [startMode, setStartMode] = useState<StartMode>(
@@ -464,6 +465,7 @@ export default function TripScreen() {
     }
     if (!parsed.destKey) return;
     if (appliedNavKeyRef.current === parsed.destKey) return;
+    destTouchedRef.current = false;
     appliedNavKeyRef.current = parsed.destKey;
     autoStartDone.current = false;
     setStartMode('nav');
@@ -531,6 +533,7 @@ export default function TripScreen() {
       if (parsed.autoStartFree) {
         setStartMode('free');
       } else if (parsed.destKey && appliedNavKeyRef.current !== parsed.destKey) {
+        destTouchedRef.current = false;
         appliedNavKeyRef.current = parsed.destKey;
         autoStartDone.current = false;
         setDestination(parsed.dest);
@@ -930,9 +933,19 @@ export default function TripScreen() {
         ...(extraStop ? [extraStop] : []),
         ...stopCoords(tripStopsRef.current),
       ].filter((s) => Number.isFinite(s.latitude) && Number.isFinite(s.longitude));
+      const originOk =
+        origin &&
+        Number.isFinite(origin.latitude) &&
+        Number.isFinite(origin.longitude) &&
+        !(
+          Math.abs(origin.latitude - dest.latitude) < 0.00025 &&
+          Math.abs(origin.longitude - dest.longitude) < 0.00025
+        )
+          ? origin
+          : null;
       return launchGoogleMapsNavigation({
         destination: dest,
-        origin: origin ?? null,
+        origin: originOk,
         waypoints: stops.length ? stops : undefined,
         waypointMode: stops.length ? 'stop' : undefined,
         label,
@@ -2695,6 +2708,8 @@ export default function TripScreen() {
 
           <ScrollView
             style={styles.panel}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             contentContainerStyle={[
               styles.panelContent,
               !activeTrip && activeVehicle ? { paddingBottom: 120 + insets.bottom } : null,
@@ -3152,11 +3167,14 @@ export default function TripScreen() {
                         value={destination}
                         bias={userLocation}
                         onChangeText={(t) => {
+                          destTouchedRef.current = true;
                           setDestination(t);
-                          setDestCoords(null);
-                          setRouteOptions([]);
-                          setSelectedRouteId(null);
-                          setPlannedRoute([]);
+                          if (!t.trim()) {
+                            setDestCoords(null);
+                            setRouteOptions([]);
+                            setSelectedRouteId(null);
+                            setPlannedRoute([]);
+                          }
                         }}
                         places={places}
                         onPickPlace={(p) => {
