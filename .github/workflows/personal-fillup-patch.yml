@@ -1,0 +1,43 @@
+name: Patch plein perso (cloud)
+
+# One-shot : plein 206 Intermarché La Guerche + trajet du 12/09 si absent.
+# Ne rebuild PAS l’APK. Idempotent.
+
+on:
+  push:
+    branches: [prod]
+    paths:
+      - 'scripts/ci/personal-fillup-once.json'
+      - '.github/workflows/personal-fillup-patch.yml'
+  workflow_dispatch:
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Attendre l’API puis enregistrer le plein
+        env:
+          TOKEN: ${{ secrets.RELEASE_UPLOAD_TOKEN }}
+        run: |
+          set -euo pipefail
+          BODY="$(cat scripts/ci/personal-fillup-once.json)"
+          URL="https://gasoil-tracking.delhomme.ovh/api/ci/personal-fillup"
+          for i in $(seq 1 30); do
+            HTTP=$(curl -sS -o /tmp/patch.json -w "%{http_code}" -X POST "$URL" \
+              -H "X-Release-Token: $TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "$BODY" || true)
+            echo "try $i → HTTP $HTTP"
+            cat /tmp/patch.json || true
+            echo
+            if [ "$HTTP" = "200" ]; then
+              node -e "const j=JSON.parse(require('fs').readFileSync('/tmp/patch.json','utf8')); if(!j.ok) process.exit(1); console.log('OK', j.already?'already':'added', 'fill', j.fillUpId, 'L', j.liters, '€', j.totalCost, 'fuel', j.estimatedFuelLiters, 'trip', j.tripId);"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "Échec après retries"
+          exit 1

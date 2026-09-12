@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyPersonalCommute,
+  applyPersonalFillUp,
   downsampleCoords,
   localDayIso,
 } from './personalCommute.js';
@@ -54,6 +55,56 @@ describe('applyPersonalCommute', () => {
     expect(second.already).toBe(true);
     expect(second.snapshot.trips).toHaveLength(1);
     expect(second.snapshot.vehicles[0].estimatedFuelLiters).toBe(12.5);
+  });
+
+  it('ne remet pas la jauge à 1/4 si le trajet existe déjà après un plein', () => {
+    const first = applyPersonalCommute({ vehicles: [vehicle], trips: [], places: [] }, route);
+    first.snapshot.vehicles[0].estimatedFuelLiters = 50;
+    const second = applyPersonalCommute(first.snapshot, route);
+    expect(second.already).toBe(true);
+    expect(second.snapshot.vehicles[0].estimatedFuelLiters).toBe(50);
+  });
+});
+
+describe('applyPersonalFillUp', () => {
+  it('ajoute le plein Intermarché et met le réservoir plein', () => {
+    const r = applyPersonalFillUp(
+      { vehicles: [vehicle], trips: [], places: [], fillUps: [] },
+      route,
+      {
+        fillUp: {
+          liters: 34.62,
+          totalCost: 75.09,
+          isFull: true,
+          stationName: 'Intermarché La Guerche de Bretagne',
+        },
+      }
+    );
+    expect(r.ok).toBe(true);
+    expect(r.already).toBe(false);
+    expect(r.liters).toBe(34.62);
+    expect(r.totalCost).toBe(75.09);
+    expect(r.pricePerLiter).toBe(2.169);
+    expect(r.estimatedFuelLiters).toBe(50);
+    expect(r.snapshot.fillUps).toHaveLength(1);
+    expect(r.snapshot.trips).toHaveLength(1);
+    expect(r.snapshot.fillUps[0].note).toMatch(/Intermarché/);
+    expect(r.snapshot.trips[0].fillUpId).toBe(r.fillUpId);
+    expect(r.snapshot.vehicles[0].defaultFuelPrice).toBe(2.169);
+  });
+
+  it('ne duplique pas le même plein', () => {
+    const first = applyPersonalFillUp(
+      { vehicles: [vehicle], trips: [], places: [], fillUps: [] },
+      route,
+      { fillUp: { liters: 34.62, totalCost: 75.09, isFull: true } }
+    );
+    const second = applyPersonalFillUp(first.snapshot, route, {
+      fillUp: { liters: 34.62, totalCost: 75.09, isFull: true },
+    });
+    expect(second.already).toBe(true);
+    expect(second.snapshot.fillUps).toHaveLength(1);
+    expect(second.estimatedFuelLiters).toBe(50);
   });
 });
 
