@@ -6,6 +6,12 @@
 export const HOME = { latitude: 48.1571969, longitude: -1.586983 };
 export const WORK = { latitude: 47.9483893, longitude: -1.2237387 };
 export const VIA = { latitude: 48.04867, longitude: -1.50282 };
+/** Aire / bourg Forges-la-Forêt (35640), sur la route La Guerche → Nantes. */
+export const FORGES = { latitude: 47.8619159, longitude: -1.2793479 };
+/** Carrefour Nantes La Beaujoire — Route de Paris / av. Flora Tristan. */
+export const CARREFOUR_BEAUJOIRE = { latitude: 47.257706, longitude: -1.50968 };
+/** Parc des expositions de la Beaujoire. */
+export const EXPO_BEAUJOIRE = { latitude: 47.2584968, longitude: -1.532388 };
 
 export const DEFAULT_OPTS = {
   email: 'paveldelhomme@gmail.com',
@@ -72,8 +78,8 @@ export function addMinutesIso(iso, minutes) {
   return new Date(new Date(iso).getTime() + minutes * 60_000).toISOString();
 }
 
-export async function fetchCommuteRoute() {
-  const path = `${HOME.longitude},${HOME.latitude};${VIA.longitude},${VIA.latitude};${WORK.longitude},${WORK.latitude}`;
+export async function fetchOsrmRoute(points) {
+  const path = (points || []).map((p) => `${p.longitude},${p.latitude}`).join(';');
   const url = `https://router.project-osrm.org/route/v1/driving/${path}?overview=full&geometries=geojson`;
   const res = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(`OSRM HTTP ${res.status}`);
@@ -89,6 +95,19 @@ export async function fetchCommuteRoute() {
     durationMinutes: Math.max(1, Math.round(route.duration / 60)),
     coordinates: downsampleCoords(coordinates, 180),
   };
+}
+
+/** Aller direct domicile → Intermarché (~49 km, sans le via Rennes). */
+export async function fetchCommuteRoute() {
+  return fetchOsrmRoute([HOME, WORK]);
+}
+
+export async function fetchAfternoonRoutes() {
+  const [beaujoire, expo] = await Promise.all([
+    fetchOsrmRoute([WORK, FORGES, CARREFOUR_BEAUJOIRE]),
+    fetchOsrmRoute([CARREFOUR_BEAUJOIRE, EXPO_BEAUJOIRE]),
+  ]);
+  return { beaujoire, expo };
 }
 
 function ensurePlaces(snapshot, opts) {
@@ -160,7 +179,10 @@ export function applyPersonalCommute(snapshot, route, extra = {}) {
   const tank = Number(vehicle.tankCapacity) > 0 ? Number(vehicle.tankCapacity) : 50;
   const liters = Math.round(tank * opts.fuelFraction * 10) / 10;
   if (opts.odometerKm != null) {
-    vehicle.currentOdometer = opts.odometerKm;
+    const next = Number(opts.odometerKm);
+    if (!(Number(vehicle.currentOdometer) > next)) {
+      vehicle.currentOdometer = next;
+    }
   }
   const vi = vehicles.findIndex((v) => v.id === vehicle.id);
   vehicles[vi] = vehicle;
@@ -168,12 +190,16 @@ export function applyPersonalCommute(snapshot, route, extra = {}) {
   const { places, created: placesCreated } = ensurePlaces(data, opts);
 
   if (alreadyHasCommute(trips, vehicle.id, opts.day)) {
-    const existing = trips.find(
+    const existingIdx = trips.findIndex(
       (t) =>
         Number(t.vehicleId) === Number(vehicle.id) &&
         String(t.startTime || '').slice(0, 10) === opts.day &&
         /guerche|inter/i.test(`${t.destinationName || ''}${t.originName || ''}`)
     );
+    const existing = existingIdx >= 0 ? trips[existingIdx] : null;
+    if (existing && opts.distanceKm != null && Math.abs(Number(existing.distanceKm) - Number(opts.distanceKm)) > 0.6) {
+      trips[existingIdx] = { ...existing, distanceKm: Number(opts.distanceKm) };
+    }
     return {
       ok: true,
       already: true,
@@ -187,6 +213,7 @@ export function applyPersonalCommute(snapshot, route, extra = {}) {
       snapshot: {
         ...data,
         vehicles,
+        trips,
         places,
         exportedAt: new Date().toISOString(),
       },
@@ -194,8 +221,8 @@ export function applyPersonalCommute(snapshot, route, extra = {}) {
   }
 
   const startIso = localDayIso(opts.day, opts.startLocal);
-  const durationMin = route?.durationMinutes || 53;
-  const distanceKm = route?.distanceKm || 44.7;
+  const durationMin = opts.durationMinutes || route?.durationMinutes || 44;
+  const distanceKm = opts.distanceKm != null ? Number(opts.distanceKm) : route?.distanceKm || 49;
   const startMs = new Date(startIso).getTime();
   const coords = route?.coordinates?.length >= 2 ? route.coordinates : [HOME, WORK];
   const stamped = stampRoute(coords, startMs, durationMin * 60_000);
@@ -277,9 +304,183 @@ function tripKmSince(trips, vehicleId, sinceIso) {
     .reduce((acc, t) => acc + (Number(t.distanceKm) || 0), 0);
 }
 
+function estimateTrip(vehicle, distanceKm) {
+  const cons = Number(vehicle.consumptionPer100) > 0 ? Number(vehicle.consumptionPer100) : 5.2;
+  const learn = Number(vehicle.consumptionLearnFactor) > 0 ? Number(vehicle.consumptionLearnFactor) : 1;
+  const fuel = Math.round(cons * learn * (distanceKm / 100) * 100) / 100;
+  const price = Number(vehicle.defaultFuelPrice) > 0 ? Number(vehicle.defaultFuelPrice) : 1.8;
+  return { fuel, cost: Math.round(fuel * price * 100) / 100 };
+}
+
+function tripMatchesLeg(t, vehicleId, day, originRe, destRe) {
+  if (Number(t.vehicleId) !== Number(vehicleId)) return false;
+  if (String(t.startTime || '').slice(0, 10) !== day) return false;
+  return originRe.test(`${t.originName || ''}`) && destRe.test(`${t.destinationName || ''}`);
+}
+
+function ensureNamedPlace(places, spec) {
+  const re = spec.match instanceof RegExp ? spec.match : new RegExp(spec.match || spec.name, 'i');
+  const idx = places.findIndex((p) => re.test(`${p.name || ''} ${p.address || ''}`));
+  if (idx >= 0) {
+    const cur = places[idx];
+    places[idx] = {
+      ...cur,
+      latitude: cur.latitude ?? spec.latitude,
+      longitude: cur.longitude ?? spec.longitude,
+      address: cur.address || spec.address,
+    };
+    return places[idx];
+  }
+  const place = {
+    id: nextId(places),
+    name: spec.name,
+    address: spec.address,
+    kind: spec.kind || 'other',
+    latitude: spec.latitude,
+    longitude: spec.longitude,
+    createdAt: new Date().toISOString(),
+  };
+  places.push(place);
+  return place;
+}
+
+/**
+ * Aller Intermarché → Carrefour Beaujoire (via Forges) + 3,5 km vers le parc expo.
+ */
+export function applyAfternoonTrips(snapshot, extra = {}) {
+  const legs = Array.isArray(extra.afternoon) ? extra.afternoon : [];
+  const data = snapshot && typeof snapshot === 'object' ? { ...snapshot } : {};
+  if (!legs.length) {
+    return { ok: true, added: 0, kmAdded: 0, snapshot: data };
+  }
+  const vehicles = Array.isArray(data.vehicles) ? data.vehicles.map((v) => ({ ...v })) : [];
+  const trips = Array.isArray(data.trips) ? [...data.trips] : [];
+  const places = Array.isArray(data.places) ? [...data.places] : [];
+  const vehicle =
+    vehicles.find((v) => is206(v) && v.isActive !== false) || vehicles.find(is206);
+  if (!vehicle) {
+    return { ok: false, reason: 'vehicle-206-missing', added: 0, kmAdded: 0, snapshot: data };
+  }
+
+  const day = extra.day || DEFAULT_OPTS.day;
+  const routes = extra.afternoonRoutes || {};
+  let added = 0;
+  let kmAdded = 0;
+  let fuelUsed = 0;
+
+  ensureNamedPlace(places, {
+    name: 'Aire de repos Forges-la-Forêt',
+    address: 'Forges-la-Forêt, 35640',
+    kind: 'other',
+    latitude: FORGES.latitude,
+    longitude: FORGES.longitude,
+    match: /forges-la-for[eê]t/i,
+  });
+  ensureNamedPlace(places, {
+    name: 'Carrefour Nantes La Beaujoire',
+    address: 'Route de Paris, 44300 Nantes',
+    kind: 'other',
+    latitude: CARREFOUR_BEAUJOIRE.latitude,
+    longitude: CARREFOUR_BEAUJOIRE.longitude,
+    match: /carrefour/i,
+  });
+  ensureNamedPlace(places, {
+    name: 'Parc des expositions de la Beaujoire',
+    address: 'Route de Saint-Joseph de Porterie, 44300 Nantes',
+    kind: 'other',
+    latitude: EXPO_BEAUJOIRE.latitude,
+    longitude: EXPO_BEAUJOIRE.longitude,
+    match: /expo|exposition/i,
+  });
+
+  for (const leg of legs) {
+    const originRe = new RegExp(leg.originRe || '.', 'i');
+    const destRe = new RegExp(leg.destRe || '.', 'i');
+    if (trips.some((t) => tripMatchesLeg(t, vehicle.id, day, originRe, destRe))) {
+      continue;
+    }
+    const route = routes[leg.key] || {};
+    const distanceKm = Number(leg.distanceKm) || route.distanceKm || 0;
+    if (!(distanceKm > 0)) continue;
+    const durationMin =
+      Number(leg.durationMinutes) || route.durationMinutes || Math.max(1, Math.round(distanceKm * 1.1));
+    const startIso = localDayIso(day, leg.startLocal || '13:00');
+    const coords = route.coordinates?.length >= 2 ? route.coordinates : [];
+    const stamped =
+      coords.length >= 2 ? stampRoute(coords, new Date(startIso).getTime(), durationMin * 60_000) : [];
+    const { fuel, cost } = estimateTrip(vehicle, distanceKm);
+    trips.push({
+      id: nextId(trips),
+      vehicleId: vehicle.id,
+      startTime: startIso,
+      endTime: addMinutesIso(startIso, durationMin),
+      distanceKm,
+      estimatedFuelUsed: fuel,
+      estimatedCost: cost,
+      routePoints: JSON.stringify(stamped),
+      originName: leg.originName,
+      destinationName: leg.destinationName,
+      isActive: false,
+      isPaused: false,
+      status: 'confirmed',
+      source: 'manual',
+      fillUpId: null,
+      note: leg.note || 'Saisie cloud — 12 sept. 2026',
+    });
+    added += 1;
+    kmAdded += distanceKm;
+    fuelUsed += fuel;
+  }
+
+  if (added > 0) {
+    const tank = Number(vehicle.tankCapacity) > 0 ? Number(vehicle.tankCapacity) : 50;
+    vehicle.currentOdometer =
+      Math.round((Number(vehicle.currentOdometer || 0) + kmAdded) * 10) / 10;
+    vehicle.estimatedFuelLiters = Math.max(
+      0,
+      Math.round((Number(vehicle.estimatedFuelLiters || 0) - fuelUsed) * 10) / 10
+    );
+    if (vehicle.estimatedFuelLiters > tank) vehicle.estimatedFuelLiters = tank;
+    const vi = vehicles.findIndex((v) => v.id === vehicle.id);
+    vehicles[vi] = vehicle;
+  }
+
+  return {
+    ok: true,
+    added,
+    kmAdded,
+    snapshot: {
+      ...data,
+      schema: data.schema || 1,
+      exportedAt: new Date().toISOString(),
+      vehicles,
+      trips,
+      places,
+      fillUps: data.fillUps,
+    },
+  };
+}
+
+function finishFillUp(result, extra) {
+  const after = applyAfternoonTrips(result.snapshot, extra);
+  if (!after.ok) return after;
+  const v =
+    (after.snapshot.vehicles || []).find((x) => is206(x) && x.isActive !== false) ||
+    (after.snapshot.vehicles || []).find(is206);
+  return {
+    ...result,
+    already: Boolean(result.already) && after.added === 0,
+    afternoonAdded: after.added,
+    afternoonKm: after.kmAdded,
+    estimatedFuelLiters: v?.estimatedFuelLiters ?? result.estimatedFuelLiters,
+    odometerKm: v?.currentOdometer ?? result.odometerKm,
+    snapshot: after.snapshot,
+  };
+}
+
 /**
  * Plein réel 206 + trajet domicile → Intermarché si absent.
- * Ne remet jamais la jauge à 1/4.
+ * Ne remet jamais la jauge à 1/4. Ajoute l’après-midi Nantes si `extra.afternoon`.
  */
 export function applyPersonalFillUp(snapshot, route, extra = {}) {
   const fill = extra.fillUp && typeof extra.fillUp === 'object' ? extra.fillUp : extra;
@@ -322,34 +523,53 @@ export function applyPersonalFillUp(snapshot, route, extra = {}) {
     ) || null;
 
   if (alreadyHasFillUp(fillUps, vehicle.id, day, liters, totalCost)) {
-    vehicle.estimatedFuelLiters = isFull ? tank : vehicle.estimatedFuelLiters;
     vehicle.defaultFuelPrice = pricePerLiter;
+    const afternoonSpec = Array.isArray(extra.afternoon) && extra.afternoon.length;
+    const afternoonAlready =
+      afternoonSpec &&
+      extra.afternoon.every((leg) =>
+        trips.some((t) =>
+          tripMatchesLeg(
+            t,
+            vehicle.id,
+            day,
+            new RegExp(leg.originRe || '.', 'i'),
+            new RegExp(leg.destRe || '.', 'i')
+          )
+        )
+      );
+    if (isFull && (!afternoonSpec || !afternoonAlready)) {
+      vehicle.estimatedFuelLiters = tank;
+    }
     const vi = vehicles.findIndex((v) => v.id === vehicle.id);
     vehicles[vi] = vehicle;
-    return {
-      ok: true,
-      already: true,
-      reason: 'fillup-already-present',
-      vehicleId: vehicle.id,
-      tripId: dayTrip?.id ?? commute.tripId,
-      fillUpId: fillUps.find(
-        (f) =>
-          Number(f.vehicleId) === Number(vehicle.id) &&
-          String(f.date || '').slice(0, 10) === day
-      )?.id,
-      liters,
-      totalCost,
-      pricePerLiter,
-      estimatedFuelLiters: vehicle.estimatedFuelLiters,
-      odometerKm: vehicle.currentOdometer,
-      snapshot: {
-        ...data,
-        vehicles,
-        fillUps,
-        trips,
-        exportedAt: new Date().toISOString(),
+    return finishFillUp(
+      {
+        ok: true,
+        already: true,
+        reason: 'fillup-already-present',
+        vehicleId: vehicle.id,
+        tripId: dayTrip?.id ?? commute.tripId,
+        fillUpId: fillUps.find(
+          (f) =>
+            Number(f.vehicleId) === Number(vehicle.id) &&
+            String(f.date || '').slice(0, 10) === day
+        )?.id,
+        liters,
+        totalCost,
+        pricePerLiter,
+        estimatedFuelLiters: vehicle.estimatedFuelLiters,
+        odometerKm: vehicle.currentOdometer,
+        snapshot: {
+          ...data,
+          vehicles,
+          fillUps,
+          trips,
+          exportedAt: new Date().toISOString(),
+        },
       },
-    };
+      extra
+    );
   }
 
   const prevFill = lastFillForVehicle(fillUps, vehicle.id);
@@ -384,34 +604,37 @@ export function applyPersonalFillUp(snapshot, route, extra = {}) {
         Math.round(((Number(vehicle.estimatedFuelLiters) || 0) + liters) * 10) / 10
       );
   vehicle.defaultFuelPrice = pricePerLiter;
-  if (odometer != null) {
+  if (odometer != null && !(Number(vehicle.currentOdometer) > Number(odometer))) {
     vehicle.currentOdometer = odometer;
     vehicle.trackedKm = 0;
   }
   const vi = vehicles.findIndex((v) => v.id === vehicle.id);
   vehicles[vi] = vehicle;
 
-  return {
-    ok: true,
-    already: false,
-    reason: commute.already ? 'trip-already-present' : 'trip-and-fillup-added',
-    vehicleId: vehicle.id,
-    tripId: dayTrip?.id ?? commute.tripId,
-    fillUpId: fillUp.id,
-    liters,
-    totalCost,
-    pricePerLiter,
-    distanceKm: dayTrip?.distanceKm ?? commute.distanceKm,
-    estimatedFuelLiters: vehicle.estimatedFuelLiters,
-    odometerKm: vehicle.currentOdometer,
-    snapshot: {
-      ...data,
-      schema: data.schema || 1,
-      exportedAt: new Date().toISOString(),
-      vehicles,
-      trips,
-      fillUps,
-      places: data.places,
+  return finishFillUp(
+    {
+      ok: true,
+      already: false,
+      reason: commute.already ? 'trip-already-present' : 'trip-and-fillup-added',
+      vehicleId: vehicle.id,
+      tripId: dayTrip?.id ?? commute.tripId,
+      fillUpId: fillUp.id,
+      liters,
+      totalCost,
+      pricePerLiter,
+      distanceKm: dayTrip?.distanceKm ?? commute.distanceKm,
+      estimatedFuelLiters: vehicle.estimatedFuelLiters,
+      odometerKm: vehicle.currentOdometer,
+      snapshot: {
+        ...data,
+        schema: data.schema || 1,
+        exportedAt: new Date().toISOString(),
+        vehicles,
+        trips,
+        fillUps,
+        places: data.places,
+      },
     },
-  };
+    extra
+  );
 }

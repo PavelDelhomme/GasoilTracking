@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   applyPersonalCommute,
@@ -5,6 +8,13 @@ import {
   downsampleCoords,
   localDayIso,
 } from './personalCommute.js';
+
+const fillSpec = JSON.parse(
+  fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '../../scripts/ci/personal-fillup-once.json'),
+    'utf8'
+  )
+);
 
 const vehicle = {
   id: 3,
@@ -105,6 +115,42 @@ describe('applyPersonalFillUp', () => {
     expect(second.already).toBe(true);
     expect(second.snapshot.fillUps).toHaveLength(1);
     expect(second.estimatedFuelLiters).toBe(50);
+  });
+
+  it('applique le JSON CI (plein + 49 km + 82 km + 3,5 km)', () => {
+    expect(fillSpec.fillUp.liters).toBe(34.62);
+    expect(fillSpec.fillUp.totalCost).toBe(75.09);
+    expect(fillSpec.distanceKm).toBe(49);
+    const r = applyPersonalFillUp(
+      { vehicles: [vehicle], trips: [], places: [], fillUps: [] },
+      route,
+      fillSpec
+    );
+    expect(r.ok).toBe(true);
+    expect(r.snapshot.trips).toHaveLength(3);
+    expect(r.snapshot.trips[0].startTime).toBe('2026-09-12T11:55:00+02:00');
+    expect(r.snapshot.trips[0].distanceKm).toBe(49);
+    expect(r.snapshot.trips[1].distanceKm).toBe(82);
+    expect(r.snapshot.trips[1].destinationName).toMatch(/Carrefour/);
+    expect(r.snapshot.trips[2].distanceKm).toBe(3.5);
+    expect(r.snapshot.trips[2].destinationName).toMatch(/expo/i);
+    expect(r.snapshot.fillUps[0].date).toBe('2026-09-12T12:50:00+02:00');
+    expect(r.snapshot.vehicles[0].currentOdometer).toBe(121660.5);
+    expect(r.snapshot.vehicles[0].estimatedFuelLiters).toBe(44.4);
+    expect(r.afternoonAdded).toBe(2);
+  });
+
+  it('ne duplique pas les trajets de l’après-midi', () => {
+    const first = applyPersonalFillUp(
+      { vehicles: [vehicle], trips: [], places: [], fillUps: [] },
+      route,
+      fillSpec
+    );
+    const second = applyPersonalFillUp(first.snapshot, route, fillSpec);
+    expect(second.snapshot.trips).toHaveLength(3);
+    expect(second.afternoonAdded).toBe(0);
+    expect(second.snapshot.vehicles[0].currentOdometer).toBe(121660.5);
+    expect(second.snapshot.vehicles[0].estimatedFuelLiters).toBe(44.4);
   });
 });
 

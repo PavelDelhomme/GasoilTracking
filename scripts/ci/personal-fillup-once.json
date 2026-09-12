@@ -4,13 +4,39 @@
   "odometerKm": 121575,
   "day": "2026-09-12",
   "startLocal": "11:55",
+  "durationMinutes": 44,
+  "distanceKm": 49,
   "originName": "Domicile — 1 Rue Camille Saint-Saëns, Thorigné-Fouillard",
-  "destinationName": "Intermarché La Guerche de Bretagne",
+  "destinationName": "Intermarché Super La Guerche de Bretagne",
   "fillUpAt": "2026-09-12T12:50:00+02:00",
   "fillUp": {
     "liters": 34.62,
     "totalCost": 75.09,
     "isFull": true,
-    "stationName": "Intermarché La Guerche de Bretagne"
-  }
+    "stationName": "Intermarché Super La Guerche de Bretagne"
+  },
+  "afternoon": [
+    {
+      "key": "beaujoire",
+      "startLocal": "13:20",
+      "distanceKm": 82,
+      "durationMinutes": 92,
+      "originName": "Intermarché Super La Guerche de Bretagne",
+      "destinationName": "Carrefour Nantes La Beaujoire",
+      "originRe": "guerche|inter",
+      "destRe": "carrefour",
+      "note": "Après le plein — Intermarché La Guerche → aire de repos Forges-la-Forêt (35640, ~12 km) → Carrefour Nantes La Beaujoire (82 km depuis l’Intermarché)"
+    },
+    {
+      "key": "expo",
+      "startLocal": "14:55",
+      "distanceKm": 3.5,
+      "durationMinutes": 6,
+      "originName": "Carrefour Nantes La Beaujoire",
+      "destinationName": "Parc des expositions de la Beaujoire",
+      "originRe": "carrefour",
+      "destRe": "expo|exposition",
+      "note": "Carrefour Beaujoire → Parc des expositions de la Beaujoire (3,5 km)"
+    }
+  ]
 }

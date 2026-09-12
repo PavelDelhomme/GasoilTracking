@@ -7,10 +7,17 @@ import {
   updateFillUp,
   updateVehicle,
   createFillUp,
+  createTrip,
+  updateTrip,
   deactivateVehicleScopedBudgets,
 } from '@/lib/database';
 import { litersFromTicket } from '@/lib/fuelPrices';
-import { hasMatchingFillUp, INTERMARCHE_GUERCHE_FILL } from '@/lib/intermarcheFillUp';
+import {
+  hasMatchingFillUp,
+  hasMatchingTrip,
+  INTERMARCHE_GUERCHE_FILL,
+  PERSONAL_DAY_TRIPS_2026_09_12,
+} from '@/lib/intermarcheFillUp';
 
 /** Gazole TotalEnergies Thorigné-Fouillard (open data ~2,250 €/L, maj août 2026). */
 export const TOTAL_THORIGNE_GAZOLE_EUR = 2.25;
@@ -214,13 +221,13 @@ export async function repairFillUpVehiclesAndBudgets(): Promise<{
       } catch {
         /* ignore */
       }
-      await createFillUp({
+      const fillId = await createFillUp({
         vehicleId: v206.id,
         date: `${spec.day}T12:50:00+02:00`,
         liters: spec.liters,
         pricePerLiter: spec.pricePerLiter,
         totalCost: spec.totalCost,
-        odometer: v206.hasOdometer ? v206.currentOdometer : null,
+        odometer: v206.hasOdometer ? 121575 : null,
         distanceSinceLastKm,
         isFull: true,
         note: `Plein ${spec.stationName} — ${spec.liters.toFixed(2)} L · ${spec.totalCost.toFixed(2)} €`,
@@ -231,6 +238,62 @@ export async function repairFillUpVehiclesAndBudgets(): Promise<{
         estimatedFuelLiters: v206.tankCapacity,
         defaultFuelPrice: spec.pricePerLiter,
       });
+      levelsFixed += 1;
+      if (fillId) {
+        try {
+          const trips = await getTrips(v206.id);
+          const commute = trips.find(
+            (t) =>
+              t.vehicleId === v206.id &&
+              String(t.startTime).slice(0, 10) === spec.day &&
+              /guerche|inter/i.test(t.destinationName || '')
+          );
+          if (commute && commute.fillUpId == null) {
+            await updateTrip(commute.id, { fillUpId: fillId });
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+
+  // Trajets 206 du 12/09 non captés par le GPS
+  if (v206) {
+    let trips = await getTrips(v206.id);
+    const cons = Number(v206.consumptionPer100) > 0 ? Number(v206.consumptionPer100) : 6.5;
+    const price =
+      Number(v206.defaultFuelPrice) > 0 ? Number(v206.defaultFuelPrice) : INTERMARCHE_GUERCHE_FILL.pricePerLiter;
+    for (const spec of PERSONAL_DAY_TRIPS_2026_09_12) {
+      if (hasMatchingTrip(trips, v206.id, spec)) continue;
+      const fuel = Math.round(cons * (spec.distanceKm / 100) * 100) / 100;
+      await createTrip({
+        vehicleId: v206.id,
+        startTime: spec.startTime,
+        endTime: spec.endTime,
+        distanceKm: spec.distanceKm,
+        estimatedFuelUsed: fuel,
+        estimatedCost: Math.round(fuel * price * 100) / 100,
+        routePoints: '[]',
+        originName: spec.originName,
+        destinationName: spec.destinationName,
+        isActive: false,
+        isPaused: false,
+        status: 'confirmed',
+        source: 'manual',
+        fillUpId: null,
+        note: spec.note,
+      });
+      fillUpsFixed += 1;
+      trips = await getTrips(v206.id);
+    }
+    const afternoonKm = PERSONAL_DAY_TRIPS_2026_09_12.filter((s) => s.key !== 'home-inter').reduce(
+      (s, t) => s + t.distanceKm,
+      0
+    );
+    const targetOdo = Math.round((121575 + afternoonKm) * 10) / 10;
+    if (v206.hasOdometer && (v206.currentOdometer == null || v206.currentOdometer < targetOdo - 0.2)) {
+      await updateVehicle(v206.id, { currentOdometer: targetOdo, trackedKm: 0 });
       levelsFixed += 1;
     }
   }
@@ -263,7 +326,7 @@ export async function repairFillUpVehiclesAndBudgets(): Promise<{
       .filter((f) => f.vehicleId === v206.id)
       .sort((a, b) => String(b.date).localeCompare(String(a.date)));
     const last = vehicleFills[0];
-    if (last?.isFull && String(last.date).slice(0, 10) === '2026-09-02') {
+    if (last?.isFull) {
       try {
         const trips = await getTrips(v206.id);
         const burned = trips
