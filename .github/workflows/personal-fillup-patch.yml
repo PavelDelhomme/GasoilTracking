@@ -16,7 +16,7 @@ on:
 jobs:
   patch:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -27,7 +27,17 @@ jobs:
       - name: Enregistrer le plein sur le sync cloud
         env:
           API_URL: https://gasoil-tracking.delhomme.ovh
+          PORTAINER_URL: https://portainer.delhomme.ovh
           PERSONAL_MAIL: ${{ secrets.PERSONAL_MAIL }}
           PERSONAL_PASSWORD: ${{ secrets.PERSONAL_PASSWORD }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          QA_LAB_PASSWORD: ${{ secrets.QA_LAB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
           RELEASE_UPLOAD_TOKEN: ${{ secrets.RELEASE_UPLOAD_TOKEN }}
+          PORTAINER_ACCESS_TOKEN: ${{ secrets.PORTAINER_ACCESS_TOKEN }}
+          PORTAINER_PASSWORD: ${{ secrets.PORTAINER_PASSWORD }}
+          PORTAINER_USERNAME: ${{ secrets.PORTAINER_USERNAME }}
+          PORTAINER_WEBHOOK_URL: ${{ secrets.PORTAINER_WEBHOOK_URL }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: node scripts/ci/apply-personal-fillup-sync.mjs
