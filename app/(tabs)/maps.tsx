@@ -39,7 +39,10 @@ import { searchAddressSuggestions, type SuggestHit } from '@/lib/placeSuggest';
 import { tripHistoryNav } from '@/lib/tripHistoryNav';
 import { startGpsTrip, pauseGpsTrip, resumeGpsTrip, stopGpsTripLite } from '@/lib/startFreeTrip';
 import { formatDurationMin, liveTripHudStats } from '@/lib/liveTripHud';
-import { fetchDrivingRoute } from '@/lib/roadDistance';
+import {
+  fetchDrivingRouteAlternatives,
+  type DrivingRoute,
+} from '@/lib/roadDistance';
 import { downsampleRoute } from '@/lib/routeGeometry';
 import { readLiveTripBuffer } from '@/lib/liveTripBuffer';
 import type { Place } from '@/types';
@@ -68,6 +71,9 @@ export default function MapsScreen() {
   const [liveTail, setLiveTail] = useState<RoutePoint[]>([]);
   const [pendingDest, setPendingDest] = useState<PendingDest | null>(null);
   const [plannedRoute, setPlannedRoute] = useState<{ latitude: number; longitude: number }[]>([]);
+  const [routeOptions, setRouteOptions] = useState<DrivingRoute[]>([]);
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  const [routesLoading, setRoutesLoading] = useState(false);
   const [starting, setStarting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [nowMs, setNowMs] = useState(Date.now());
@@ -227,18 +233,69 @@ export default function MapsScreen() {
     };
   }, [user?.latitude, user?.longitude, tracking]);
 
+  const applyRouteChoice = useCallback((route: DrivingRoute) => {
+    setSelectedRouteId(route.id);
+    setPlannedRoute(downsampleRoute(route.coordinates, 120));
+  }, []);
+
   const loadPlanned = useCallback(
     async (dest: PendingDest, from?: { latitude: number; longitude: number } | null) => {
-      const origin = from || user;
-      if (!origin) return;
+      setRoutesLoading(true);
+      setRouteOptions([]);
+      setSelectedRouteId(null);
+      let origin = from || user;
+      if (!origin) {
+        const loc = await getCurrentLocation({ fresh: true });
+        if (loc?.coords) {
+          origin = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+          setUser(origin);
+        }
+      }
+      if (!origin) {
+        setPlannedRoute([dest]);
+        setRoutesLoading(false);
+        mapRef.current?.fitToCoordinates([dest], {
+          edgePadding: { top: 60, right: 40, bottom: 120, left: 40 },
+          animated: true,
+        });
+        return;
+      }
       try {
-        const route = await fetchDrivingRoute(origin, dest);
-        setPlannedRoute(downsampleRoute(route.coordinates, 120));
+        const alts = await fetchDrivingRouteAlternatives(origin, dest);
+        setRouteOptions(alts);
+        const prefer =
+          alts.find((a) => a.kind === 'eco') ||
+          alts.find((a) => a.kind === 'fastest') ||
+          alts[0];
+        if (prefer) {
+          applyRouteChoice(prefer);
+          const fitPts =
+            prefer.coordinates.length > 1
+              ? downsampleRoute(prefer.coordinates, 40)
+              : [origin, dest];
+          mapRef.current?.fitToCoordinates(fitPts, {
+            edgePadding: { top: 70, right: 40, bottom: 160, left: 40 },
+            animated: true,
+          });
+        } else {
+          setPlannedRoute([origin, dest]);
+          mapRef.current?.fitToCoordinates([origin, dest], {
+            edgePadding: { top: 60, right: 40, bottom: 120, left: 40 },
+            animated: true,
+          });
+        }
       } catch {
+        setRouteOptions([]);
         setPlannedRoute([origin, dest]);
+        mapRef.current?.fitToCoordinates([origin, dest], {
+          edgePadding: { top: 60, right: 40, bottom: 120, left: 40 },
+          animated: true,
+        });
+      } finally {
+        setRoutesLoading(false);
       }
     },
-    [user]
+    [user, applyRouteChoice]
   );
 
   const setDestinationOnMap = useCallback(
@@ -248,16 +305,32 @@ export default function MapsScreen() {
       setQuery(label);
       setSearchFocused(false);
       setSearchError(null);
+      setRouteOptions([]);
+      setSelectedRouteId(null);
+      setPlannedRoute([]);
       Keyboard.dismiss();
       void loadPlanned(dest);
-      mapRef.current?.fitToCoordinates(
-        user
-          ? [user, dest]
-          : [dest],
-        { edgePadding: { top: 60, right: 40, bottom: 80, left: 40 }, animated: true }
-      );
     },
-    [loadPlanned, user]
+    [loadPlanned]
+  );
+
+  const clearDestination = useCallback(() => {
+    setPendingDest(null);
+    setPlannedRoute([]);
+    setRouteOptions([]);
+    setSelectedRouteId(null);
+  }, []);
+
+  const alternateRoutes = useMemo(() => {
+    if (!routeOptions.length || !selectedRouteId) return [];
+    return routeOptions
+      .filter((r) => r.id !== selectedRouteId)
+      .map((r) => r.coordinates);
+  }, [routeOptions, selectedRouteId]);
+
+  const selectedRoute = useMemo(
+    () => routeOptions.find((r) => r.id === selectedRouteId) || routeOptions[0] || null,
+    [routeOptions, selectedRouteId]
   );
 
   const goSearch = useCallback(async (raw?: string) => {
@@ -477,6 +550,8 @@ export default function MapsScreen() {
       });
       setPendingDest(null);
       setPlannedRoute([]);
+      setRouteOptions([]);
+      setSelectedRouteId(null);
       setLiveTail([]);
       showToast(
         hud
@@ -529,8 +604,75 @@ export default function MapsScreen() {
           followUser={tracking && !paused}
           paused={paused}
           plannedRoute={liveTail.length > 4 ? [] : plannedRoute}
+          alternateRoutes={tracking ? [] : alternateRoutes}
           destination={destForMap}
         />
+        {!tracking && pendingDest && (routeOptions.length > 0 || routesLoading) ? (
+          <View style={styles.routePicker} pointerEvents="box-none">
+            {routesLoading && routeOptions.length === 0 ? (
+              <View style={[styles.routeChipLoading, { backgroundColor: 'rgba(15,23,42,0.9)', borderColor: 'rgba(255,255,255,0.25)' }]}>
+                <ActivityIndicator color="#fff" size="small" />
+                <Text style={{ color: '#e2e8f0', fontWeight: '700', fontSize: 12, marginLeft: 8 }}>
+                  Calcul des itinéraires…
+                </Text>
+              </View>
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.routePickerInner}
+              >
+                {routeOptions.map((r) => {
+                  const selected = r.id === selectedRoute?.id;
+                  const kindLabel =
+                    r.kind === 'eco' ? 'Éco' : r.kind === 'fastest' ? 'Rapide' : r.label;
+                  return (
+                    <Pressable
+                      key={r.id}
+                      onPress={() => {
+                        applyRouteChoice(r);
+                        if (r.coordinates.length > 1) {
+                          mapRef.current?.fitToCoordinates(downsampleRoute(r.coordinates, 40), {
+                            edgePadding: { top: 70, right: 40, bottom: 160, left: 40 },
+                            animated: true,
+                          });
+                        }
+                      }}
+                      style={[
+                        styles.routeChip,
+                        {
+                          borderColor: selected ? colors.accent : 'rgba(255,255,255,0.35)',
+                          backgroundColor: selected ? colors.accent : 'rgba(15,23,42,0.9)',
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          color: selected ? '#fff' : '#e2e8f0',
+                          fontWeight: '800',
+                          fontSize: 12,
+                        }}
+                      >
+                        {kindLabel}
+                        {r.kind === 'eco' || r.kind === 'fastest' ? ` · ${r.label}` : ''}
+                      </Text>
+                      <Text
+                        style={{
+                          color: selected ? 'rgba(255,255,255,0.9)' : '#94a3b8',
+                          fontSize: 11,
+                          marginTop: 2,
+                        }}
+                      >
+                        {r.distanceKm.toFixed(1)} km
+                        {r.durationMinutes != null ? ` · ${r.durationMinutes} min` : ''}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </View>
+        ) : null}
         <View style={[styles.hud, { top: 12 }]} pointerEvents="box-none">
           <View style={styles.hudLeft}>
             {tracking && hud ? (
@@ -666,10 +808,14 @@ export default function MapsScreen() {
                 {pendingDest.label}
               </Text>
               <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                Itinéraire sur la carte — démarrez pour le suivi live.
+                {routesLoading
+                  ? 'Calcul Éco / Rapide…'
+                  : selectedRoute
+                    ? `${selectedRoute.kind === 'eco' ? 'Éco' : selectedRoute.kind === 'fastest' ? 'Rapide' : selectedRoute.label} · ${selectedRoute.distanceKm.toFixed(1)} km — choisissez un type puis démarrez`
+                    : 'Choisissez un type d’itinéraire, puis démarrez'}
               </Text>
             </View>
-            <Pressable onPress={() => { setPendingDest(null); setPlannedRoute([]); }} hitSlop={8}>
+            <Pressable onPress={clearDestination} hitSlop={8}>
               <Ionicons name="close" size={18} color={colors.textSecondary} />
             </Pressable>
           </View>
@@ -793,6 +939,32 @@ export default function MapsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   mapWrap: { flex: 1, minHeight: 220 },
+  routePicker: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    bottom: 10,
+  },
+  routePickerInner: {
+    gap: 8,
+    paddingVertical: 4,
+    alignItems: 'center',
+  },
+  routeChip: {
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginRight: 4,
+  },
+  routeChipLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
   hud: {
     position: 'absolute',
     left: 8,

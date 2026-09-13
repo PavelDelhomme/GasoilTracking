@@ -2,7 +2,16 @@
  * Suggestions de trajets réguliers selon l’heure (domicile↔travail, etc.).
  */
 import type { Place, Trip } from '@/types';
-import { haversineDistance, parseRoutePoints } from '@/lib/calculations';
+import { haversineDistance } from '@/lib/geoMath';
+
+function parseRoutePoints(routePoints: string): Array<{ latitude: number; longitude: number }> {
+  try {
+    const parsed = JSON.parse(routePoints);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 export type SmartSuggestion = {
   id: string;
@@ -20,7 +29,8 @@ function hourNow(d = new Date()): number {
   return d.getHours() + d.getMinutes() / 60;
 }
 
-function isWeekday(d = new Date()): boolean {
+/** Lundi–vendredi (heure locale appareil). */
+export function isWeekday(d = new Date()): boolean {
   const day = d.getDay();
   return day >= 1 && day <= 5;
 }
@@ -34,24 +44,24 @@ function tripHour(iso: string): number {
   }
 }
 
-/** Fenêtres typiques FR. */
-function commuteWindow(): 'to_work' | 'to_home' | 'none' {
-  const h = hourNow();
-  const wd = isWeekday();
-  if (!wd) {
-    // Week-end : suggestions plus faibles
-    if (h >= 8 && h < 12) return 'to_work';
-    if (h >= 16 && h < 21) return 'to_home';
-    return 'none';
-  }
+/**
+ * Fenêtres commute FR — uniquement en jours ouvrés.
+ * Week-end / jours fériés locaux : jamais « aller travail » / « fin de journée ».
+ */
+export function commuteWindow(now = new Date()): 'to_work' | 'to_home' | 'none' {
+  if (!isWeekday(now)) return 'none';
+  const h = hourNow(now);
+  // Matin boulot
   if (h >= 5.5 && h < 11) return 'to_work';
-  if (h >= 15.5 && h < 22) return 'to_home';
+  // Soir retour (pas jusqu’à 22 h — trop tard pour « fin de journée »)
+  if (h >= 15.5 && h < 20.5) return 'to_home';
   return 'none';
 }
 
 /**
  * Propose 1–3 trajets habituels (non bloquant).
- * Priorité : domicile→travail le matin, travail→domicile le soir, puis corridors fréquents.
+ * Priorité : domicile→travail le matin, travail→domicile le soir (jours ouvrés),
+ * puis corridors fréquents.
  */
 export function suggestTripsForNow(opts: {
   places: Place[];
@@ -60,7 +70,7 @@ export function suggestTripsForNow(opts: {
   now?: Date;
 }): SmartSuggestion[] {
   const now = opts.now || new Date();
-  const window = commuteWindow();
+  const window = commuteWindow(now);
   const home = opts.places.find((p) => p.kind === 'home' && p.latitude != null && p.longitude != null);
   const work = opts.places.find((p) => p.kind === 'work' && p.latitude != null && p.longitude != null);
   const out: SmartSuggestion[] = [];
@@ -74,41 +84,46 @@ export function suggestTripsForNow(opts: {
     return haversineDistance(a.latitude, a.longitude, bLat, bLon) < 4;
   };
 
-  // Domicile → travail
-  if (home && work && (window === 'to_work' || window === 'none')) {
+  // Domicile → travail : uniquement dans la fenêtre matin ouvrée
+  if (home && work && window === 'to_work') {
     const nearHome =
       !opts.userLocation || near(opts.userLocation, home.latitude, home.longitude);
-    if (nearHome || window === 'to_work') {
-      const score = window === 'to_work' ? 100 : 40;
+    // Si on est clairement déjà au travail, pas d’aller
+    const nearWork = opts.userLocation
+      ? near(opts.userLocation, work.latitude, work.longitude)
+      : false;
+    if (!nearWork && (nearHome || !opts.userLocation)) {
       out.push({
         id: 'commute-work',
         title: 'Aller au travail',
-        subtitle: window === 'to_work' ? 'Habitude du matin' : 'Domicile → travail',
+        subtitle: 'Habitude du matin',
         label: work.address?.trim() || work.name,
         latitude: work.latitude!,
         longitude: work.longitude!,
         kind: 'commute_to_work',
-        score: nearHome ? score : score - 20,
+        score: nearHome ? 100 : 80,
         habitCount: countCorridor(opts.trips, home, work),
       });
     }
   }
 
-  // Travail → domicile
-  if (home && work && (window === 'to_home' || window === 'none')) {
+  // Travail → domicile : uniquement soir ouvré, et pas si déjà à la maison
+  if (home && work && window === 'to_home') {
+    const nearHome = opts.userLocation
+      ? near(opts.userLocation, home.latitude, home.longitude)
+      : false;
     const nearWork =
       !opts.userLocation || near(opts.userLocation, work.latitude, work.longitude);
-    if (nearWork || window === 'to_home') {
-      const score = window === 'to_home' ? 100 : 40;
+    if (!nearHome && (nearWork || !opts.userLocation)) {
       out.push({
         id: 'commute-home',
         title: 'Retour domicile',
-        subtitle: window === 'to_home' ? 'Habitude du soir' : 'Travail → domicile',
+        subtitle: 'Habitude du soir',
         label: home.address?.trim() || home.name,
         latitude: home.latitude!,
         longitude: home.longitude!,
         kind: 'commute_to_home',
-        score: nearWork ? score : score - 20,
+        score: nearWork ? 100 : 80,
         habitCount: countCorridor(opts.trips, work, home),
       });
     }
@@ -121,7 +136,6 @@ export function suggestTripsForNow(opts: {
     if (out.some((s) => Math.abs(s.latitude - c.dLat) < 0.01 && Math.abs(s.longitude - c.dLon) < 0.01)) {
       continue;
     }
-    // Bonus si heure proche de l’habitude
     const hourDist = Math.min(...c.hours.map((hh) => Math.abs(hh - h)));
     if (hourDist > 3.5 && c.count < 5) continue;
     const score = 55 - hourDist * 8 + Math.min(c.count, 10);
@@ -182,7 +196,6 @@ function frequentCorridors(trips: Trip[], minCount: number): Corridor[] {
     const ends = endsOf(t);
     if (ends.dLat == null || ends.dLon == null) continue;
     const label = (t.destinationName || '').trim() || 'Destination';
-    // grille ~1.5 km
     const key = `${(ends.dLat * 40).toFixed(0)}_${(ends.dLon * 40).toFixed(0)}`;
     const cur = map.get(key);
     if (cur) {
@@ -212,8 +225,8 @@ function formatHourBand(hours: number[]): string {
 }
 
 export function commuteHintLabel(now = new Date()): string | null {
-  const w = commuteWindow();
-  if (w === 'to_work') return isWeekday(now) ? 'Matin — aller travail ?' : 'Sortie — une destination habituelle ?';
+  const w = commuteWindow(now);
+  if (w === 'to_work') return 'Matin — aller travail ?';
   if (w === 'to_home') return 'Fin de journée — retour domicile ?';
   return null;
 }
