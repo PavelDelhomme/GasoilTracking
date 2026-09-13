@@ -37,6 +37,7 @@ import { TutorialAnchor } from '@/components/TutorialAnchor';
 import type { ConsumptionStats, Place, SinceLastFillStats, Trip, VehicleMaintenance } from '@/types';
 import { MAINTENANCE_KIND_LABELS, maintenanceIsUrgent } from '@/lib/vehicleMaintenance';
 import { formatDateSlash, formatRelativeDay, toLocalYmd } from '@/lib/dates';
+import { tripHistoryNav } from '@/lib/tripHistoryNav';
 
 export default function HomeScreen() {
   const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles, selectVehicle, isLoading } = useApp();
@@ -464,6 +465,18 @@ export default function HomeScreen() {
             </TutorialAnchor>
 
             {(todayTrips.length > 0 || todayKm > 0) && (
+              <Pressable
+                onPress={() =>
+                  router.push(
+                    tripHistoryNav({
+                      filter: 'today',
+                      vehicleId: activeVehicle.id,
+                    }) as never
+                  )
+                }
+                accessibilityRole="button"
+                accessibilityLabel={`Trajets d’aujourd’hui, ${todayTrips.length} trajet${todayTrips.length > 1 ? 's' : ''}, ${formatDistance(todayKm)}`}
+              >
               <Card style={{ marginTop: 12 }}>
                 <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '800' }}>
                   AUJOURD’HUI
@@ -490,7 +503,11 @@ export default function HomeScreen() {
                     <Text style={{ color: colors.textSecondary, fontSize: 11 }}>coût</Text>
                   </View>
                 </View>
+                <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 12, marginTop: 8 }}>
+                  Voir les trajets du jour →
+                </Text>
               </Card>
+              </Pressable>
             )}
 
             {activeTrip && (
@@ -544,10 +561,12 @@ export default function HomeScreen() {
             {sinceFill?.lastFill && (
               <Pressable
                 onPress={() =>
-                  router.push({
-                    pathname: '/(tabs)/trip',
-                    params: { tab: 'history', filter: 'sinceFill' },
-                  } as never)
+                  router.push(
+                    tripHistoryNav({
+                      filter: 'sinceFill',
+                      vehicleId: activeVehicle.id,
+                    }) as never
+                  )
                 }
                 accessibilityRole="button"
                 accessibilityLabel="Voir les trajets depuis le dernier plein"
@@ -635,6 +654,14 @@ export default function HomeScreen() {
                 label="Distance"
                 value={formatDistance(stats?.totalDistance ?? 0)}
                 subtitle="tous trajets"
+                onPress={() =>
+                  router.push(
+                    tripHistoryNav({
+                      filter: 'all',
+                      vehicleId: activeVehicle.id,
+                    }) as never
+                  )
+                }
               />
             </View>
 

@@ -135,7 +135,7 @@ jobs:
             -F "version=$VERSION" \
             -F "versionCode=$VERSION_CODE" \
             -F "forceUpdate=1" \
-            -F "releaseNotes=Mise à jour installable (versionCode corrigé) · suivi GPS libre · OTA sans retéléchargement (v$VERSION)." \
+            -F "releaseNotes=v$VERSION — suivi live Maps (HUD vitesse/limite/km) · historique par date/plage · OTA force." \
             -F "apk=@/tmp/gasoil.apk")
           cat /tmp/rel.json
           echo

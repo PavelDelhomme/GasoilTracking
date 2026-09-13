@@ -123,8 +123,8 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: 'history',
         title: 'Historique des trajets',
         body:
-          'Menu ☰ → Historique des trajets, ou bouton Historique sur Maps. Depuis l’accueil, « Depuis le plein » ouvre l’historique filtré depuis le dernier plein.',
-        link: { label: 'Ouvrir l’historique', href: '/(tabs)/trip?tab=history' },
+          'Menu ☰ → Historique des trajets, ou bouton Historique sur Maps (trajets du jour, véhicule sélectionné). Accueil : carte « Aujourd’hui » (km / nb trajets), « Distance » (tous trajets), ou « Depuis le plein ». Filtres : Aujourd’hui · Depuis le dernier plein · Tout.',
+        link: { label: 'Ouvrir l’historique du jour', href: '/(tabs)/trip?tab=history&filter=today' },
       },
       {
         id: 'pause-fill',

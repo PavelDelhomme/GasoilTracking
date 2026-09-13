@@ -228,7 +228,7 @@ export function AccountDrawer() {
               icon="time-outline"
               label="Historique des trajets"
               subtitle="Trajets passés, validation, cartes"
-              onPress={() => go('/(tabs)/trip?tab=history')}
+              onPress={() => go('/(tabs)/trip?tab=history&filter=all')}
             />
             <DrawerRow
               icon="download-outline"

@@ -73,8 +73,18 @@ export function currentMonthKey(d = new Date()): string {
 
 /** Mois précédent `AAAA-MM` (ex. 2026-09 → 2026-08). */
 export function previousMonthKey(ym: string): string {
+  return addMonthsYm(ym, -1);
+}
+
+/** Mois suivant `AAAA-MM`. */
+export function nextMonthKey(ym: string): string {
+  return addMonthsYm(ym, 1);
+}
+
+/** Décale un mois calendaire `AAAA-MM`. */
+export function addMonthsYm(ym: string, delta: number): string {
   const [y, m] = ym.split('-').map(Number);
-  const d = new Date(y, (m || 1) - 2, 1);
+  const d = new Date(y, (m || 1) - 1 + delta, 1);
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 }
 
