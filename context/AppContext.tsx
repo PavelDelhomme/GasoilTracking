@@ -89,8 +89,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
+      // Ne pas lancer de repair lourd pendant un trajet live (risque de course / UI figée).
       const repairKey = active?.id ?? 'none';
-      if (repairedForVehicle.current !== repairKey) {
+      if (repairedForVehicle.current !== repairKey && !trip?.isActive) {
         try {
           await repairTripHistory(active?.id);
           repairedForVehicle.current = repairKey;

@@ -30,7 +30,7 @@ import { Button } from '@/components/Button';
 import { DrawerMenuButton } from '@/components/DrawerMenuButton';
 import { HeaderActions } from '@/components/HeaderActions';
 import { TutorialAnchor } from '@/components/TutorialAnchor';
-import { getPlaces, getTripById } from '@/lib/database';
+import { getPlaces, getTripById, updatePlace } from '@/lib/database';
 import {
   getRecentDestinations,
   type RecentDestination,
@@ -76,12 +76,27 @@ export default function MapsScreen() {
   const [routesLoading, setRoutesLoading] = useState(false);
   const [starting, setStarting] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** UI live même si le Context met 1 frame à voir le trajet actif (notif FGS déjà là). */
+  const [sessionTracking, setSessionTracking] = useState(false);
+  const [sessionTripId, setSessionTripId] = useState<number | null>(null);
+  /** Empêche le dropdown « Lieux / Adresses » après un chip carnet / récent. */
+  const [suggestLocked, setSuggestLocked] = useState(false);
   const [nowMs, setNowMs] = useState(Date.now());
   const suggestDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const tracking = Boolean(activeTrip?.isActive);
+  const tracking = Boolean(activeTrip?.isActive) || sessionTracking;
   const paused = Boolean(activeTrip?.isPaused);
   const hud = liveTripHudStats(activeTrip, nowMs);
+
+  useEffect(() => {
+    if (activeTrip?.isActive) {
+      setSessionTracking(true);
+      setSessionTripId(activeTrip.id);
+    } else if (!starting) {
+      setSessionTracking(false);
+      setSessionTripId(null);
+    }
+  }, [activeTrip?.isActive, activeTrip?.id, starting]);
 
   const refreshLoc = useCallback(async () => {
     const loc = await getCurrentLocation({ fresh: true });
@@ -303,6 +318,8 @@ export default function MapsScreen() {
       const dest = { label, latitude: lat, longitude: lon };
       setPendingDest(dest);
       setQuery(label);
+      setSuggestLocked(true);
+      setSearchHits([]);
       setSearchFocused(false);
       setSearchError(null);
       setRouteOptions([]);
@@ -319,7 +336,26 @@ export default function MapsScreen() {
     setPlannedRoute([]);
     setRouteOptions([]);
     setSelectedRouteId(null);
-  }, []);
+    setQuery('');
+    setSearchHits([]);
+    setSuggestLocked(false);
+    setSearchError(null);
+    // Recentrer sur la position actuelle (plus de tracé fantôme)
+    if (user) {
+      mapRef.current?.fitToCoordinates([user], {
+        edgePadding: { top: 80, right: 60, bottom: 120, left: 60 },
+        animated: true,
+      });
+      mapRef.current?.setCenter?.(user.latitude, user.longitude, 15);
+    } else {
+      void getCurrentLocation({ fresh: true }).then((loc) => {
+        if (!loc?.coords) return;
+        const u = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+        setUser(u);
+        mapRef.current?.setCenter?.(u.latitude, u.longitude, 15);
+      });
+    }
+  }, [user]);
 
   const alternateRoutes = useMemo(() => {
     if (!routeOptions.length || !selectedRouteId) return [];
@@ -358,18 +394,24 @@ export default function MapsScreen() {
 
   useEffect(() => {
     if (suggestDebounce.current) clearTimeout(suggestDebounce.current);
+    // Destination déjà choisie (chip carnet / récent) : pas de liste « Lieux / Adresses »
+    if (suggestLocked || pendingDest) {
+      setSearchHits([]);
+      return;
+    }
     const q = query.trim();
-    if (q.length < 2) {
+    if (q.length < 2 || !searchFocused) {
       setSearchHits([]);
       return;
     }
     suggestDebounce.current = setTimeout(() => {
       void (async () => {
+        // Uniquement suggestions d’adresses (Nominatim) — pas de doublons « Lieu » carnet
         const geo = await searchAddressSuggestions(q, 6);
         const qn = q.toLowerCase();
         const recentHits: SuggestHit[] = recentDests
           .filter((r) => r.label.toLowerCase().includes(qn))
-          .slice(0, 4)
+          .slice(0, 3)
           .map((r, i) => ({
             id: `recent-${i}-${r.label}`,
             label: r.label,
@@ -378,27 +420,13 @@ export default function MapsScreen() {
             longitude: r.longitude ?? undefined,
             subtitle: 'Récent',
           }));
-        const placeHits: SuggestHit[] = places
-          .filter((p) => {
-            const hay = `${p.name} ${p.address}`.toLowerCase();
-            return hay.includes(qn);
-          })
-          .slice(0, 4)
-          .map((p) => ({
-            id: `place-${p.id}`,
-            label: p.name,
-            subtitle: p.address || undefined,
-            source: 'place' as const,
-            latitude: p.latitude ?? undefined,
-            longitude: p.longitude ?? undefined,
-          }));
-        setSearchHits([...recentHits, ...placeHits, ...geo].slice(0, 10));
+        setSearchHits([...recentHits, ...geo].slice(0, 8));
       })();
     }, 320);
     return () => {
       if (suggestDebounce.current) clearTimeout(suggestDebounce.current);
     };
-  }, [query, places, recentDests]);
+  }, [query, places, recentDests, suggestLocked, pendingDest, searchFocused]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -438,7 +466,17 @@ export default function MapsScreen() {
               <Ionicons name="search" size={14} color={colors.textSecondary} />
               <TextInput
                 value={query}
-                onChangeText={setQuery}
+                onChangeText={(t) => {
+                  setQuery(t);
+                  setSuggestLocked(false);
+                  if (pendingDest) {
+                    // Édition manuelle = on quitte la préselection (sinon suggestions + tracé fantômes)
+                    setPendingDest(null);
+                    setPlannedRoute([]);
+                    setRouteOptions([]);
+                    setSelectedRouteId(null);
+                  }
+                }}
                 onFocus={() => setSearchFocused(true)}
                 onBlur={() => setTimeout(() => setSearchFocused(false), 180)}
                 placeholder="Tapez une adresse…"
@@ -489,12 +527,18 @@ export default function MapsScreen() {
           showToast(r.error);
           return;
         }
+        // Affiche tout de suite Pause / Terminer (évite l’écran « lieux » alors que FGS tourne)
+        setSessionTracking(true);
+        setSessionTripId(r.tripId);
+        setSuggestLocked(true);
+        setSearchHits([]);
+        await refresh();
         if (!r.trackingStarted) {
           showToast('Trajet créé — autorisez la localisation pour tracer.');
         } else {
           showToast(
             dest
-              ? `Guidage vers ${dest.label} — restez sur Maps.`
+              ? `Guidage vers ${dest.label} — suivi actif sur Maps.`
               : 'Suivi GPS démarré — restez sur Maps.'
           );
         }
@@ -509,6 +553,38 @@ export default function MapsScreen() {
     void startOnMaps(null);
   };
 
+  /** Chip carnet : toujours l’adresse (pas le seul nom « Parent » → Clermont). */
+  const selectSavedPlace = useCallback(
+    async (p: Place) => {
+      if (tracking) {
+        showToast('Terminez le trajet en cours avant de choisir une destination.');
+        return;
+      }
+      const label = (p.address?.trim() || p.name).trim();
+      if (p.latitude != null && p.longitude != null && Number.isFinite(p.latitude) && Number.isFinite(p.longitude)) {
+        setDestinationOnMap(label, p.latitude, p.longitude);
+        return;
+      }
+      setSearching(true);
+      try {
+        const hit = await forwardGeocode(p.address?.trim() || `${p.name}, France`);
+        if (!hit) {
+          setSearchError('Adresse du lieu introuvable');
+          return;
+        }
+        setDestinationOnMap(label, hit.latitude, hit.longitude);
+        void updatePlace(p.id, { latitude: hit.latitude, longitude: hit.longitude }).then(() =>
+          reloadPlaces()
+        );
+      } catch {
+        setSearchError('Géocodage indisponible');
+      } finally {
+        setSearching(false);
+      }
+    },
+    [tracking, showToast, setDestinationOnMap, reloadPlaces]
+  );
+
   const goToPlace = (label: string, lat?: number | null, lon?: number | null) => {
     if (tracking) {
       showToast('Terminez le trajet en cours avant de choisir une destination.');
@@ -517,20 +593,37 @@ export default function MapsScreen() {
     if (lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon)) {
       setDestinationOnMap(label, lat, lon);
     } else {
-      setQuery(label);
-      void goSearch(label);
+      // Géocode l’adresse complète, jamais un libellé court ambigu (« Parent »)
+      setSuggestLocked(true);
+      setSearchHits([]);
+      void (async () => {
+        setSearching(true);
+        try {
+          const hit = await forwardGeocode(label);
+          if (!hit) {
+            setSearchError('Lieu introuvable');
+            return;
+          }
+          setDestinationOnMap(hit.label || label, hit.latitude, hit.longitude);
+        } catch {
+          setSearchError('Recherche indisponible');
+        } finally {
+          setSearching(false);
+        }
+      })();
     }
   };
 
   const onPauseResume = async () => {
-    if (!activeTrip) return;
+    const tripId = activeTrip?.id ?? sessionTripId;
+    if (!tripId) return;
     setBusy(true);
     try {
       if (paused) {
-        const ok = await resumeGpsTrip(activeTrip.id, refresh);
+        const ok = await resumeGpsTrip(tripId, refresh);
         showToast(ok ? 'Suivi repris' : 'Vérifiez les permissions localisation.');
       } else {
-        await pauseGpsTrip(activeTrip.id, refresh);
+        await pauseGpsTrip(tripId, refresh);
         showToast('Pause — le tracé est figé.');
       }
     } finally {
@@ -539,13 +632,15 @@ export default function MapsScreen() {
   };
 
   const onStop = async () => {
-    if (!activeTrip) return;
+    const tripId = activeTrip?.id ?? sessionTripId;
+    const vehicleId = activeTrip?.vehicleId ?? activeVehicle?.id;
+    if (!tripId || vehicleId == null) return;
     setBusy(true);
     try {
       await stopGpsTripLite({
-        tripId: activeTrip.id,
-        vehicleId: activeTrip.vehicleId,
-        distanceKm: activeTrip.distanceKm,
+        tripId,
+        vehicleId,
+        distanceKm: activeTrip?.distanceKm ?? 0,
         refresh,
       });
       setPendingDest(null);
@@ -553,11 +648,19 @@ export default function MapsScreen() {
       setRouteOptions([]);
       setSelectedRouteId(null);
       setLiveTail([]);
+      setSessionTracking(false);
+      setSessionTripId(null);
+      setSuggestLocked(false);
+      setQuery('');
+      setSearchHits([]);
       showToast(
         hud
           ? `Trajet terminé · ${formatDistance(hud.distanceKm)}`
           : 'Trajet terminé'
       );
+      if (user) {
+        mapRef.current?.setCenter?.(user.latitude, user.longitude, 15);
+      }
     } catch {
       showToast('Impossible de terminer le trajet');
     } finally {
@@ -735,19 +838,19 @@ export default function MapsScreen() {
           <Text style={{ color: colors.warning, fontSize: 12, marginBottom: 6 }}>{searchError}</Text>
         ) : null}
 
-        {!tracking && (searchFocused || query.trim().length >= 2) && searchHits.length > 0 ? (
+        {!tracking && !pendingDest && (searchFocused || query.trim().length >= 2) && searchHits.length > 0 ? (
           <View style={{ marginBottom: 10, maxHeight: 180 }}>
             <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled>
               {searchHits.map((h) => (
                 <Pressable
                   key={h.id}
                   onPress={() => {
-                    setQuery(h.label);
+                    setSuggestLocked(true);
+                    setSearchHits([]);
                     setSearchFocused(false);
                     if (h.latitude != null && h.longitude != null) {
                       goToPlace(h.label, h.latitude, h.longitude);
                     } else {
-                      setQuery(h.label);
                       void goSearch(h.label);
                     }
                   }}
@@ -758,11 +861,7 @@ export default function MapsScreen() {
                   }}
                 >
                   <Text style={{ color: colors.accent, fontSize: 10, fontWeight: '800' }}>
-                    {h.subtitle === 'Récent'
-                      ? 'Récent'
-                      : h.source === 'place'
-                        ? 'Lieu'
-                        : 'Adresse'}
+                    {h.subtitle === 'Récent' ? 'Récent' : 'Adresse'}
                   </Text>
                   <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1}>
                     {h.label}
@@ -821,7 +920,7 @@ export default function MapsScreen() {
           </View>
         ) : null}
 
-        {!tracking ? (
+        {!tracking && !pendingDest ? (
           <>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Lieux & récents</Text>
             <ScrollView
@@ -832,7 +931,7 @@ export default function MapsScreen() {
               {quickPlaces.map((p) => (
                 <Pressable
                   key={p.id}
-                  onPress={() => goToPlace(p.name, p.latitude, p.longitude)}
+                  onPress={() => void selectSavedPlace(p)}
                   style={[styles.chip, { borderColor: colors.accent, backgroundColor: colors.accent + '14' }]}
                 >
                   <Ionicons
@@ -846,7 +945,7 @@ export default function MapsScreen() {
               {otherPlaces.map((p) => (
                 <Pressable
                   key={p.id}
-                  onPress={() => goToPlace(p.name, p.latitude, p.longitude)}
+                  onPress={() => void selectSavedPlace(p)}
                   style={[styles.chip, { borderColor: colors.border, backgroundColor: colors.background }]}
                 >
                   <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{p.name}</Text>

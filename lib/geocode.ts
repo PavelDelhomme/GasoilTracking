@@ -109,10 +109,14 @@ export async function forwardGeocode(
     const hit = data[0];
     if (!hit?.lat || !hit?.lon) return null;
     const a = hit.address || {};
+    const road = a.road || a.pedestrian || a.footway || a.residential;
     const city = a.city || a.town || a.village || a.municipality || hit.name;
     const label =
+      (a.house_number && road
+        ? `${a.house_number} ${road}${city ? `, ${city}` : ''}${a.postcode ? ` ${a.postcode}` : ''}`
+        : null) ||
       city ||
-      (hit.display_name ? hit.display_name.split(',').slice(0, 2).join(',').trim() : q);
+      (hit.display_name ? hit.display_name.split(',').slice(0, 3).join(',').trim() : q);
     return {
       latitude: Number(hit.lat),
       longitude: Number(hit.lon),
