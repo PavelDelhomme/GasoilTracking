@@ -167,7 +167,13 @@ export async function recalibrateFromManualGauge(
   if (!isSaneConsumptionSample(measured, vehicle.fuelType)) return null;
 
   const prev = vehicle.consumptionPer100 > 0 ? vehicle.consumptionPer100 : measured;
-  const nextL100 = Math.round((measured * 0.55 + prev * 0.45) * 10) / 10;
+  // Garde-fou : une jauge approximative ne doit pas envoyer une 206 à 10–13 L/100.
+  // Au-delà de ~+35 % / 9,5 L/100 essence → on ignore la conso catalogue (jauge seule).
+  const maxEssence = vehicle.fuelType === 'diesel' ? 11 : 9.5;
+  if (measured > maxEssence || measured > prev * 1.4) {
+    return null;
+  }
+  const nextL100 = Math.round((measured * 0.4 + prev * 0.6) * 10) / 10;
   const learn =
     prev > 0.5 ? Math.round(Math.min(1.35, Math.max(0.7, measured / prev)) * 1000) / 1000 : 1;
   await updateVehicle(vehicleId, {
