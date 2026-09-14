@@ -369,6 +369,29 @@ function mergeVehicleCorrectionsFromCloud(
 }
 
 /**
+ * Avant un pull : ne pas perdre une jauge locale connue si le cloud est encore
+ * null/vide (réglage téléphone non poussé, ou force-stop avant fin de sync).
+ */
+function preserveLocalFuelOnPull(local: AppDataSnapshot, remote: AppDataSnapshot): number {
+  if (!remote.vehicles?.length || !local.vehicles?.length) return 0;
+  let n = 0;
+  for (const rv of remote.vehicles) {
+    const lv = local.vehicles.find((v) => v.id === rv.id);
+    if (!lv) continue;
+    const localL = lv.estimatedFuelLiters;
+    const remoteL = rv.estimatedFuelLiters;
+    if (localL == null || !Number.isFinite(localL)) continue;
+    if (remoteL == null || remoteL < 0.2) {
+      if (localL >= 0.2 || remoteL == null) {
+        rv.estimatedFuelLiters = localL;
+        n += 1;
+      }
+    }
+  }
+  return n;
+}
+
+/**
  * Si le cloud est plus récent, tire ; sinon pousse.
  * Ne tire jamais un cloud « pauvre » (ex. 1 véhicule fantôme) par-dessus un local riche.
  * Privilégie le téléphone s’il a plus d’activité trajet / km (source de vérité terrain).
@@ -445,6 +468,7 @@ export async function syncPreferNewer(): Promise<SyncPreferResult> {
   }
 
   if (action === 'pull') {
+    preserveLocalFuelOnPull(local, remoteSnap);
     await applySnapshot(remoteSnap, 'replace');
     try {
       await repairFillUpVehiclesAndBudgets();

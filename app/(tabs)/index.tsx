@@ -41,7 +41,7 @@ import { tripHistoryNav } from '@/lib/tripHistoryNav';
 
 export default function HomeScreen() {
   const { activeVehicle, activeTrip, budgetStatuses, refresh, vehicles, selectVehicle, isLoading } = useApp();
-  const { syncNow, user } = useAuth();
+  const { syncNow, pushLocalNow, user } = useAuth();
   const { colors } = useTheme();
   const { locale, countryCode } = useLocale();
   const { checkNow } = useAppUpdate();
@@ -433,7 +433,13 @@ export default function HomeScreen() {
                     await refresh();
                     await reloadStats(activeVehicle.id);
                     notify('Réservoir', `${L.toFixed(1)} L · conso recalibrée si possible`);
-                    void syncNow();
+                    // Push forcé : un syncPreferNewer peut PULL un cloud sans jauge et tout effacer.
+                    try {
+                      const r = await pushLocalNow();
+                      if (r?.ok) showToast('Jauge synchronisée');
+                    } catch {
+                      /* offline OK — local déjà sauvé */
+                    }
                   }}
                 />
                 {(() => {

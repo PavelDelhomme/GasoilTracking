@@ -15,7 +15,7 @@ import { syncFailureMessage } from '@/lib/api';
 
 export default function VehiclesScreen() {
   const { vehicles, activeVehicle, selectVehicle, refresh } = useApp();
-  const { syncNow } = useAuth();
+  const { syncNow, pushLocalNow } = useAuth();
   const { showToast } = useToast();
   const { colors } = useTheme();
   const [refreshing, setRefreshing] = useState(false);
@@ -103,7 +103,7 @@ export default function VehiclesScreen() {
               onDelete={() => handleDelete(item.id, item.name)}
               onFuelUpdated={() => {
                 void refresh();
-                void syncNow();
+                void pushLocalNow();
               }}
             />
           );

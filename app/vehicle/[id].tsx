@@ -40,7 +40,7 @@ export default function VehicleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const vehicleId = Number(id);
   const { vehicles, activeVehicle, selectVehicle, refresh } = useApp();
-  const { syncNow } = useAuth();
+  const { syncNow, pushLocalNow } = useAuth();
   const { showToast } = useToast();
   const { colors } = useTheme();
   const { locale } = useLocale();
@@ -187,8 +187,8 @@ export default function VehicleDetailScreen() {
             await refresh();
             await load();
             notify('Réservoir', `${L.toFixed(1)} L · conso recalibrée si plein connu`);
-            void syncNow().then(async (r) => {
-              if (r === 'pushed') showToast('Jauge synchronisée');
+            void pushLocalNow().then(async (r) => {
+              if (r?.ok) showToast('Jauge synchronisée');
               await refresh();
               await load();
             });
