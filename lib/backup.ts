@@ -327,8 +327,14 @@ function mergeVehicleCorrectionsFromCloud(
       (lv.estimatedFuelLiters == null ||
         Math.abs((lv.estimatedFuelLiters ?? 0) - rv.estimatedFuelLiters) > 0.05)
     ) {
-      lv.estimatedFuelLiters = rv.estimatedFuelLiters;
-      touched = true;
+      // Ne pas écraser une jauge locale crédible par un cloud « vide » (0 L) :
+      // cas QA / téléphone qui vient de régler ½, cloud encore à 0 après ajout véhicule.
+      const cloudEmpty = rv.estimatedFuelLiters < 0.2;
+      const localHasFuel = (lv.estimatedFuelLiters ?? 0) > 1;
+      if (!(cloudEmpty && localHasFuel)) {
+        lv.estimatedFuelLiters = rv.estimatedFuelLiters;
+        touched = true;
+      }
     }
     if (
       Number.isFinite(rv.consumptionPer100) &&
@@ -342,6 +348,15 @@ function mergeVehicleCorrectionsFromCloud(
       touched = true;
     }
     if (
+      Number.isFinite(rv.currentOdometer) &&
+      Number.isFinite(lv.currentOdometer)
+    ) {
+      const best = Math.max(rv.currentOdometer || 0, lv.currentOdometer || 0);
+      if (Math.abs((lv.currentOdometer || 0) - best) > 0.5) {
+        lv.currentOdometer = best;
+        touched = true;
+      }
+    } else if (
       Number.isFinite(rv.currentOdometer) &&
       rv.currentOdometer > (lv.currentOdometer || 0) + 0.5
     ) {

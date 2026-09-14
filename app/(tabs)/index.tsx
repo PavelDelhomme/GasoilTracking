@@ -218,8 +218,7 @@ export default function HomeScreen() {
 
   const checkReachNearestStation = useCallback(async () => {
     if (!activeVehicle || stationCheckBusy) return;
-    const liters =
-      activeVehicle.estimatedFuelLiters ?? sinceFill?.fuelRemainingEst ?? null;
+    const liters = activeVehicle.estimatedFuelLiters ?? null;
     if (liters == null) {
       notify('Carburant', 'Indiquez d’abord le niveau sur la jauge.');
       return;
@@ -262,7 +261,7 @@ export default function HomeScreen() {
     } finally {
       setStationCheckBusy(false);
     }
-  }, [activeVehicle, stationCheckBusy, sinceFill?.fuelRemainingEst, countryCode]);
+  }, [activeVehicle, stationCheckBusy, countryCode]);
 
   const mainBudget = budgetStatuses.find((s) => s.budget.vehicleId == null) || budgetStatuses[0];
   const homePlace = places.find((p) => p.kind === 'home');
@@ -303,17 +302,16 @@ export default function HomeScreen() {
 
   const fuelTone = activeVehicle
     ? fuelRemainingTone({
-        litersRemaining:
-          activeVehicle.estimatedFuelLiters ?? sinceFill?.fuelRemainingEst ?? null,
+        litersRemaining: activeVehicle.estimatedFuelLiters ?? null,
         tankCapacity: activeVehicle.tankCapacity,
         lowLitersThreshold: activeVehicle.lowFuelThresholdLiters,
-        rangeKm: sinceFill?.rangeKm,
+        rangeKm:
+          activeVehicle.estimatedFuelLiters != null ? sinceFill?.rangeKm : undefined,
         vehicle: activeVehicle,
       })
     : 'unknown';
   const fuelColor = fuelToneColor(fuelTone, colors);
-  const litersNow =
-    activeVehicle?.estimatedFuelLiters ?? sinceFill?.fuelRemainingEst ?? null;
+  const litersNow = activeVehicle?.estimatedFuelLiters ?? null;
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -439,13 +437,15 @@ export default function HomeScreen() {
                   }}
                 />
                 {(() => {
-                  const rem =
-                    homeFuelDraft ??
-                    activeVehicle.estimatedFuelLiters ??
-                    sinceFill?.fuelRemainingEst ??
-                    null;
-                  const rangeKm = sinceFill?.rangeKm ?? 0;
+                  // Uniquement la jauge véhicule — pas sinceFill (0 par défaut sans plein → « ~0.0 L » fantôme).
+                  const rem = homeFuelDraft ?? activeVehicle.estimatedFuelLiters ?? null;
                   if (rem == null) return null;
+                  const rangeKm =
+                    rem > 0 && activeVehicle.consumptionPer100 > 0
+                      ? Math.round((rem / activeVehicle.consumptionPer100) * 100)
+                      : sinceFill?.rangeKm && activeVehicle.estimatedFuelLiters != null
+                        ? sinceFill.rangeKm
+                        : 0;
                   return (
                     <Text
                       style={{

@@ -60,7 +60,8 @@ export function FuelGaugeSlider({
   const { colors } = useTheme();
   const capacity = Math.max(1, tankCapacity || 50);
   const known = liters != null && Number.isFinite(liters);
-  const savedL = known ? Math.max(0, Math.min(capacity, liters!)) : capacity * 0.5;
+  // Inconnu = aiguille à E (pas à ½) : sinon Accueil montre ½ vert + « ~0.0 L » à côté.
+  const savedL = known ? Math.max(0, Math.min(capacity, liters!)) : 0;
 
   const [editing, setEditing] = useState(!requireConfirm);
   const [draft, setDraft] = useState(savedL);
@@ -73,7 +74,11 @@ export function FuelGaugeSlider({
   const locked = requireConfirm && !editing;
   const interactive = !disabled && !locked;
   const displayL = requireConfirm && editing ? draft : savedL;
-  const fraction = Math.max(0, Math.min(1, displayL / capacity));
+  // Hors édition + inconnu : fraction 0 (pas de demi-plein fantôme).
+  const fraction = Math.max(
+    0,
+    Math.min(1, !known && !editing ? 0 : displayL / capacity)
+  );
 
   const tone = fuelRemainingTone({
     litersRemaining: displayL,
@@ -175,8 +180,10 @@ export function FuelGaugeSlider({
   };
 
   const startEdit = () => {
+    // Annuler restaure l’état sauvé (0 si inconnu). En édition, on place l’aiguille à ½
+    // comme point de départ pour un premier réglage (geste toujours requis si inconnu).
     baselineRef.current = savedL;
-    setDraft(savedL);
+    setDraft(known ? savedL : Math.round(capacity * 0.5 * 10) / 10);
     setNeedsGesture(!known);
     setGestured(false);
     setEditing(true);
