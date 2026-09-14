@@ -11,6 +11,7 @@ import {
 import { router, useLocalSearchParams, useFocusEffect, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/hooks/useTheme';
 import { useLocale } from '@/context/LocaleContext';
 import { Card, StatCard } from '@/components/Card';
@@ -31,12 +32,16 @@ import { notify } from '@/lib/notify';
 import { updateVehicle } from '@/lib/database';
 import { MaintenanceStatusPanel } from '@/components/MaintenanceStatusPanel';
 import { TutorialAnchor } from '@/components/TutorialAnchor';
+import { syncFailureMessage } from '@/lib/api';
+import { useToast } from '@/context/ToastContext';
 import type { FillUp, SinceLastFillStats, Trip } from '@/types';
 
 export default function VehicleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const vehicleId = Number(id);
   const { vehicles, activeVehicle, selectVehicle, refresh } = useApp();
+  const { syncNow } = useAuth();
+  const { showToast } = useToast();
   const { colors } = useTheme();
   const { locale } = useLocale();
   const vehicle = vehicles.find((v) => v.id === vehicleId) || null;
@@ -45,6 +50,7 @@ export default function VehicleDetailScreen() {
   const [since, setSince] = useState<SinceLastFillStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [draftFuel, setDraftFuel] = useState<number | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(vehicleId)) return;
@@ -105,10 +111,24 @@ export default function VehicleDetailScreen() {
       contentContainerStyle={styles.content}
       refreshControl={
         <RefreshControl
-          refreshing={loading}
-          onRefresh={() => {
-            void load();
-            void refresh();
+          refreshing={loading || syncing}
+          onRefresh={async () => {
+            setSyncing(true);
+            try {
+              await load();
+              await refresh();
+              const result = await syncNow();
+              await refresh();
+              await load();
+              if (result === 'pulled') showToast('Cloud téléchargé');
+              else if (result === 'pushed') showToast('Sauvegarde envoyée au cloud');
+              else if (result === 'blocked-trip') showToast('Sync reportée — trajet en cours');
+              else if (result === 'up-to-date') showToast('Déjà synchronisé');
+            } catch (e) {
+              showToast(syncFailureMessage(e).message);
+            } finally {
+              setSyncing(false);
+            }
           }}
         />
       }
@@ -166,7 +186,12 @@ export default function VehicleDetailScreen() {
             await setFuelLiters(vehicle, L);
             await refresh();
             await load();
-            notify('Réservoir', `${L.toFixed(1)} L enregistrés`);
+            notify('Réservoir', `${L.toFixed(1)} L · conso recalibrée si plein connu`);
+            void syncNow().then(async (r) => {
+              if (r === 'pushed') showToast('Jauge synchronisée');
+              await refresh();
+              await load();
+            });
           }}
         />
         {since?.lastFill && (

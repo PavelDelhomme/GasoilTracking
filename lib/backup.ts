@@ -11,7 +11,41 @@ import { prepareSnapshotForPush, slimSnapshotAggressive, snapshotContentHash } f
 import { getActiveTripLite, stopActiveTrips } from '@/lib/database';
 import { finalizeStaleActiveTrip } from '@/lib/finalizeStaleTrip';
 import { decideSyncAction } from '@/lib/syncDecision';
+import { stopBackgroundTracking } from '@/lib/locationService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+/**
+ * Ne tue un trajet actif que s’il est vraiment zombie (tiny + vieux, ou > 90 min).
+ * Un suivi tout juste démarré (0 km) ou en pause doit rester actif + FGS.
+ * @returns true si un trajet live bloque encore la sync
+ */
+async function resolveActiveTripForSync(opts?: {
+  /** Pull explicite : ne jamais tuer un trajet récent */
+  neverKillRecent?: boolean;
+}): Promise<boolean> {
+  await finalizeStaleActiveTrip();
+  let live = await getActiveTripLite();
+  if (!live?.isActive) return false;
+
+  const startMs = Date.parse(live.startTime || '');
+  const ageMs = Number.isFinite(startMs) ? Date.now() - startMs : 0;
+  const tiny = (live.distanceKm || 0) < 0.5;
+  const staleTiny = tiny && ageMs > 30 * 60 * 1000;
+  const oldGhost = ageMs > 90 * 60 * 1000;
+
+  if (!opts?.neverKillRecent && (staleTiny || oldGhost)) {
+    await stopActiveTrips();
+    try {
+      await stopBackgroundTracking();
+    } catch {
+      /* web / non dispo */
+    }
+    live = await getActiveTripLite();
+    return !!live?.isActive;
+  }
+
+  return true;
+}
 
 const BACKUP_KEY = 'gasoil_local_backup_v1';
 const PENDING_UPDATE_KEY = 'gasoil_pending_update_v1';
@@ -72,18 +106,11 @@ export async function prepareDataForUpdate(): Promise<{
   cloudSynced: boolean;
 }> {
   try {
-    // Zombies (crash / Freecess) : ne pas bloquer la MAJ — on clôture puis on sauvegarde.
-    await finalizeStaleActiveTrip();
-    const live = await getActiveTripLite();
-    if (live?.isActive) {
-      const tiny = (live.distanceKm || 0) < 0.5;
-      if (tiny) {
-        await stopActiveTrips();
-      } else {
-        throw new Error(
-          'Terminez le trajet en cours avant la mise à jour (ou reportez la MAJ).'
-        );
-      }
+    const blocked = await resolveActiveTripForSync();
+    if (blocked) {
+      throw new Error(
+        'Terminez le trajet en cours avant la mise à jour (ou reportez la MAJ).'
+      );
     }
   } catch (e) {
     if (e instanceof Error && /Terminez le trajet/.test(e.message)) throw e;
@@ -210,13 +237,8 @@ export async function refreshFromCloud(): Promise<{
   const token = await getToken();
   if (!token) return { ok: false, reason: 'no-auth' };
   try {
-    // Clôture d’abord les zombies (crash / Freecess) — un faux « trajet actif »
-    // ne doit pas bloquer un pull explicite qui remplace tout le local.
-    await finalizeStaleActiveTrip();
-    const live = await getActiveTripLite();
-    if (live?.isActive) {
-      await stopActiveTrips();
-    }
+    const blocked = await resolveActiveTripForSync({ neverKillRecent: true });
+    if (blocked) return { ok: false, reason: 'active-trip' };
   } catch {
     /* continue */
   }
@@ -306,20 +328,8 @@ export async function syncPreferNewer(): Promise<SyncPreferResult> {
   const token = await getToken();
   if (!token) return 'skipped';
   try {
-    // Zombies d’abord — sinon sync bloquée sans trajet visible à l’UI.
-    await finalizeStaleActiveTrip();
-    let live = await getActiveTripLite();
-    if (live?.isActive) {
-      const tiny = (live.distanceKm || 0) < 0.5;
-      const paused = !!live.isPaused;
-      const startMs = Date.parse(live.startTime || '');
-      const oldGhost = Number.isFinite(startMs) && Date.now() - startMs > 90 * 60 * 1000;
-      if (tiny || paused || oldGhost) {
-        await stopActiveTrips();
-        live = await getActiveTripLite();
-      }
-    }
-    if (live?.isActive) return 'blocked-trip';
+    const blocked = await resolveActiveTripForSync();
+    if (blocked) return 'blocked-trip';
   } catch {
     /* continue */
   }
@@ -399,16 +409,8 @@ export async function forcePushLocalToCloud(): Promise<{ ok: boolean; reason: st
   const token = await getToken();
   if (!token) return { ok: false, reason: 'no-auth' };
   try {
-    await finalizeStaleActiveTrip();
-    let live = await getActiveTripLite();
-    if (live?.isActive) {
-      const tiny = (live.distanceKm || 0) < 0.5;
-      if (tiny || live.isPaused) {
-        await stopActiveTrips();
-        live = await getActiveTripLite();
-      }
-    }
-    if (live?.isActive) return { ok: false, reason: 'active-trip' };
+    const blocked = await resolveActiveTripForSync();
+    if (blocked) return { ok: false, reason: 'active-trip' };
   } catch {
     /* continue */
   }

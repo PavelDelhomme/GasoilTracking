@@ -1,8 +1,9 @@
 /** Helpers niveau carburant estimé par véhicule (multi-voitures). */
 
 import type { FillUp, Vehicle } from '@/types';
-import { updateVehicle } from '@/lib/database';
+import { getFillUps, getTrips, getVehicleById, updateTrip, updateVehicle } from '@/lib/database';
 import { estimateTripFuelLiters } from '@/lib/consumptionModel';
+import { isSaneConsumptionSample } from '@/lib/calculations';
 
 export type FillFuelPreview = {
   beforeLiters: number | null;
@@ -51,36 +52,162 @@ export function previewFillUpFuel(
   };
 }
 
-/** Applique un plein au niveau estimé du véhicule. */
+/**
+ * Rejoue le niveau depuis le dernier plein chronologique :
+ * niveau au plein − Σ conso des trajets postérieurs.
+ * Corrige les « plein fantômes » et les pleins antidatés.
+ */
+export async function recomputeFuelFromLastFill(vehicleId: number): Promise<number | null> {
+  const vehicle = await getVehicleById(vehicleId);
+  if (!vehicle || vehicle.fuelType === 'electrique') {
+    return vehicle?.estimatedFuelLiters ?? null;
+  }
+  const fills = await getFillUps(vehicleId);
+  if (!fills.length) return vehicle.estimatedFuelLiters;
+
+  const last = [...fills].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+  const trips = await getTrips(vehicleId, { omitRoutePoints: true });
+  const since = trips.filter(
+    (t) =>
+      !t.isActive &&
+      t.status !== 'rejected' &&
+      String(t.startTime) > String(last.date)
+  );
+
+  const atFill = last.isFull
+    ? vehicle.tankCapacity
+    : (() => {
+        // Partiel : niveau juste après le plein ≈ stock actuel + déjà brûlé depuis
+        // (évite d’écraser un adjust manuel s’il n’y a pas encore de trajets).
+        if (since.length === 0) return vehicle.estimatedFuelLiters ?? Math.min(vehicle.tankCapacity, last.liters);
+        let burnedProbe = 0;
+        for (const t of since) {
+          if ((t.estimatedFuelUsed || 0) > 0) burnedProbe += t.estimatedFuelUsed;
+          else if ((t.distanceKm || 0) > 0) burnedProbe += estimateTripFuelLiters(vehicle, t.distanceKm);
+        }
+        const inferred =
+          (vehicle.estimatedFuelLiters ?? Math.min(vehicle.tankCapacity, last.liters)) + burnedProbe;
+        return Math.min(vehicle.tankCapacity, Math.max(last.liters, inferred));
+      })();
+
+  if (!last.isFull && since.length === 0 && vehicle.estimatedFuelLiters != null) {
+    return vehicle.estimatedFuelLiters;
+  }
+
+  let burned = 0;
+  for (const t of since) {
+    const km = t.distanceKm || 0;
+    if (km <= 0) continue;
+    // Toujours le modèle distance : estimatedFuelUsed peut être 0 (trajets Maps / GPS mal clos).
+    const model = estimateTripFuelLiters(vehicle, km);
+    const stored = t.estimatedFuelUsed || 0;
+    burned += Math.max(model, stored);
+  }
+  const next = Math.max(0, Math.round((atFill - burned) * 10) / 10);
+  if (vehicle.estimatedFuelLiters == null || Math.abs(vehicle.estimatedFuelLiters - next) > 0.05) {
+    await updateVehicle(vehicleId, { estimatedFuelLiters: next });
+  }
+  return next;
+}
+
+/** Applique un plein puis rejoue les trajets postérieurs (antidatés OK). */
 export async function applyFillUpToFuelEstimate(
   vehicle: Vehicle,
   fill: Pick<FillUp, 'liters' | 'isFull'>
 ): Promise<number> {
   const preview = previewFillUpFuel(vehicle, fill);
-  const next = preview.afterLiters;
-  // La conso L/100 est calibrée par adaptVehicleConsumption (pleins du véhicule),
-  // pas via consumptionLearnFactor ici (évite double peine).
-  await updateVehicle(vehicle.id, { estimatedFuelLiters: next });
-  return next;
+  await updateVehicle(vehicle.id, { estimatedFuelLiters: preview.afterLiters });
+  const recomputed = await recomputeFuelFromLastFill(vehicle.id);
+  return recomputed ?? preview.afterLiters;
 }
 
 /**
- * Après modification d’un plein déjà enregistré : retire l’ancien apport litres, puis réapplique.
+ * Après modification d’un plein : rejoue depuis le dernier plein (plus fiable qu’un undo litres).
  */
 export async function reapplyFillUpFuelEstimate(
   vehicle: Vehicle,
-  previous: Pick<FillUp, 'liters' | 'isFull'>,
-  nextFill: Pick<FillUp, 'liters' | 'isFull'>
+  _previous: Pick<FillUp, 'liters' | 'isFull'>,
+  _nextFill: Pick<FillUp, 'liters' | 'isFull'>
 ): Promise<number | null> {
-  if (vehicle.estimatedFuelLiters == null) {
-    return applyFillUpToFuelEstimate(vehicle, nextFill);
-  }
-  const undone = Math.max(
-    0,
-    Math.round((vehicle.estimatedFuelLiters - previous.liters) * 10) / 10
+  return recomputeFuelFromLastFill(vehicle.id);
+}
+
+/**
+ * Jauge manuelle = ancre : recalibre L/100 + redistribue la conso des trajets
+ * depuis le dernier plein complet.
+ */
+export async function recalibrateFromManualGauge(
+  vehicleId: number,
+  currentLiters: number
+): Promise<{ measuredL100: number; nextL100: number; tripsAdjusted: number } | null> {
+  const vehicle = await getVehicleById(vehicleId);
+  if (!vehicle || vehicle.fuelType === 'electrique') return null;
+  if (vehicle.consumptionAutoAdapt === false) return null;
+
+  const fills = await getFillUps(vehicleId);
+  if (!fills.length) return null;
+  const last = [...fills].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+  if (!last.isFull) return null;
+
+  const trips = await getTrips(vehicleId, { omitRoutePoints: true });
+  const since = trips.filter(
+    (t) =>
+      !t.isActive &&
+      t.status !== 'rejected' &&
+      (t.distanceKm || 0) > 0 &&
+      String(t.startTime) > String(last.date)
   );
-  const virtual: Vehicle = { ...vehicle, estimatedFuelLiters: undone };
-  return applyFillUpToFuelEstimate(virtual, nextFill);
+  const tripKm = since.reduce((s, t) => s + (t.distanceKm || 0), 0);
+  if (tripKm < 8) return null;
+
+  const actualBurn = Math.max(0, vehicle.tankCapacity - currentLiters);
+  if (actualBurn < 0.4) return null;
+
+  const measured = (actualBurn / tripKm) * 100;
+  if (!isSaneConsumptionSample(measured, vehicle.fuelType)) return null;
+
+  const prev = vehicle.consumptionPer100 > 0 ? vehicle.consumptionPer100 : measured;
+  const nextL100 = Math.round((measured * 0.55 + prev * 0.45) * 10) / 10;
+  const learn =
+    prev > 0.5 ? Math.round(Math.min(1.35, Math.max(0.7, measured / prev)) * 1000) / 1000 : 1;
+  await updateVehicle(vehicleId, {
+    consumptionPer100: nextL100,
+    consumptionLearnFactor: learn,
+  });
+
+  let estTotal = since.reduce((s, t) => s + (t.estimatedFuelUsed || 0), 0);
+  if (estTotal < 0.2) {
+    estTotal = since.reduce(
+      (s, t) => s + estimateTripFuelLiters(vehicle, t.distanceKm || 0),
+      0
+    );
+  }
+  let tripsAdjusted = 0;
+  if (estTotal > 0.2) {
+    const factor = actualBurn / estTotal;
+    const price =
+      last.pricePerLiter > 0
+        ? last.pricePerLiter
+        : vehicle.defaultFuelPrice > 0
+          ? vehicle.defaultFuelPrice
+          : 0;
+    for (const t of since) {
+      const base =
+        (t.estimatedFuelUsed || 0) > 0
+          ? t.estimatedFuelUsed
+          : estimateTripFuelLiters(vehicle, t.distanceKm || 0);
+      const fuel = Math.round(base * factor * 100) / 100;
+      const cost = price > 0 ? Math.round(fuel * price * 100) / 100 : t.estimatedCost;
+      await updateTrip(t.id, { estimatedFuelUsed: fuel, estimatedCost: cost });
+      tripsAdjusted += 1;
+    }
+  }
+
+  return {
+    measuredL100: Math.round(measured * 10) / 10,
+    nextL100,
+    tripsAdjusted,
+  };
 }
 
 /** Décrémente le niveau après un trajet (modèle conso réaliste). */
@@ -110,13 +237,18 @@ export async function setFuelFraction(vehicle: Vehicle, fraction: number): Promi
   return next;
 }
 
-/** Fixe un niveau en litres. */
+/** Fixe un niveau en litres + recalibre conso depuis le dernier plein si possible. */
 export async function setFuelLiters(vehicle: Vehicle, liters: number): Promise<number> {
   const next = Math.min(
     vehicle.tankCapacity,
     Math.max(0, Math.round(liters * 10) / 10)
   );
   await updateVehicle(vehicle.id, { estimatedFuelLiters: next });
+  try {
+    await recalibrateFromManualGauge(vehicle.id, next);
+  } catch {
+    /* jauge seule suffit */
+  }
   return next;
 }
 

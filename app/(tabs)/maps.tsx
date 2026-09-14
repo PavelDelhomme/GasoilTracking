@@ -92,10 +92,19 @@ export default function MapsScreen() {
     if (activeTrip?.isActive) {
       setSessionTracking(true);
       setSessionTripId(activeTrip.id);
-    } else if (!starting) {
-      setSessionTracking(false);
-      setSessionTripId(null);
+      return;
     }
+    if (starting) return;
+    // FGS / buffer encore vivant alors que le Context a perdu le trajet
+    // (ex. sync qui tuait les tiny) → garder Pause / Terminer.
+    const liveId = peekLiveTripId();
+    if (liveId != null) {
+      setSessionTracking(true);
+      setSessionTripId(liveId);
+      return;
+    }
+    setSessionTracking(false);
+    setSessionTripId(null);
   }, [activeTrip?.isActive, activeTrip?.id, starting]);
 
   const refreshLoc = useCallback(async () => {
@@ -706,7 +715,7 @@ export default function MapsScreen() {
           userLocation={user}
           followUser={tracking && !paused}
           paused={paused}
-          plannedRoute={liveTail.length > 4 ? [] : plannedRoute}
+          plannedRoute={plannedRoute}
           alternateRoutes={tracking ? [] : alternateRoutes}
           destination={destForMap}
         />

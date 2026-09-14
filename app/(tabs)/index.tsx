@@ -434,7 +434,8 @@ export default function HomeScreen() {
                     await setFuelLiters(activeVehicle, L);
                     await refresh();
                     await reloadStats(activeVehicle.id);
-                    notify('Réservoir', `${L.toFixed(1)} L`);
+                    notify('Réservoir', `${L.toFixed(1)} L · conso recalibrée si possible`);
+                    void syncNow();
                   }}
                 />
                 {(() => {

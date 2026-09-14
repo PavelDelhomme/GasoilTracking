@@ -3,15 +3,20 @@ import { View, Text, StyleSheet, FlatList, RefreshControl } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/hooks/useTheme';
+import { useToast } from '@/context/ToastContext';
 import { VehicleCard } from '@/components/VehicleCard';
 import { Button } from '@/components/Button';
 import { TutorialAnchor } from '@/components/TutorialAnchor';
 import { deleteVehicle } from '@/lib/database';
 import { confirm, notify } from '@/lib/notify';
+import { syncFailureMessage } from '@/lib/api';
 
 export default function VehiclesScreen() {
   const { vehicles, activeVehicle, selectVehicle, refresh } = useApp();
+  const { syncNow } = useAuth();
+  const { showToast } = useToast();
   const { colors } = useTheme();
   const [refreshing, setRefreshing] = useState(false);
 
@@ -26,10 +31,18 @@ export default function VehiclesScreen() {
     setRefreshing(true);
     try {
       await refresh();
+      const result = await syncNow();
+      await refresh();
+      if (result === 'pulled') showToast('Cloud téléchargé');
+      else if (result === 'pushed') showToast('Sauvegarde envoyée au cloud');
+      else if (result === 'blocked-trip') showToast('Sync reportée — trajet en cours');
+      else if (result === 'up-to-date') showToast('Déjà synchronisé');
+    } catch (e) {
+      showToast(syncFailureMessage(e).message);
     } finally {
       setRefreshing(false);
     }
-  }, [refresh]);
+  }, [refresh, syncNow, showToast]);
 
   const handleDelete = (id: number, name: string) => {
     confirm(
@@ -88,7 +101,10 @@ export default function VehiclesScreen() {
               }
               onLongPress={() => handleDelete(item.id, item.name)}
               onDelete={() => handleDelete(item.id, item.name)}
-              onFuelUpdated={() => void refresh()}
+              onFuelUpdated={() => {
+                void refresh();
+                void syncNow();
+              }}
             />
           );
           // Spotlight sur la 1ʳᵉ carte seulement (évite un trou géant / double barre)

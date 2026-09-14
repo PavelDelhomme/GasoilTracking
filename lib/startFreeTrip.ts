@@ -21,7 +21,8 @@ import {
   parseRoutePoints,
 } from '@/lib/calculations';
 import { estimateTripFuelLiters } from '@/lib/consumptionModel';
-import { applyTripFuelBurn } from '@/lib/fuelLevel';
+import { applyTripFuelBurn, setFuelLiters } from '@/lib/fuelLevel';
+import { askFuelGaugeApprox } from '@/lib/fuelGaugePrompt';
 import {
   flushTripUpdates,
   getCurrentLocation,
@@ -144,6 +145,21 @@ export async function startGpsTrip(opts: {
 
     await stopBackgroundTracking();
     await clearLiveTripBuffer();
+
+    // Même prompt jauge que l’onglet Trajet (Maps / suivi libre / destination).
+    try {
+      const gauge = await askFuelGaugeApprox(
+        opts.vehicle,
+        'Niveau de carburant au départ',
+        'Réglez la jauge pour affiner la consommation estimée.',
+        { softSkip: true }
+      );
+      if (!gauge.skipped) {
+        await setFuelLiters(opts.vehicle, gauge.liters);
+      }
+    } catch {
+      /* ne bloque pas le départ GPS */
+    }
 
     const loc = await getCurrentLocation({ fresh: true });
     const startPoint = loc

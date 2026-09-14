@@ -11,6 +11,7 @@ import {
 } from '@/lib/database';
 import { litersFromTicket } from '@/lib/fuelPrices';
 import { hasMatchingFillUp, INTERMARCHE_GUERCHE_FILL } from '@/lib/intermarcheFillUp';
+import { recomputeFuelFromLastFill } from '@/lib/fuelLevel';
 
 /** Gazole TotalEnergies Thorigné-Fouillard (open data ~2,250 €/L, maj août 2026). */
 export const TOTAL_THORIGNE_GAZOLE_EUR = 2.25;
@@ -235,55 +236,33 @@ export async function repairFillUpVehiclesAndBudgets(): Promise<{
     }
   }
 
-  // Prix défaut diesel + niveaux après dernier plein marqué « complet »
+  // Prix défaut diesel — NE PLUS forcer estimatedFuelLiters = capacité
+  // (ça créait des « plein fantômes » après chaque sync/refresh).
   fills = await getFillUps();
   for (const v of vehicles) {
     if (v.fuelType !== 'diesel') continue;
-    const patch: { defaultFuelPrice?: number; estimatedFuelLiters?: number } = {};
     if (!almostEq(v.defaultFuelPrice, TOTAL_THORIGNE_GAZOLE_EUR, 0.01)) {
-      patch.defaultFuelPrice = TOTAL_THORIGNE_GAZOLE_EUR;
-    }
-    const vehicleFills = fills
-      .filter((f) => f.vehicleId === v.id)
-      .sort((a, b) => String(b.date).localeCompare(String(a.date)));
-    const last = vehicleFills[0];
-    if (last?.isFull && v.estimatedFuelLiters !== v.tankCapacity) {
-      // Plein complet → niveau = capacité réservoir (pas les litres erronés du ticket)
-      patch.estimatedFuelLiters = v.tankCapacity;
-    }
-    if (Object.keys(patch).length > 0) {
-      await updateVehicle(v.id, patch);
-      if (patch.estimatedFuelLiters !== undefined) levelsFixed += 1;
+      await updateVehicle(v.id, { defaultFuelPrice: TOTAL_THORIGNE_GAZOLE_EUR });
+      levelsFixed += 1;
     }
   }
 
-  // 206 : après plein complet du 02/09, niveau = réservoir − conso trajets depuis
-  if (v206) {
-    const vehicleFills = fills
-      .filter((f) => f.vehicleId === v206.id)
-      .sort((a, b) => String(b.date).localeCompare(String(a.date)));
-    const last = vehicleFills[0];
-    if (last?.isFull && String(last.date).slice(0, 10) === '2026-09-02') {
-      try {
-        const trips = await getTrips(v206.id);
-        const burned = trips
-          .filter(
-            (t) =>
-              t.status !== 'rejected' && String(t.startTime) > String(last.date)
-          )
-          .reduce((s, t) => s + (t.estimatedFuelUsed || 0), 0);
-        const next = Math.max(
-          0,
-          Math.round((v206.tankCapacity - burned) * 10) / 10
-        );
-        if (v206.estimatedFuelLiters == null || !almostEq(v206.estimatedFuelLiters, next, 0.15)) {
-          await updateVehicle(v206.id, { estimatedFuelLiters: next });
-          levelsFixed += 1;
-        }
-      } catch {
-        /* ignore */
+  // Tous véhicules : corriger seulement jauge inconnue ou « plein fantôme »
+  // (ne jamais remonter un niveau déjà ajusté / brûlé).
+  try {
+    for (const v of vehicles) {
+      if (v.fuelType === 'electrique') continue;
+      const before = v.estimatedFuelLiters;
+      const phantomFull =
+        before != null && almostEq(before, v.tankCapacity, 1.0);
+      if (before != null && !phantomFull) continue;
+      const next = await recomputeFuelFromLastFill(v.id);
+      if (next != null && (before == null || !almostEq(before, next, 0.15))) {
+        levelsFixed += 1;
       }
     }
+  } catch {
+    /* ignore */
   }
 
   let budgetsFixed = await deactivateVehicleScopedBudgets();
