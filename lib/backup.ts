@@ -308,6 +308,52 @@ function snapshotTripKm(snap: { trips?: { distanceKm?: number; isActive?: boolea
 }
 
 /**
+ * Avant un push : si le cloud a été corrigé après notre dernier push
+ * (jauge / conso / compteur), on reprend ces champs pour ne pas les écraser
+ * avec l’ancien local téléphone (cas Nothing → 8,3 L qui tuait 12,5 L cloud).
+ */
+function mergeVehicleCorrectionsFromCloud(
+  local: AppDataSnapshot,
+  remote: AppDataSnapshot | null | undefined
+): number {
+  if (!remote?.vehicles?.length || !local.vehicles?.length) return 0;
+  let n = 0;
+  for (const lv of local.vehicles) {
+    const rv = remote.vehicles.find((v) => v.id === lv.id);
+    if (!rv) continue;
+    let touched = false;
+    if (
+      rv.estimatedFuelLiters != null &&
+      (lv.estimatedFuelLiters == null ||
+        Math.abs((lv.estimatedFuelLiters ?? 0) - rv.estimatedFuelLiters) > 0.05)
+    ) {
+      lv.estimatedFuelLiters = rv.estimatedFuelLiters;
+      touched = true;
+    }
+    if (
+      Number.isFinite(rv.consumptionPer100) &&
+      rv.consumptionPer100 > 0 &&
+      Math.abs((lv.consumptionPer100 || 0) - rv.consumptionPer100) > 0.05
+    ) {
+      lv.consumptionPer100 = rv.consumptionPer100;
+      if (rv.consumptionLearnFactor != null) {
+        lv.consumptionLearnFactor = rv.consumptionLearnFactor;
+      }
+      touched = true;
+    }
+    if (
+      Number.isFinite(rv.currentOdometer) &&
+      rv.currentOdometer > (lv.currentOdometer || 0) + 0.5
+    ) {
+      lv.currentOdometer = rv.currentOdometer;
+      touched = true;
+    }
+    if (touched) n += 1;
+  }
+  return n;
+}
+
+/**
  * Si le cloud est plus récent, tire ; sinon pousse.
  * Ne tire jamais un cloud « pauvre » (ex. 1 véhicule fantôme) par-dessus un local riche.
  * Privilégie le téléphone s’il a plus d’activité trajet / km (source de vérité terrain).
@@ -399,6 +445,10 @@ export async function syncPreferNewer(): Promise<SyncPreferResult> {
     return 'pulled';
   }
 
+  // Push : fusionner jauge/conso/compteur cloud si correction serveur récente
+  if (remoteServerAt > meta.lastPushedAt + 1500) {
+    mergeVehicleCorrectionsFromCloud(local, remoteSnap);
+  }
   await pushSyncSafe(local);
   await saveLocalBackup(local);
   return 'pushed';

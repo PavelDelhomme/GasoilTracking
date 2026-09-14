@@ -49,15 +49,19 @@ export function decideSyncAction(i: SyncDecisionInput): SyncAction {
   const localMoreKm = i.localKm > i.remoteKm + 5;
   const localStrictlyAhead = localMoreTrips || localMoreKm;
 
-  // Correction cloud / autre appareil après notre dernier push : tirer sauf si on a vraiment plus de données.
+  // Correction cloud / autre appareil après notre dernier push : tirer
+  // même si on a un peu plus de km (sinon la jauge cloud est réécrasée).
+  // Sauf écart massif de trajets locaux non sync (>2) → push avec merge jauge.
   const cloudChangedSincePush =
     !!i.remoteHash &&
     i.localHash !== i.remoteHash &&
     i.remoteServerAt > 0 &&
     i.remoteServerAt > i.lastPushedAt + 1500;
 
-  if (cloudChangedSincePush && !localStrictlyAhead) {
-    return 'pull';
+  if (cloudChangedSincePush) {
+    const localWayAhead =
+      i.localTripCount > i.remoteTripCount + 2 || i.localKm > i.remoteKm + 40;
+    if (!localWayAhead) return 'pull';
   }
 
   // Même squelette (nb trajets + km ~égaux) mais hash différent → confiance horloge serveur
