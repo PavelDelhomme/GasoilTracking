@@ -335,11 +335,26 @@ export default function TripScreen() {
   const [simProgress, setSimProgress] = useState('');
   const simAbort = useRef({ aborted: false });
 
-  const gpsSimEnabled =
-    __DEV__ ||
-    Constants.expoConfig?.extra?.enableGpsSimulator === true ||
-    (Constants.easConfig as { enableGpsSimulator?: boolean } | undefined)?.enableGpsSimulator ===
-      true;
+  const gpsSimEnabled = (() => {
+    if (__DEV__) return true;
+    const extra =
+      (Constants.expoConfig?.extra as Record<string, unknown> | undefined) ||
+      ((Constants as { manifest?: { extra?: Record<string, unknown> } }).manifest?.extra) ||
+      ((
+        Constants as {
+          manifest2?: { extra?: { expoClient?: { extra?: Record<string, unknown> } } };
+        }
+      ).manifest2?.extra?.expoClient?.extra) ||
+      {};
+    if (extra.enableGpsSimulator === true) return true;
+    // Filet : flavors labo même si le bool n’est pas lu (Constants parfois incomplet en release)
+    const flavor = String(extra.appFlavor || '');
+    if (['preprod', 'dev', 'feat', 'qa'].includes(flavor)) return true;
+    if ((Constants.easConfig as { enableGpsSimulator?: boolean } | undefined)?.enableGpsSimulator) {
+      return true;
+    }
+    return false;
+  })();
   const [history, setHistory] = useState<Trip[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyRefreshing, setHistoryRefreshing] = useState(false);
