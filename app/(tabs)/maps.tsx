@@ -85,6 +85,7 @@ export default function MapsScreen() {
   const [suggestLocked, setSuggestLocked] = useState(false);
   const [nowMs, setNowMs] = useState(Date.now());
   const suggestDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopInFlight = useRef(false);
 
   const tracking = Boolean(activeTrip?.isActive) || sessionTracking;
   const paused = Boolean(activeTrip?.isPaused);
@@ -660,6 +661,8 @@ export default function MapsScreen() {
     const tripId = activeTrip?.id ?? sessionTripId;
     const vehicleId = activeTrip?.vehicleId ?? activeVehicle?.id;
     if (!tripId || vehicleId == null) return;
+    if (busy || stopInFlight.current || !tracking) return; // anti double-tap
+    stopInFlight.current = true;
     setBusy(true);
     // Couper l’UI tout de suite — sinon peekLiveTripId ressuscite Pause/Terminer.
     setSessionTracking(false);
@@ -671,10 +674,16 @@ export default function MapsScreen() {
           ? Math.round(calculateRouteDistance(JSON.stringify(liveTail)) * 1000) / 1000
           : 0;
       const hudKm = hud?.distanceKm ?? 0;
+      const rawKm = Math.max(activeTrip?.distanceKm ?? 0, hudKm, tailKm);
+      // Plafond de sécurité : éviter un burn absurde si buffer GPS pollué
+      const startedAt = activeTrip?.startTime ? Date.parse(activeTrip.startTime) : NaN;
+      const ageMin = Number.isFinite(startedAt) ? (Date.now() - startedAt) / 60000 : 0;
+      const maxPlausibleKm = Math.max(2, ageMin * 2.5); // ~150 km/h plafond
+      const distanceKm = Math.min(rawKm, maxPlausibleKm);
       await stopGpsTripLite({
         tripId,
         vehicleId,
-        distanceKm: Math.max(activeTrip?.distanceKm ?? 0, hudKm, tailKm),
+        distanceKm,
         refresh,
       });
       setPendingDest(null);
@@ -685,8 +694,8 @@ export default function MapsScreen() {
       setQuery('');
       setSearchHits([]);
       showToast(
-        hudKm > 0.05 || tailKm > 0.05
-          ? `Trajet terminé · ${formatDistance(Math.max(hudKm, tailKm))}`
+        distanceKm > 0.05
+          ? `Trajet terminé · ${formatDistance(distanceKm)}`
           : 'Trajet terminé'
       );
       if (user) {
@@ -700,6 +709,7 @@ export default function MapsScreen() {
         setSessionTripId(activeTrip.id);
       }
     } finally {
+      stopInFlight.current = false;
       setBusy(false);
     }
   };
