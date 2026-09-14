@@ -350,6 +350,15 @@ export default function TripScreen() {
     // Filet : flavors labo même si le bool n’est pas lu (Constants parfois incomplet en release)
     const flavor = String(extra.appFlavor || '');
     if (['preprod', 'dev', 'feat', 'qa'].includes(flavor)) return true;
+    const pkg = String(
+      Constants.expoConfig?.android?.package ||
+        (Constants as { expoConfig?: { android?: { package?: string } } }).expoConfig?.android
+          ?.package ||
+        ''
+    );
+    if (/\.(qa|preprod|dev|feat)(\.|$)/.test(pkg) || pkg.endsWith('.qa') || pkg.endsWith('.preprod') || pkg.endsWith('.dev') || pkg.endsWith('.feat')) {
+      return true;
+    }
     if ((Constants.easConfig as { enableGpsSimulator?: boolean } | undefined)?.enableGpsSimulator) {
       return true;
     }
@@ -1287,23 +1296,28 @@ export default function TripScreen() {
   const simAutoKey = useRef<string | null>(null);
   useEffect(() => {
     if (!gpsSimEnabled) return;
-    if (params.runSim !== '1') return;
+    const runSimRaw = params.runSim;
+    const runSim = String(Array.isArray(runSimRaw) ? runSimRaw[0] : runSimRaw || '');
+    if (runSim !== '1') return;
     if (!activeVehicle || simRunning) return;
-    const nonce = typeof params.runSimNonce === 'string' ? params.runSimNonce : '';
+    const nonceRaw = params.runSimNonce;
+    const nonce = String(Array.isArray(nonceRaw) ? nonceRaw[0] : nonceRaw || '');
     const key = nonce || '__once__';
     if (simAutoKey.current === key) return;
     simAutoKey.current = key;
     setTab('live');
+    const purgeRaw = params.purgeSim ?? params.purgeFirst;
+    const purge = String(Array.isArray(purgeRaw) ? purgeRaw[0] : purgeRaw || '') === '1';
     const t = setTimeout(() => {
       void (async () => {
         try {
-          if (params.purgeSim === '1' || params.purgeFirst === '1') {
+          if (purge) {
             await stopActiveTrips();
             await purgeSimulatorTrips(activeVehicle.id);
             await refresh();
             await loadLists();
           }
-          await handleRunCarSimulator();
+          await handleRunCarSimulator({ pace: 'fast' });
         } catch (e) {
           showToast(e instanceof Error ? e.message : 'Échec sim auto');
         }
@@ -2108,6 +2122,14 @@ export default function TripScreen() {
           ? `SIMULATEUR (interrompu) · ${formatDistance(distanceKm)} · ~${fuelUsed.toFixed(1)} L`
           : `SIMULATEUR ${pace === 'live' ? `LIVE×${timeScale}` : 'commute'} · ${formatDistance(distanceKm)} · ${formatSpeedKmh(stats.movingSpeedKmh)} moy. · idle ${(idleRatio * 100).toFixed(0)}% · ~${fuelUsed.toFixed(1)} L`,
       });
+      // Même burn que Terminer GPS réel — sinon la jauge Accueil ne bouge pas.
+      if (distanceKm > 0 && !simAbort.current.aborted) {
+        await applyTripFuelBurn(activeVehicle, distanceKm, 0, {
+          avgSpeedKmh: stats.movingSpeedKmh > 0 ? stats.movingSpeedKmh : undefined,
+          idleRatio,
+        }).catch(() => null);
+        await addTrackedKm(activeVehicle.id, distanceKm).catch(() => null);
+      }
       setUserLocation({
         latitude: points[points.length - 1].latitude,
         longitude: points[points.length - 1].longitude,
@@ -3175,13 +3197,14 @@ export default function TripScreen() {
                       title={
                         simRunning
                           ? simProgress || 'Simulation en cours…'
-                          : 'Sim live trajet + musique (×1 réel)'
+                          : 'Sim rapide (injection)'
                       }
                       variant="outline"
-                      onPress={() => void handleRunCarSimulator({ pace: 'live', timeScale: 1 })}
+                      onPress={() => void handleRunCarSimulator({ pace: 'fast' })}
                       loading={simRunning}
                       disabled={simRunning || isStarting}
                       style={{ marginTop: 12 }}
+                      accessibilityLabel="Sim rapide injection"
                     />
                     <Button
                       title="Sim live ×2 (~45 min)"
@@ -3191,9 +3214,9 @@ export default function TripScreen() {
                       style={{ marginTop: 8 }}
                     />
                     <Button
-                      title="Sim rapide (injection)"
+                      title="Sim live trajet + musique (×1 réel)"
                       variant="outline"
-                      onPress={() => void handleRunCarSimulator({ pace: 'fast' })}
+                      onPress={() => void handleRunCarSimulator({ pace: 'live', timeScale: 1 })}
                       disabled={simRunning || isStarting}
                       style={{ marginTop: 8 }}
                     />

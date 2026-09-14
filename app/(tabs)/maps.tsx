@@ -25,7 +25,7 @@ import type { TripMapRef } from '@/components/TripMap.types';
 import { getCurrentLocation, peekLiveRouteTail, peekLiveTripId } from '@/lib/locationService';
 import { fetchSpeedLimitNear, type SpeedLimitInfo } from '@/lib/roadSpeedLimits';
 import { forwardGeocode } from '@/lib/geocode';
-import { formatDistance, formatSpeedKmh, parseRoutePoints, type RoutePoint } from '@/lib/calculations';
+import { formatDistance, formatSpeedKmh, parseRoutePoints, calculateRouteDistance, type RoutePoint } from '@/lib/calculations';
 import { Button } from '@/components/Button';
 import { DrawerMenuButton } from '@/components/DrawerMenuButton';
 import { HeaderActions } from '@/components/HeaderActions';
@@ -36,6 +36,7 @@ import {
   type RecentDestination,
 } from '@/lib/recentDestinations';
 import { searchAddressSuggestions, type SuggestHit } from '@/lib/placeSuggest';
+import { getAppFlavor } from '@/lib/appFlavor';
 import { tripHistoryNav } from '@/lib/tripHistoryNav';
 import { startGpsTrip, pauseGpsTrip, resumeGpsTrip, stopGpsTripLite } from '@/lib/startFreeTrip';
 import { formatDurationMin, liveTripHudStats } from '@/lib/liveTripHud';
@@ -55,6 +56,7 @@ export default function MapsScreen() {
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  const labGpsSim = ['preprod', 'dev', 'feat', 'qa'].includes(getAppFlavor().key);
   const mapRef = useRef<TripMapRef>(null);
   const activeTripRef = useRef(activeTrip);
   activeTripRef.current = activeTrip;
@@ -86,7 +88,21 @@ export default function MapsScreen() {
 
   const tracking = Boolean(activeTrip?.isActive) || sessionTracking;
   const paused = Boolean(activeTrip?.isPaused);
-  const hud = liveTripHudStats(activeTrip, nowMs);
+  const hudBase = liveTripHudStats(activeTrip, nowMs);
+  const liveTailKm = useMemo(() => {
+    if (liveTail.length < 2) return 0;
+    try {
+      return Math.round(calculateRouteDistance(JSON.stringify(liveTail)) * 1000) / 1000;
+    } catch {
+      return 0;
+    }
+  }, [liveTail]);
+  const hud = hudBase
+    ? {
+        ...hudBase,
+        distanceKm: Math.max(hudBase.distanceKm, liveTailKm),
+      }
+    : hudBase;
 
   useEffect(() => {
     if (activeTrip?.isActive) {
@@ -94,7 +110,7 @@ export default function MapsScreen() {
       setSessionTripId(activeTrip.id);
       return;
     }
-    if (starting) return;
+    if (starting || busy) return;
     // FGS / buffer encore vivant alors que le Context a perdu le trajet
     // (ex. sync qui tuait les tiny) → garder Pause / Terminer.
     const liveId = peekLiveTripId();
@@ -105,7 +121,7 @@ export default function MapsScreen() {
     }
     setSessionTracking(false);
     setSessionTripId(null);
-  }, [activeTrip?.isActive, activeTrip?.id, starting]);
+  }, [activeTrip?.isActive, activeTrip?.id, starting, busy]);
 
   const refreshLoc = useCallback(async () => {
     const loc = await getCurrentLocation({ fresh: true });
@@ -645,26 +661,32 @@ export default function MapsScreen() {
     const vehicleId = activeTrip?.vehicleId ?? activeVehicle?.id;
     if (!tripId || vehicleId == null) return;
     setBusy(true);
+    // Couper l’UI tout de suite — sinon peekLiveTripId ressuscite Pause/Terminer.
+    setSessionTracking(false);
+    setSessionTripId(null);
+    setLiveTail([]);
     try {
+      const tailKm =
+        liveTail.length >= 2
+          ? Math.round(calculateRouteDistance(JSON.stringify(liveTail)) * 1000) / 1000
+          : 0;
+      const hudKm = hud?.distanceKm ?? 0;
       await stopGpsTripLite({
         tripId,
         vehicleId,
-        distanceKm: activeTrip?.distanceKm ?? 0,
+        distanceKm: Math.max(activeTrip?.distanceKm ?? 0, hudKm, tailKm),
         refresh,
       });
       setPendingDest(null);
       setPlannedRoute([]);
       setRouteOptions([]);
       setSelectedRouteId(null);
-      setLiveTail([]);
-      setSessionTracking(false);
-      setSessionTripId(null);
       setSuggestLocked(false);
       setQuery('');
       setSearchHits([]);
       showToast(
-        hud
-          ? `Trajet terminé · ${formatDistance(hud.distanceKm)}`
+        hudKm > 0.05 || tailKm > 0.05
+          ? `Trajet terminé · ${formatDistance(Math.max(hudKm, tailKm))}`
           : 'Trajet terminé'
       );
       if (user) {
@@ -672,6 +694,11 @@ export default function MapsScreen() {
       }
     } catch {
       showToast('Impossible de terminer le trajet');
+      // Si échec, retenter l’affichage suivi si le trajet est encore actif
+      if (activeTrip?.isActive) {
+        setSessionTracking(true);
+        setSessionTripId(activeTrip.id);
+      }
     } finally {
       setBusy(false);
     }
@@ -1035,6 +1062,25 @@ export default function MapsScreen() {
                 }
                 style={{ flex: 1 }}
               />
+              {labGpsSim ? (
+                <Button
+                  title="Sim labo"
+                  variant="outline"
+                  onPress={() =>
+                    router.push({
+                      pathname: '/(tabs)/trip' as never,
+                      params: {
+                        tab: 'live',
+                        runSim: '1',
+                        simPace: 'fast',
+                        runSimNonce: String(Date.now()),
+                      },
+                    })
+                  }
+                  style={{ flex: 1 }}
+                  accessibilityLabel="Sim labo injection rapide"
+                />
+              ) : null}
             </>
           )}
         </View>

@@ -279,25 +279,28 @@ export async function stopGpsTripLite(opts: {
     pts.length >= 2 ? Math.round(calculateRouteDistance(routeJson) * 1000) / 1000 : 0;
   const distanceKm = Math.max(Number(opts.distanceKm) || 0, fromPts);
 
-  let estimatedFuelUsed = Number(trip?.estimatedFuelUsed) || 0;
-  let estimatedCostVal = Number(trip?.estimatedCost) || 0;
-  try {
-    const vehicle = await getVehicleById(opts.vehicleId);
-    if (vehicle && distanceKm > 0) {
-      estimatedFuelUsed = estimateTripFuelLiters(vehicle, distanceKm, { points: pts });
-      estimatedCostVal = estimateCost(estimatedFuelUsed, vehicle.defaultFuelPrice);
-      await applyTripFuelBurn(vehicle, distanceKm);
+  let estimatedFuelUsed = 0;
+  let estimatedCostVal = 0;
+  const tiny = distanceKm < 0.25;
+  // Ne pas brûler la jauge sur un trajet rejeté / bruit GPS (sinon −plusieurs L pour 0 m UI).
+  if (!tiny && distanceKm > 0) {
+    try {
+      const vehicle = await getVehicleById(opts.vehicleId);
+      if (vehicle) {
+        estimatedFuelUsed = estimateTripFuelLiters(vehicle, distanceKm, { points: pts });
+        estimatedCostVal = estimateCost(estimatedFuelUsed, vehicle.defaultFuelPrice);
+        await applyTripFuelBurn(vehicle, distanceKm);
+      }
+    } catch {
+      /* ignore */
     }
-  } catch {
-    /* ignore */
   }
 
-  const tiny = distanceKm < 0.25;
   await updateTrip(opts.tripId, {
     isActive: false,
     isPaused: false,
     endTime: new Date().toISOString(),
-    distanceKm,
+    distanceKm: tiny ? 0 : distanceKm,
     estimatedFuelUsed,
     estimatedCost: estimatedCostVal,
     status: tiny ? 'rejected' : 'confirmed',

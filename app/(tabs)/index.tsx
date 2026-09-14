@@ -378,8 +378,8 @@ export default function HomeScreen() {
                   </Text>
                   <Text style={[styles.vehicleDetail, { color: colors.textSecondary }]}>
                     {displayOdometerKm(activeVehicle).toLocaleString(locale)} km
-                    {' · '}
-                    {activeVehicle.year}
+                    {activeVehicle.fuelType ? ` · ${activeVehicle.fuelType}` : ''}
+                    {activeVehicle.year ? ` · année ${activeVehicle.year}` : ''}
                   </Text>
                 </View>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
