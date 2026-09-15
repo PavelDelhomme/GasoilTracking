@@ -8,6 +8,7 @@ import { v4 as uuid } from 'uuid';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
 import Database from 'better-sqlite3';
 import multer from 'multer';
@@ -16,6 +17,7 @@ import { compareSemver, pickLatestRelease } from './semver.js';
 import { assertApkIdentity } from './apkMeta.js';
 import { applyPersonalCommute, applyPersonalFillUp, fetchCommuteRoute } from './personalCommute.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4000);
 const DATA_DIR = process.env.DATA_DIR || './data';
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production';
