@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,12 @@ import { TutorialAnchor } from '@/components/TutorialAnchor';
 import { createVehicle, getVehicles } from '@/lib/database';
 import { confirm, notify } from '@/lib/notify';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
-import { PRESET_VEHICLES, searchVehicles, presetDisplayName, type VehiclePreset } from '@/constants/vehicles';
+import { PRESET_VEHICLES, presetDisplayName, type VehiclePreset } from '@/constants/vehicles';
+import {
+  bootstrapVehicleCatalog,
+  refreshVehicleCatalogFromApi,
+  searchVehiclesLive,
+} from '@/lib/vehicleCatalogStore';
 import type { FuelType, VehicleSegment } from '@/types';
 import { SEGMENT_DEFAULTS, suggestPhysicsFields } from '@/lib/vehiclePhysics';
 
@@ -44,8 +49,21 @@ export default function AddVehicleScreen() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
+  const [catalogTick, setCatalogTick] = useState(0);
 
-  const results = useMemo(() => searchVehicles(search), [search]);
+  useEffect(() => {
+    void (async () => {
+      await bootstrapVehicleCatalog();
+      setCatalogTick((t) => t + 1);
+      const r = await refreshVehicleCatalogFromApi();
+      setCatalogTick((t) => t + 1);
+      if (r.source === 'api') {
+        setStatus(`Catalogue à jour · ${r.count} modèles (${r.version})`);
+      }
+    })();
+  }, []);
+
+  const results = useMemo(() => searchVehiclesLive(search), [search, catalogTick]);
 
   const applyPhysicsSuggest = (b: string, m: string, g?: number | null) => {
     const s = suggestPhysicsFields(b, m, g, {

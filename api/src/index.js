@@ -706,6 +706,34 @@ app.get('/api/fx/latest', async (_req, res) => {
   }
 });
 
+/** Catalogue véhicules public (seed APK + MAJ app). */
+app.get('/api/vehicle-catalog', (_req, res) => {
+  try {
+    const candidates = [
+      path.join(__dirname, '../static/vehicle-catalog.json'),
+      path.join(DATA_DIR, 'vehicle-catalog.json'),
+      path.join(process.cwd(), 'static/vehicle-catalog.json'),
+    ];
+    let file = null;
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        file = p;
+        break;
+      }
+    }
+    if (!file) {
+      return res.status(404).json({ error: 'Catalogue introuvable — lancez scripts/build-vehicle-catalog.mjs' });
+    }
+    const raw = fs.readFileSync(file, 'utf8');
+    const data = JSON.parse(raw);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    if (data.version) res.setHeader('X-Catalog-Version', String(data.version));
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : 'Catalogue illisible' });
+  }
+});
+
 app.get('/api/version', (_req, res) => {
   const rows = db
     .prepare('SELECT * FROM app_releases WHERE apk_filename IS NOT NULL')

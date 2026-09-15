@@ -1,4 +1,5 @@
 import type { FuelType } from '@/types';
+import { VEHICLE_CATALOG_EXTRA, VEHICLE_SEARCH_ALIASES } from '@/constants/vehicleCatalogExtra';
 
 export type VehiclePreset = {
   brand: string;
@@ -16,7 +17,7 @@ export type VehiclePreset = {
 };
 
 /** Catalogue searchable (conso & réservoir indicatifs constructeur / moyennes) */
-export const VEHICLE_CATALOG: VehiclePreset[] = [
+const VEHICLE_CATALOG_BASE: VehiclePreset[] = [
   // Peugeot
   { brand: "Peugeot", model: "108", year: 2018, consumption: 4.6, fuel: 'essence', tank: 35 },
   { brand: "Peugeot", model: "208", year: 2022, consumption: 4.1, fuel: 'essence', tank: 44, curbWeightKg: 1180, dragAreaScx: 0.61 },
@@ -324,6 +325,22 @@ export const VEHICLE_CATALOG: VehiclePreset[] = [
   { brand: "BYD", model: "Seal", year: 2024, consumption: 16.5, fuel: 'electrique', tank: 82 },
 ];
 
+function dedupeKey(v: VehiclePreset): string {
+  return `${v.brand}|${v.model}|${v.year}|${v.fuel}`.toLowerCase();
+}
+
+/** Catalogue complet (base + extra, dédoublonné). */
+export const VEHICLE_CATALOG: VehiclePreset[] = (() => {
+  const map = new Map<string, VehiclePreset>();
+  for (const v of [...VEHICLE_CATALOG_BASE, ...VEHICLE_CATALOG_EXTRA]) {
+    map.set(dedupeKey(v), v);
+  }
+  return [...map.values()];
+})();
+
+/** Version catalogue embarquée (bump à chaque gros enrichissement). */
+export const VEHICLE_CATALOG_VERSION = '2026.09.15-b';
+
 /** Favoris affichés en cartes */
 export const PRESET_VEHICLES: VehiclePreset[] = [
   VEHICLE_CATALOG.find((v) => v.model === '806 Roland Garros')!,
@@ -336,24 +353,47 @@ export const PRESET_VEHICLES: VehiclePreset[] = [
   VEHICLE_CATALOG.find((v) => v.model === 'Tucson' && v.year === 2023)!,
 ].filter(Boolean);
 
-export function searchVehicles(query: string): VehiclePreset[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return VEHICLE_CATALOG.slice(0, 60);
-  const scored = VEHICLE_CATALOG.map((v) => {
-    const model = v.model.toLowerCase();
-    const blob = `${v.brand} ${v.model} ${v.year} ${v.fuel}`.toLowerCase();
+function expandQueryTokens(query: string): string[] {
+  const q = query.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (!q) return [];
+  const tokens = new Set<string>([q]);
+  for (const [canon, aliases] of Object.entries(VEHICLE_SEARCH_ALIASES)) {
+    const all = [canon, ...aliases].map((a) =>
+      a.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    );
+    if (all.some((a) => q.includes(a) || a.includes(q))) {
+      all.forEach((a) => tokens.add(a));
+    }
+  }
+  return [...tokens];
+}
+
+export function searchVehicles(
+  query: string,
+  catalog: VehiclePreset[] = VEHICLE_CATALOG
+): VehiclePreset[] {
+  const tokens = expandQueryTokens(query);
+  if (!tokens.length) {
+    return [...catalog].sort((a, b) => b.year - a.year).slice(0, 60);
+  }
+  const scored = catalog.map((v) => {
+    const model = v.model.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const brand = v.brand.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const blob = `${brand} ${model} ${v.year} ${v.fuel}`.toLowerCase();
     let score = 0;
-    if (model === q) score = 100;
-    else if (model.startsWith(q)) score = 80;
-    else if (new RegExp(`(?:^|\\s)${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|$)`).test(model))
-      score = 70;
-    else if (blob.includes(q)) score = 40;
-    else return null;
-    // Évite 108 quand on cherche 208 (et inverse) : match modèle exact prioritaire
+    for (const q of tokens) {
+      if (model === q) score = Math.max(score, 100);
+      else if (model.startsWith(q)) score = Math.max(score, 85);
+      else if (new RegExp(`(?:^|\\s)${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|$)`).test(model))
+        score = Math.max(score, 75);
+      else if (brand.startsWith(q) || brand === q) score = Math.max(score, 55);
+      else if (blob.includes(q)) score = Math.max(score, 40);
+    }
+    if (score <= 0) return null;
     return { v, score };
   }).filter(Boolean) as { v: VehiclePreset; score: number }[];
   scored.sort((a, b) => b.score - a.score || b.v.year - a.v.year);
-  return scored.map((s) => s.v).slice(0, 80);
+  return scored.map((s) => s.v).slice(0, 100);
 }
 
 /** Libellé distinct (208 essence ≠ 208 diesel ≠ 108). */
@@ -361,6 +401,6 @@ export function presetDisplayName(preset: VehiclePreset): string {
   return `${preset.brand} ${preset.model} · ${preset.year} ${preset.fuel}`;
 }
 
-export function listBrands(): string[] {
-  return [...new Set(VEHICLE_CATALOG.map((v) => v.brand))].sort((a, b) => a.localeCompare(b, 'fr'));
+export function listBrands(catalog: VehiclePreset[] = VEHICLE_CATALOG): string[] {
+  return [...new Set(catalog.map((v) => v.brand))].sort((a, b) => a.localeCompare(b, 'fr'));
 }
