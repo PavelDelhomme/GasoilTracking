@@ -48,6 +48,8 @@ import { downsampleRoute } from '@/lib/routeGeometry';
 import { readLiveTripBuffer } from '@/lib/liveTripBuffer';
 import type { Place } from '@/types';
 
+const PARIS_CENTER = { latitude: 48.8566, longitude: 2.3522 };
+
 type PendingDest = { label: string; latitude: number; longitude: number };
 
 export default function MapsScreen() {
@@ -86,6 +88,7 @@ export default function MapsScreen() {
   const [nowMs, setNowMs] = useState(Date.now());
   const suggestDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopInFlight = useRef(false);
+  const didCenterOnUser = useRef(false);
 
   const tracking = Boolean(activeTrip?.isActive) || sessionTracking;
   const paused = Boolean(activeTrip?.isPaused);
@@ -125,13 +128,31 @@ export default function MapsScreen() {
   }, [activeTrip?.isActive, activeTrip?.id, starting, busy]);
 
   const refreshLoc = useCallback(async () => {
-    const loc = await getCurrentLocation({ fresh: true });
-    if (loc?.coords) {
-      setUser({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+    // Last-known rapide pour afficher le point tout de suite, puis fix plus frais.
+    const apply = (loc: Awaited<ReturnType<typeof getCurrentLocation>>) => {
+      if (!loc?.coords) return null;
+      const next = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+      setUser(next);
       const sp = loc.coords.speed;
       if (sp != null && sp >= 0) setSpeedKmh(sp * 3.6);
-    }
+      return next;
+    };
+    const quick = await getCurrentLocation({ fresh: false, timeoutMs: 2500 });
+    apply(quick);
+    const loc = await getCurrentLocation({ fresh: true, timeoutMs: 8000 });
+    return apply(loc) || (quick?.coords
+      ? { latitude: quick.coords.latitude, longitude: quick.coords.longitude }
+      : null);
   }, []);
+
+  /** Premier GPS (ou retour focus) : zoom sur la position, hors suivi / destination. */
+  useEffect(() => {
+    if (!user) return;
+    if (tracking || pendingDest) return;
+    if (didCenterOnUser.current) return;
+    didCenterOnUser.current = true;
+    mapRef.current?.setCenter?.(user.latitude, user.longitude, 15);
+  }, [user, tracking, pendingDest]);
 
   const reloadPlaces = useCallback(async () => {
     const [p, r] = await Promise.all([getPlaces(), getRecentDestinations(8)]);
@@ -141,7 +162,14 @@ export default function MapsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      void refreshLoc();
+      didCenterOnUser.current = false;
+      void (async () => {
+        const u = await refreshLoc();
+        if (u && !pendingDest && !(activeTripRef.current?.isActive)) {
+          didCenterOnUser.current = true;
+          mapRef.current?.setCenter?.(u.latitude, u.longitude, 15);
+        }
+      })();
       void reloadPlaces();
       let nativeSub: Location.LocationSubscription | null = null;
       let webWatch: number | null = null;
@@ -746,8 +774,8 @@ export default function MapsScreen() {
   }, [liveTail, plannedRoute]);
 
   const region = {
-    latitude: user?.latitude ?? 48.11,
-    longitude: user?.longitude ?? -1.68,
+    latitude: user?.latitude ?? PARIS_CENTER.latitude,
+    longitude: user?.longitude ?? PARIS_CENTER.longitude,
     latitudeDelta: tracking ? 0.02 : 0.04,
     longitudeDelta: tracking ? 0.02 : 0.04,
   };

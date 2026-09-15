@@ -192,6 +192,8 @@ function buildHtml(
           setUser(msg.user || null, !!msg.paused);
           setDest(msg.dest || null);
           if (msg.follow && msg.user) map.panTo(msg.user);
+          // Première position hors suivi : recentrer une fois
+          if (msg.centerOnUser && msg.user) { map.setView(msg.user, 15); fittedOnce = true; }
           if (msg.refit && msg.route && msg.route.length) fit(msg.route, true);
         }
         if (msg.type === 'fit' && msg.route && msg.route.length) fit(msg.route, true);
@@ -237,7 +239,7 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
         region.longitude,
         zoom,
         routePoints,
-        followUser ? userLocation : null,
+        userLocation ?? null,
         accentColor,
         !!paused,
         plannedRoute,
@@ -261,15 +263,30 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
     },
   }));
 
+  const lastCenteredUser = useRef(false);
+
   useEffect(() => {
     const now = Date.now();
     // Throttle inject WebView (Chromium + OSM = OOM si trop fréquent).
-    if (now - lastInjectAt.current < 3500 && didBootFit.current) return;
+    // Première position GPS : injecter tout de suite (pas attendre le throttle).
+    const firstUserFix =
+      !!userLocation && !lastInjectSig.current.includes('u:');
+    if (now - lastInjectAt.current < 3500 && didBootFit.current && !firstUserFix) return;
     const route = ptsForMap(routePoints).map((p) => [p.latitude, p.longitude]);
-    const sig = `${route.length}:${route[route.length - 1]?.join(',') || ''}:${paused ? 1 : 0}:${followUser ? 1 : 0}`;
+    const userSig = userLocation
+      ? `u:${userLocation.latitude.toFixed(4)},${userLocation.longitude.toFixed(4)}`
+      : 'u:';
+    const sig = `${route.length}:${route[route.length - 1]?.join(',') || ''}:${paused ? 1 : 0}:${followUser ? 1 : 0}:${userSig}`;
     if (sig === lastInjectSig.current && didBootFit.current) return;
     lastInjectSig.current = sig;
     lastInjectAt.current = now;
+    const centerOnUser =
+      !!userLocation &&
+      !followUser &&
+      routePoints.length < 2 &&
+      !destination &&
+      !lastCenteredUser.current;
+    if (centerOnUser) lastCenteredUser.current = true;
     inject(webRef, {
       type: 'update',
       route,
@@ -278,13 +295,15 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
       alts: (alternateRoutes || []).map((alt) =>
         ptsForMap(alt, 80).map((p) => [p.latitude, p.longitude])
       ),
-      user: followUser && userLocation ? [userLocation.latitude, userLocation.longitude] : null,
+      // Toujours afficher le point bleu si on a un GPS (même hors suivi).
+      user: userLocation ? [userLocation.latitude, userLocation.longitude] : null,
       dest: destination ? [destination.latitude, destination.longitude] : null,
       paused: !!paused,
       follow: !!followUser,
+      centerOnUser,
       refit: !followUser && routePoints.length > 1 && !didBootFit.current,
     });
-    if (!followUser && routePoints.length > 1) didBootFit.current = true;
+    if ((!followUser && routePoints.length > 1) || userLocation) didBootFit.current = true;
   }, [
     routePoints,
     userLocation,
@@ -295,7 +314,7 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
     followUser,
   ]);
 
-  // Remount une fois hors Paris par défaut — mais avec region déjà = bbox trajet
+  // Remount une fois hors Paris par défaut — mais avec region déjà = bbox trajet / GPS
   const [bootKey, setBootKey] = useState(0);
   useEffect(() => {
     if (Math.abs(region.latitude - 48.8566) > 0.15 || Math.abs(region.longitude - 2.3522) > 0.15) {
@@ -310,7 +329,7 @@ const TripMap = forwardRef<TripMapRef, TripMapProps>(function TripMap(
         region.longitude,
         zoom,
         routePoints,
-        followUser ? userLocation : null,
+        userLocation ?? null,
         accentColor,
         !!paused,
         plannedRoute,
