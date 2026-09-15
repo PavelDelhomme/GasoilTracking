@@ -322,7 +322,80 @@ export const VEHICLE_CATALOG: VehiclePreset[] = [
   { brand: "BYD", model: "Atto 3", year: 2024, consumption: 16, fuel: 'electrique', tank: 60 },
   { brand: "BYD", model: "Dolphin", year: 2024, consumption: 14.5, fuel: 'electrique', tank: 60 },
   { brand: "BYD", model: "Seal", year: 2024, consumption: 16.5, fuel: 'electrique', tank: 82 },
+  { brand: "BYD", model: "Seal U", year: 2025, consumption: 17, fuel: 'electrique', tank: 87 },
+  // --- Phase B : vieux FR + millésimes 2024/2025 ---
+  { brand: "Peugeot", model: "205", year: 1995, consumption: 6.5, fuel: 'essence', tank: 50, odometerUnreliable: true, curbWeightKg: 850 },
+  { brand: "Peugeot", model: "306", year: 1999, consumption: 6.2, fuel: 'diesel', tank: 60, curbWeightKg: 1100 },
+  { brand: "Peugeot", model: "307", year: 2005, consumption: 5.8, fuel: 'diesel', tank: 60 },
+  { brand: "Peugeot", model: "405", year: 1995, consumption: 7.2, fuel: 'diesel', tank: 70, odometerUnreliable: true },
+  { brand: "Peugeot", model: "E-2008", year: 2024, consumption: 16, fuel: 'electrique', tank: 54 },
+  { brand: "Peugeot", model: "E-3008", year: 2024, consumption: 17.5, fuel: 'electrique', tank: 73 },
+  { brand: "Peugeot", model: "E-5008", year: 2025, consumption: 18.5, fuel: 'electrique', tank: 73 },
+  { brand: "Peugeot", model: "208", year: 2025, consumption: 4.0, fuel: 'essence', tank: 44, curbWeightKg: 1180, dragAreaScx: 0.61 },
+  { brand: "Citroën", model: "ZX", year: 1996, consumption: 6.8, fuel: 'diesel', tank: 60, odometerUnreliable: true },
+  { brand: "Citroën", model: "Saxo", year: 2001, consumption: 6.2, fuel: 'essence', tank: 45 },
+  { brand: "Citroën", model: "Xsara", year: 2003, consumption: 5.8, fuel: 'diesel', tank: 54 },
+  { brand: "Citroën", model: "C4 Picasso", year: 2012, consumption: 5.5, fuel: 'diesel', tank: 55 },
+  { brand: "Citroën", model: "Grand C4 Picasso", year: 2015, consumption: 5.2, fuel: 'diesel', tank: 55 },
+  { brand: "Citroën", model: "ë-C3", year: 2024, consumption: 14.5, fuel: 'electrique', tank: 44 },
+  { brand: "Citroën", model: "C3", year: 2024, consumption: 4.5, fuel: 'essence', tank: 45 },
+  { brand: "Renault", model: "Twingo I", year: 2000, consumption: 6.0, fuel: 'essence', tank: 40, odometerUnreliable: true },
+  { brand: "Renault", model: "Clio I", year: 1994, consumption: 6.5, fuel: 'essence', tank: 43, odometerUnreliable: true },
+  { brand: "Renault", model: "Mégane I", year: 2000, consumption: 6.0, fuel: 'diesel', tank: 60 },
+  { brand: "Renault", model: "Mégane II", year: 2006, consumption: 5.2, fuel: 'diesel', tank: 60 },
+  { brand: "Renault", model: "Mégane III", year: 2012, consumption: 4.5, fuel: 'diesel', tank: 60 },
+  { brand: "Renault", model: "R5 E-Tech", year: 2024, consumption: 14.5, fuel: 'electrique', tank: 52 },
+  { brand: "Renault", model: "Rafale", year: 2024, consumption: 4.7, fuel: 'essence', tank: 55 },
+  { brand: "Renault", model: "Symbioz", year: 2024, consumption: 4.6, fuel: 'essence', tank: 48 },
+  { brand: "Renault", model: "Clio V", year: 2025, consumption: 4.1, fuel: 'essence', tank: 42 },
+  { brand: "Volkswagen", model: "Golf V", year: 2007, consumption: 5.5, fuel: 'diesel', tank: 55 },
+  { brand: "Volkswagen", model: "Golf VI", year: 2011, consumption: 4.8, fuel: 'diesel', tank: 55 },
+  { brand: "Volkswagen", model: "Passat B5", year: 2003, consumption: 6.5, fuel: 'diesel', tank: 62 },
+  { brand: "Volkswagen", model: "ID.7", year: 2024, consumption: 16.5, fuel: 'electrique', tank: 77 },
+  { brand: "Volkswagen", model: "Tiguan", year: 2024, consumption: 5.4, fuel: 'diesel', tank: 58 },
+  { brand: "Toyota", model: "Corolla", year: 2005, consumption: 6.2, fuel: 'essence', tank: 55 },
+  { brand: "Toyota", model: "Yaris", year: 2008, consumption: 5.5, fuel: 'essence', tank: 42 },
+  { brand: "Toyota", model: "C-HR", year: 2024, consumption: 4.5, fuel: 'essence', tank: 43 },
+  { brand: "Dacia", model: "Duster", year: 2024, consumption: 5.4, fuel: 'essence', tank: 50 },
+  { brand: "Dacia", model: "Bigster", year: 2025, consumption: 5.5, fuel: 'essence', tank: 50 },
+  { brand: "Dacia", model: "Sandero", year: 2025, consumption: 4.9, fuel: 'essence', tank: 50 },
+  { brand: "Opel", model: "Corsa", year: 2005, consumption: 5.8, fuel: 'essence', tank: 44 },
+  { brand: "Opel", model: "Astra H", year: 2008, consumption: 5.5, fuel: 'diesel', tank: 52 },
+  { brand: "Opel", model: "Frontera", year: 2024, consumption: 5.6, fuel: 'essence', tank: 44 },
+  { brand: "Ford", model: "Focus", year: 2005, consumption: 5.8, fuel: 'diesel', tank: 53 },
+  { brand: "Ford", model: "Explorer EV", year: 2024, consumption: 17.5, fuel: 'electrique', tank: 79 },
+  { brand: "Ford", model: "Capri EV", year: 2025, consumption: 17, fuel: 'electrique', tank: 77 },
+  { brand: "Hyundai", model: "Inster", year: 2025, consumption: 14, fuel: 'electrique', tank: 49 },
+  { brand: "Hyundai", model: "Ioniq 5", year: 2025, consumption: 17, fuel: 'electrique', tank: 84 },
+  { brand: "Kia", model: "EV3", year: 2024, consumption: 15.5, fuel: 'electrique', tank: 81 },
+  { brand: "Kia", model: "Sportage", year: 2025, consumption: 5.4, fuel: 'diesel', tank: 54 },
+  { brand: "Skoda", model: "Elroq", year: 2025, consumption: 16, fuel: 'electrique', tank: 63 },
+  { brand: "Skoda", model: "Octavia", year: 2024, consumption: 4.6, fuel: 'diesel', tank: 45 },
+  { brand: "Cupra", model: "Tavascan", year: 2024, consumption: 17, fuel: 'electrique', tank: 77 },
+  { brand: "Cupra", model: "Terramar", year: 2025, consumption: 5.5, fuel: 'essence', tank: 55 },
+  { brand: "Tesla", model: "Model 3", year: 2025, consumption: 13.5, fuel: 'electrique', tank: 60 },
+  { brand: "Tesla", model: "Model Y", year: 2025, consumption: 15.5, fuel: 'electrique', tank: 75 },
+  { brand: "Mini", model: "Aceman", year: 2025, consumption: 15, fuel: 'electrique', tank: 54 },
+  { brand: "Volvo", model: "EX90", year: 2024, consumption: 20, fuel: 'electrique', tank: 111 },
+  { brand: "Volvo", model: "EC40", year: 2024, consumption: 17, fuel: 'electrique', tank: 82 },
+  { brand: "Alfa", model: "Junior", year: 2024, consumption: 5.4, fuel: 'essence', tank: 44 },
+  { brand: "Leapmotor", model: "T03", year: 2025, consumption: 14, fuel: 'electrique', tank: 41 },
+  { brand: "Xpeng", model: "G6", year: 2025, consumption: 17.5, fuel: 'electrique', tank: 87 },
 ];
+
+/** Version du snapshot embarqué (bump si catalogue seed change). */
+export const VEHICLE_CATALOG_SEED_VERSION = '2026.09.15-b1';
+
+/** Catalogue runtime (API cache) — sinon seed embarqué. */
+let runtimeCatalog: VehiclePreset[] | null = null;
+
+export function getActiveCatalog(): VehiclePreset[] {
+  return runtimeCatalog && runtimeCatalog.length > 0 ? runtimeCatalog : VEHICLE_CATALOG;
+}
+
+export function setRuntimeCatalog(entries: VehiclePreset[] | null): void {
+  runtimeCatalog = entries && entries.length > 0 ? entries : null;
+}
 
 /** Favoris affichés en cartes */
 export const PRESET_VEHICLES: VehiclePreset[] = [
@@ -336,20 +409,70 @@ export const PRESET_VEHICLES: VehiclePreset[] = [
   VEHICLE_CATALOG.find((v) => v.model === 'Tucson' && v.year === 2023)!,
 ].filter(Boolean);
 
+/** Alias recherche (sans accents) → tokens à matcher dans blob marque/modèle. */
+const SEARCH_ALIASES: Record<string, string[]> = {
+  megane: ['megane'],
+  citroen: ['citroen'],
+  vw: ['volkswagen'],
+  golf: ['golf'],
+  benz: ['mercedes'],
+  merc: ['mercedes'],
+  'land rover': ['landrover'],
+  landrover: ['landrover'],
+  'range rover': ['range rover'],
+  picasso: ['picasso', 'c4 picasso', 'xsara picasso'],
+  'c4 picasso': ['c4 picasso', 'grand c4 picasso'],
+  r5: ['r5 e-tech', 'r5'],
+  'renault 5': ['r5 e-tech'],
+  hybride: ['hybrid', 'e-tech'],
+  hybrid: ['hybrid', 'e-tech'],
+  ev: ['electrique', 'e-', 'id.', 'ioniq', 'model'],
+  electrique: ['electrique'],
+  diesel: ['diesel'],
+  essence: ['essence'],
+  gpl: ['gpl'],
+};
+
+function fold(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .trim();
+}
+
+function expandQueryTokens(q: string): string[] {
+  const base = fold(q);
+  if (!base) return [];
+  const tokens = new Set<string>([base]);
+  for (const [alias, targets] of Object.entries(SEARCH_ALIASES)) {
+    if (base === alias || base.includes(alias) || alias.includes(base)) {
+      for (const t of targets) tokens.add(t);
+    }
+  }
+  return [...tokens];
+}
+
 export function searchVehicles(query: string): VehiclePreset[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return VEHICLE_CATALOG.slice(0, 60);
-  const scored = VEHICLE_CATALOG.map((v) => {
-    const model = v.model.toLowerCase();
-    const blob = `${v.brand} ${v.model} ${v.year} ${v.fuel}`.toLowerCase();
+  const catalog = getActiveCatalog();
+  const qRaw = query.trim();
+  if (!qRaw) return catalog.slice(0, 60);
+  const q = fold(qRaw);
+  const tokens = expandQueryTokens(qRaw);
+  const scored = catalog.map((v) => {
+    const model = fold(v.model);
+    const brand = fold(v.brand);
+    const blob = fold(`${v.brand} ${v.model} ${v.year} ${v.fuel}`);
     let score = 0;
     if (model === q) score = 100;
     else if (model.startsWith(q)) score = 80;
     else if (new RegExp(`(?:^|\\s)${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|$)`).test(model))
       score = 70;
+    else if (brand === q || brand.startsWith(q)) score = 65;
+    else if (tokens.some((t) => t.length >= 2 && (model.includes(t) || blob.includes(t)))) score = 55;
     else if (blob.includes(q)) score = 40;
     else return null;
-    // Évite 108 quand on cherche 208 (et inverse) : match modèle exact prioritaire
     return { v, score };
   }).filter(Boolean) as { v: VehiclePreset; score: number }[];
   scored.sort((a, b) => b.score - a.score || b.v.year - a.v.year);
@@ -362,5 +485,5 @@ export function presetDisplayName(preset: VehiclePreset): string {
 }
 
 export function listBrands(): string[] {
-  return [...new Set(VEHICLE_CATALOG.map((v) => v.brand))].sort((a, b) => a.localeCompare(b, 'fr'));
+  return [...new Set(getActiveCatalog().map((v) => v.brand))].sort((a, b) => a.localeCompare(b, 'fr'));
 }

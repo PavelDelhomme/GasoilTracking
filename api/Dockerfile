@@ -10,6 +10,7 @@ RUN apk add --no-cache wget
 COPY --from=builder /app/node_modules ./node_modules
 COPY package.json ./
 COPY src ./src
+COPY data ./data
 RUN mkdir -p /data /data/apks
 ENV NODE_ENV=production
 ENV DATA_DIR=/data

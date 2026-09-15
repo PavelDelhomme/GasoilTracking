@@ -1,5 +1,6 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 // Enregistre la task GPS background le plus tôt possible (Expo TaskManager)
 import '@/lib/locationService';
@@ -20,10 +21,18 @@ import { RegisterServiceWorker } from '@/components/RegisterServiceWorker';
 import { OnboardingTutorial } from '@/components/OnboardingTutorial';
 import { TutorialProvider } from '@/context/TutorialContext';
 import { useApp } from '@/context/AppContext';
+import { hydrateVehicleCatalogFromCache, refreshVehicleCatalog } from '@/lib/vehicleCatalogCache';
 
 function TutorialBridge({ children }: { children: React.ReactNode }) {
   const { refresh } = useApp();
   return <TutorialProvider onRefresh={refresh}>{children}</TutorialProvider>;
+}
+
+function VehicleCatalogBootstrap() {
+  useEffect(() => {
+    void hydrateVehicleCatalogFromCache().then(() => refreshVehicleCatalog());
+  }, []);
+  return null;
 }
 
 function RootNavigation() {
@@ -34,6 +43,7 @@ function RootNavigation() {
     <>
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
       <RegisterServiceWorker />
+      <VehicleCatalogBootstrap />
       <Stack
         screenOptions={{
           headerStyle: { backgroundColor: colors.background },

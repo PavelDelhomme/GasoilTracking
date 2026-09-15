@@ -12,9 +12,13 @@ import nodemailer from 'nodemailer';
 import Database from 'better-sqlite3';
 import multer from 'multer';
 import QRCode from 'qrcode';
+import { fileURLToPath } from 'url';
 import { compareSemver, pickLatestRelease } from './semver.js';
 import { assertApkIdentity } from './apkMeta.js';
 import { applyPersonalCommute, applyPersonalFillUp, fetchCommuteRoute } from './personalCommute.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT || 4000);
 const DATA_DIR = process.env.DATA_DIR || './data';
@@ -760,6 +764,47 @@ app.get('/api/version', (_req, res) => {
       iosAppStore: false,
     },
   });
+});
+
+/** Catalogue véhicules versionné (phase C) — public, ETag, seed embarqué dans l’image */
+const VEHICLE_CATALOG_PATHS = [
+  path.join(DATA_DIR, 'vehicle-catalog.json'),
+  path.join(__dirname, '..', 'data', 'vehicle-catalog.json'),
+  path.join(process.cwd(), 'data', 'vehicle-catalog.json'),
+];
+
+function loadVehicleCatalogFile() {
+  for (const p of VEHICLE_CATALOG_PATHS) {
+    try {
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf8');
+        const data = JSON.parse(raw);
+        if (Array.isArray(data?.entries) && data.entries.length > 0) {
+          return { data, raw, path: p };
+        }
+      }
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+}
+
+app.get('/api/vehicle-catalog', (req, res) => {
+  const loaded = loadVehicleCatalogFile();
+  if (!loaded) {
+    return res.status(503).json({
+      error: 'Catalogue indisponible',
+      hint: 'Générer avec npm run build:vehicle-catalog',
+    });
+  }
+  const etag = `"${crypto.createHash('sha256').update(loaded.raw).digest('hex').slice(0, 16)}"`;
+  if (req.headers['if-none-match'] === etag) {
+    return res.status(304).end();
+  }
+  res.setHeader('ETag', etag);
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.json(loaded.data);
 });
 
 /** Inscription : envoie un email de vérification (pas de compte actif tant que non cliqué) */

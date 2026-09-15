@@ -1,0 +1,13 @@
+---
+description: Backlog à faire (ne pas oublier entre sessions)
+alwaysApply: true
+---
+
+# Backlog Gasoil Tracking
+
+## À faire (noté 2026-09-15)
+
+- **Prise ODNB** — à implémenter / brancher (si OBD-II voulu, confirmer le libellé).
+- **Catalogue véhicules** — phases **B+C faites** (seed enrichi + `GET /api/vehicle-catalog` + cache 7 j). Suite : **D** import ADEME / open data (`docs/catalogue-vehicules-sources.md`).
+
+Ne pas traiter comme bloquant le ship courant tant que l’utilisateur ne demande pas de démarrer ces items.

@@ -6,7 +6,7 @@
  * Seul η_trans (rendement moyen selon nb de rapports) est utilisé — suffisant sans OBD.
  */
 import type { FuelType, Vehicle, VehicleSegment } from '@/types';
-import { VEHICLE_CATALOG, type VehiclePreset } from '@/constants/vehicles';
+import { getActiveCatalog, type VehiclePreset } from '@/constants/vehicles';
 import { lookupScxCache, resolveScxFromEntry } from '@/lib/scxCache';
 
 export type { VehicleSegment };
@@ -199,7 +199,7 @@ export function findCatalogueMatch(
   const b = (brand || '').trim().toLowerCase();
   const m = (model || '').trim().toLowerCase();
   if (!b && !m) return null;
-  const candidates = VEHICLE_CATALOG.filter((v) => {
+  const candidates = getActiveCatalog().filter((v) => {
     const vb = v.brand.toLowerCase();
     const vm = v.model.toLowerCase();
     const brandOk = !b || vb.includes(b) || b.includes(vb);
