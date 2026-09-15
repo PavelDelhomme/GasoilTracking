@@ -18,7 +18,12 @@ import { getVehicleById, updateVehicle, deleteVehicle } from '@/lib/database';
 import { getConsumptionStats } from '@/lib/calculations';
 import { confirm, notify } from '@/lib/notify';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
-import { searchVehicles, presetDisplayName, type VehiclePreset } from '@/constants/vehicles';
+import { presetDisplayName, type VehiclePreset } from '@/constants/vehicles';
+import {
+  bootstrapVehicleCatalog,
+  refreshVehicleCatalogFromApi,
+  searchVehiclesLive,
+} from '@/lib/vehicleCatalogStore';
 import { setFuelLiters } from '@/lib/fuelLevel';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
 import { refreshVehicleReminders } from '@/lib/reminders';
@@ -111,7 +116,18 @@ export default function EditVehicleScreen() {
     });
   }, [vehicleId]);
 
-  const results = useMemo(() => searchVehicles(search), [search]);
+  const [catalogTick, setCatalogTick] = useState(0);
+
+  useEffect(() => {
+    void (async () => {
+      await bootstrapVehicleCatalog();
+      setCatalogTick((t) => t + 1);
+      await refreshVehicleCatalogFromApi();
+      setCatalogTick((t) => t + 1);
+    })();
+  }, []);
+
+  const results = useMemo(() => searchVehiclesLive(search), [search, catalogTick]);
 
   const applyPreset = (preset: VehiclePreset) => {
     setBrand(preset.brand);

@@ -8,18 +8,16 @@ import { v4 as uuid } from 'uuid';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
 import Database from 'better-sqlite3';
 import multer from 'multer';
 import QRCode from 'qrcode';
-import { fileURLToPath } from 'url';
 import { compareSemver, pickLatestRelease } from './semver.js';
 import { assertApkIdentity } from './apkMeta.js';
 import { applyPersonalCommute, applyPersonalFillUp, fetchCommuteRoute } from './personalCommute.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4000);
 const DATA_DIR = process.env.DATA_DIR || './data';
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production';
@@ -46,6 +44,8 @@ function isManagerEmail(email) {
   if (!e) return false;
   if (e === ADMIN_EMAIL) return true;
   if (PERSONAL_MAIL && e === PERSONAL_MAIL) return true;
+  // Fallback si PERSONAL_MAIL n’est pas injecté en prod
+  if (e === 'paveldelhomme@gmail.com') return true;
   return false;
 }
 
@@ -708,6 +708,34 @@ app.get('/api/fx/latest', async (_req, res) => {
   }
 });
 
+/** Catalogue véhicules public (seed APK + MAJ app). */
+app.get('/api/vehicle-catalog', (_req, res) => {
+  try {
+    const candidates = [
+      path.join(__dirname, '../static/vehicle-catalog.json'),
+      path.join(DATA_DIR, 'vehicle-catalog.json'),
+      path.join(process.cwd(), 'static/vehicle-catalog.json'),
+    ];
+    let file = null;
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        file = p;
+        break;
+      }
+    }
+    if (!file) {
+      return res.status(404).json({ error: 'Catalogue introuvable — lancez scripts/build-vehicle-catalog.mjs' });
+    }
+    const raw = fs.readFileSync(file, 'utf8');
+    const data = JSON.parse(raw);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    if (data.version) res.setHeader('X-Catalog-Version', String(data.version));
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : 'Catalogue illisible' });
+  }
+});
+
 app.get('/api/version', (_req, res) => {
   const rows = db
     .prepare('SELECT * FROM app_releases WHERE apk_filename IS NOT NULL')
@@ -762,47 +790,6 @@ app.get('/api/version', (_req, res) => {
       iosAppStore: false,
     },
   });
-});
-
-/** Catalogue véhicules versionné (phase C) — public, ETag, seed embarqué dans l’image */
-const VEHICLE_CATALOG_PATHS = [
-  path.join(DATA_DIR, 'vehicle-catalog.json'),
-  path.join(__dirname, '..', 'data', 'vehicle-catalog.json'),
-  path.join(process.cwd(), 'data', 'vehicle-catalog.json'),
-];
-
-function loadVehicleCatalogFile() {
-  for (const p of VEHICLE_CATALOG_PATHS) {
-    try {
-      if (fs.existsSync(p)) {
-        const raw = fs.readFileSync(p, 'utf8');
-        const data = JSON.parse(raw);
-        if (Array.isArray(data?.entries) && data.entries.length > 0) {
-          return { data, raw, path: p };
-        }
-      }
-    } catch {
-      /* try next */
-    }
-  }
-  return null;
-}
-
-app.get('/api/vehicle-catalog', (req, res) => {
-  const loaded = loadVehicleCatalogFile();
-  if (!loaded) {
-    return res.status(503).json({
-      error: 'Catalogue indisponible',
-      hint: 'Générer avec npm run build:vehicle-catalog',
-    });
-  }
-  const etag = `"${crypto.createHash('sha256').update(loaded.raw).digest('hex').slice(0, 16)}"`;
-  if (req.headers['if-none-match'] === etag) {
-    return res.status(304).end();
-  }
-  res.setHeader('ETag', etag);
-  res.setHeader('Cache-Control', 'public, max-age=3600');
-  res.json(loaded.data);
 });
 
 /** Inscription : envoie un email de vérification (pas de compte actif tant que non cliqué) */
@@ -1598,13 +1585,10 @@ function requireReleaseToken(req, res) {
  */
 app.post('/api/ci/personal-commute', async (req, res) => {
   if (!requireReleaseToken(req, res)) return;
-  const allowed = [PERSONAL_MAIL, ADMIN_EMAIL, process.env.CI_PERSONAL_EMAIL]
-    .filter(Boolean)
-    .map((e) => String(e).toLowerCase().trim());
-  const email = String(req.body?.email || allowed[0] || '')
+  const email = String(req.body?.email || 'paveldelhomme@gmail.com')
     .toLowerCase()
     .trim();
-  if (!email || !allowed.includes(email)) {
+  if (email !== 'paveldelhomme@gmail.com') {
     return res.status(403).json({ error: 'Email non autorisé pour ce patch' });
   }
   const user = db.prepare('SELECT id, email FROM users WHERE email = ?').get(email);
@@ -1646,13 +1630,10 @@ app.post('/api/ci/personal-commute', async (req, res) => {
  */
 app.post('/api/ci/personal-fillup', async (req, res) => {
   if (!requireReleaseToken(req, res)) return;
-  const allowed = [PERSONAL_MAIL, ADMIN_EMAIL, process.env.CI_PERSONAL_EMAIL]
-    .filter(Boolean)
-    .map((e) => String(e).toLowerCase().trim());
-  const email = String(req.body?.email || allowed[0] || '')
+  const email = String(req.body?.email || 'paveldelhomme@gmail.com')
     .toLowerCase()
     .trim();
-  if (!email || !allowed.includes(email)) {
+  if (email !== 'paveldelhomme@gmail.com') {
     return res.status(403).json({ error: 'Email non autorisé pour ce patch' });
   }
   const user = db.prepare('SELECT id, email FROM users WHERE email = ?').get(email);
@@ -1809,7 +1790,7 @@ async function sendDownloadInviteEmail({ to, url, fromName, inviteCode, webUrl, 
 async function notifyManagersPendingRegistration({ email, name, platform }) {
   const recipients = [
     ...new Set(
-      [ADMIN_EMAIL, PERSONAL_MAIL].filter(Boolean).map((e) =>
+      [ADMIN_EMAIL, PERSONAL_MAIL, 'paveldelhomme@gmail.com'].filter(Boolean).map((e) =>
         String(e).toLowerCase().trim()
       )
     ),

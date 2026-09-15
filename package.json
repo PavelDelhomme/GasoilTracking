@@ -14,7 +14,7 @@
     "fetch:keystore": "node scripts/fetch-eas-keystore.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build:vehicle-catalog": "node scripts/build-vehicle-catalog.mjs"
+    "catalog:export": "node scripts/build-vehicle-catalog.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~4.0.1",

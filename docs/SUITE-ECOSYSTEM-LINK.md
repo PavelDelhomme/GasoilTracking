@@ -1,26 +1,25 @@
 # Lien écosystème Cloudity Suite (GasoilTracking)
 
-> Ne pas toucher au volume **`gasoil_api_data`** (~8,9 Go) sans backup.
-
 | | |
-|--|--|
+|---|---|
 | Repo | `PavelDelhomme/GasoilTracking` |
-| Clone | `/home/pactivisme/Documents/Dev/Perso/GasoilTracking` |
-| Sous Cloudity (cible) | `products/GasoilTracking/` (submodule à créer) |
-| Branches | `dev` · `preprod` · `prod` |
-| Stack VPS | `gasoil-tracking` (`api` + `web` 1.4.136) |
+| **Checkout canonique** | `/home/pactivisme/Documents/Dev/Perso/Cloudity/Cloudity/products/GasoilTracking` |
+| Alias Cloudity | `products/fuel` → `GasoilTracking` |
+| Clone historique (secondaire) | `/home/pactivisme/Documents/Dev/Perso/GasoilTracking` |
+| Branches | `dev` (quotidien / submodule), `prod` (ship Portainer), `preprod` |
+| Stack VPS | `gasoil-tracking` (`api` + `web`) — volume `gasoil_api_data` (**jamais** Remove) |
+| Domaine | https://gasoil-tracking.delhomme.ovh |
 
-## Docs Cloudity
+## Règle de travail
 
-- `docs/ecosystem/EMAIL-PORTEUR-DECISIONS-SUITE-2026-09-15.md`
-- `docs/ecosystem/ARCHITECTURE-CURSOR-PORTAINER-SUITE.md`
-- `docs/cursor/BRIEF-INTEGRATION-SUITE.md`
-
-## Cursor
+1. Ouvrir **via Cloudity** : `products/GasoilTracking` (ou workspace `Cloudity.code-workspace`).
+2. Commits / push dans ce repo ; branche `dev` pour le quotidien, merge → `prod` pour ship.
+3. Après push `prod` : `make deploy` + APK / OTA depuis ce même checkout.
+4. Puis bump du pointeur submodule dans le monorepo Cloudity (`git add products/GasoilTracking`).
 
 ```bash
-cd /home/pactivisme/Documents/Dev/Perso/GasoilTracking && cursor .
-# Plus tard : Cloudity/products/GasoilTracking
+cd /home/pactivisme/Documents/Dev/Perso/Cloudity/Cloudity/products/GasoilTracking
+cursor .
 ```
 
-SSO / Maps Cloudity = **après** décisions D1–D10. Données trajets/pleins **conservées**.
+Guide suite : `Cloudity/docs/cursor/BRIEF-INTEGRATION-SUITE.md`

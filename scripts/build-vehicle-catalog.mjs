@@ -1,74 +1,74 @@
 #!/usr/bin/env node
 /**
- * Extrait VEHICLE_CATALOG depuis constants/vehicles.ts → api/data/vehicle-catalog.json
+ * Génère api/static/vehicle-catalog.json depuis constants/vehicles*.ts
+ * (Node pur — pas besoin de tsx).
+ *
  * Usage: node scripts/build-vehicle-catalog.mjs
  */
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import vm from 'node:vm';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(__dirname, '..');
-const srcPath = path.join(root, 'constants', 'vehicles.ts');
-const outPath = path.join(root, 'api', 'data', 'vehicle-catalog.json');
+const root = path.join(__dirname, '..');
 
-const src = fs.readFileSync(srcPath, 'utf8');
-const versionMatch = src.match(/VEHICLE_CATALOG_SEED_VERSION\s*=\s*['"]([^'"]+)['"]/);
-const versionCatalog = versionMatch?.[1] || `build-${new Date().toISOString().slice(0, 10)}`;
-
-const start = src.indexOf('export const VEHICLE_CATALOG');
-const eq = src.indexOf('=', start);
-const arrStart = src.indexOf('[', eq);
-if (arrStart < 0) {
-  console.error('VEHICLE_CATALOG introuvable');
-  process.exit(1);
-}
-let depth = 0;
-let arrEnd = -1;
-for (let i = arrStart; i < src.length; i++) {
-  const c = src[i];
-  if (c === '[') depth++;
-  else if (c === ']') {
-    depth--;
-    if (depth === 0) {
-      arrEnd = i;
-      break;
+function parseArrayLiteral(src, marker) {
+  const start = src.indexOf(marker);
+  if (start < 0) throw new Error(`Marqueur introuvable: ${marker}`);
+  const eq = src.indexOf('=', start);
+  const i = src.indexOf('[', eq);
+  let depth = 0;
+  let end = -1;
+  for (let k = i; k < src.length; k++) {
+    const c = src[k];
+    if (c === '[') depth++;
+    else if (c === ']') {
+      depth--;
+      if (depth === 0) {
+        end = k;
+        break;
+      }
     }
   }
-}
-if (arrEnd < 0) {
-  console.error('Fin de tableau VEHICLE_CATALOG introuvable');
-  process.exit(1);
+  if (end < 0) throw new Error(`Tableau non fermé après ${marker}`);
+  return new Function(`return (${src.slice(i, end + 1)})`)();
 }
 
-let literal = src.slice(arrStart, arrEnd + 1);
-// Clés uniquement après { ou , (ne pas toucher aux "e:Ny1" etc.)
-literal = literal
-  .replace(/'/g, '"')
-  .replace(/([{\[,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:/g, '$1"$2":')
-  .replace(/,\s*([}\]])/g, '$1');
-
-let entries;
-try {
-  entries = vm.runInNewContext(`(${literal})`, Object.create(null), { timeout: 5000 });
-} catch (e) {
-  console.error('Parse catalogue échoué:', e.message);
-  process.exit(1);
+function dedupeKey(v) {
+  return `${v.brand}|${v.model}|${v.year}|${v.fuel}`.toLowerCase();
 }
 
-if (!Array.isArray(entries) || entries.length < 50) {
-  console.error('Catalogue trop petit ou invalide:', entries?.length);
-  process.exit(1);
+function main() {
+  const vehiclesTs = fs.readFileSync(path.join(root, 'constants/vehicles.ts'), 'utf8');
+  const extraTs = fs.readFileSync(path.join(root, 'constants/vehicleCatalogExtra.ts'), 'utf8');
+
+  const base = parseArrayLiteral(vehiclesTs, 'const VEHICLE_CATALOG_BASE');
+  const extra = parseArrayLiteral(extraTs, 'export const VEHICLE_CATALOG_EXTRA');
+
+  const versionMatch = vehiclesTs.match(
+    /export const VEHICLE_CATALOG_VERSION\s*=\s*['"]([^'"]+)['"]/
+  );
+  const version = versionMatch?.[1] || 'unknown';
+
+  const map = new Map();
+  for (const v of [...base, ...extra]) {
+    map.set(dedupeKey(v), v);
+  }
+  const vehicles = [...map.values()];
+
+  const payload = {
+    schema: 'gasoil.vehicle-catalog.v1',
+    version,
+    updatedAt: new Date().toISOString(),
+    count: vehicles.length,
+    vehicles,
+  };
+
+  const outDir = path.join(root, 'api/static');
+  fs.mkdirSync(outDir, { recursive: true });
+  const outFile = path.join(outDir, 'vehicle-catalog.json');
+  fs.writeFileSync(outFile, `${JSON.stringify(payload)}\n`);
+  console.log(`OK ${outFile} — ${vehicles.length} véhicules, version ${version}`);
 }
 
-const payload = {
-  schema: 'gasoil.vehicle-catalog.v1',
-  versionCatalog,
-  updatedAt: new Date().toISOString(),
-  entries,
-};
-
-fs.mkdirSync(path.dirname(outPath), { recursive: true });
-fs.writeFileSync(outPath, JSON.stringify(payload, null, 2) + '\n');
-console.log(`OK ${entries.length} entrées → ${path.relative(root, outPath)} (${versionCatalog})`);
+main();

@@ -9,9 +9,11 @@ Complète le travail déjà documenté côté aéro (`scripts/reports/generators
 
 | Couche | Fichier / UI | Rôle |
 |--------|----------------|------|
-| Catalogue embarqué | `constants/vehicles.ts` → `VEHICLE_CATALOG` | ~**332** presets (seed `2026.09.15-b1`), années ~**1982–2025** |
+| Catalogue embarqué | `constants/vehicles.ts` + `vehicleCatalogExtra.ts` | ~**500+** presets, marques FR/EU, années ~**1982–2025** |
+| Snapshot API | `api/static/vehicle-catalog.json` | Généré via `npm run catalog:export` |
 | Favoris UI | `PRESET_VEHICLES` (8 cartes) | Accès rapide, pas le catalogue complet |
-| Recherche | `searchVehicles(query)` | Score modèle exact / préfixe / blob ; max **80** résultats |
+| Recherche | `searchVehicles` / `searchVehiclesLive` | Alias, accents, score modèle ; max **100** résultats |
+| Cache cloud | `lib/vehicleCatalogStore.ts` | AsyncStorage + refresh **7 j** depuis `/api/vehicle-catalog` |
 | Écran | `app/vehicle/add.tsx`, `edit.tsx` | Recherche + applique conso / réservoir / physique |
 | Physique | `lib/vehiclePhysics.ts` | Segments, masse, SCx, boîte si absents du preset |
 | Enrichissement VIN | `lib/vehicleSpecsLookup.ts` | Autoref (clé optionnelle) + cache SCx local |
@@ -19,8 +21,7 @@ Complète le travail déjà documenté côté aéro (`scripts/reports/generators
 
 **Limites aujourd’hui**
 
-- Catalogue **statique** dans l’APK (pas de refresh cloud / cron).
-- Couverture **partielle** (surtout modèles FR « populaires ») ; beaucoup de trims / années manquent.
+- Couverture encore **partielle** (pas tous les trims) ; import ADEME = phase D.
 - Conso / réservoir = **indicatifs** (WLTP / moyennes), pas une lecture carte grise.
 - VIN → surtout **masse / identité** ; **pas** Cx/SCx ni toujours le type mine.
 
@@ -171,8 +172,8 @@ App
 | Phase | Livrable | Effort |
 |-------|----------|--------|
 | **A** | Doc (ce fichier) + backlog | Fait |
-| **B** | Étendre `VEHICLE_CATALOG` (vieux + 2024/2025) + meilleurs alias recherche | **Fait** (2026-09-15) |
-| **C** | Endpoint `/api/vehicle-catalog` + cache app + refresh 7 j | **Fait** (2026-09-15) |
+| **B** | Étendre `VEHICLE_CATALOG` (vieux + 2024/2025) + meilleurs alias recherche | **Fait** (2026-09-15, ~508 modèles) |
+| **C** | Endpoint `/api/vehicle-catalog` + cache app + refresh 7 j | **Fait** (`api/static/…`, `vehicleCatalogStore`) |
 | **D** | Script import ADEME / data.gouv → JSON | Moyen |
 | **E** | Option immat/VIN FR (prestataire) derrière feature flag | Plus gros / € |
 | **F** | Continuer cache SCx (Système D) pour aéro | Continu |
@@ -190,11 +191,12 @@ App
 
 ## 8. Fichiers clés à toucher plus tard
 
-- `constants/vehicles.ts` — seed / snapshot
+- `constants/vehicles.ts` + `constants/vehicleCatalogExtra.ts` — seed / snapshot
+- `lib/vehicleCatalogStore.ts` — cache + refresh API
 - `app/vehicle/add.tsx`, `edit.tsx` — UI recherche
 - `lib/vehicleSpecsLookup.ts`, `lib/vehiclePhysics.ts`, `lib/scxCache.ts`
-- `api/src/index.js` — futur `GET /api/vehicle-catalog`
-- `scripts/build-vehicle-catalog.mjs` — à créer
+- `api/src/index.js` — `GET /api/vehicle-catalog`
+- `scripts/build-vehicle-catalog.mjs` — `npm run catalog:export`
 - Aide in-app : `lib/helpContent.ts` (section Garage / VIN)
 
 ---
@@ -208,4 +210,4 @@ App
 | « Quelle masse / SCx pour le modèle physique ? » | **Fiche technique / cache SCx / VIN masse** |
 | « Liste à jour des modèles » | **Catalogue versionné serveur** (import open data mensuel) + snapshot APK |
 
-Ce document est la référence pour la prochaine itération « recherche modèles + MAJ régulière ». L’implémentation code démarre sur demande explicite (phases B+).
+Phases **B** et **C** livrées le 2026-09-15. Suite : phase **D** (import ADEME).

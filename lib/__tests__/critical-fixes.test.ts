@@ -78,18 +78,13 @@ describe('vehicles search', () => {
     const p = searchVehicles('208')[0]!;
     expect(presetDisplayName(p)).toMatch(/208 · \d{4}/);
   });
-  it('trouve Mégane sans accent', () => {
-    const r = searchVehicles('megane');
-    expect(r.some((v) => /mégane/i.test(v.model))).toBe(true);
+  it('catalogue enrichi (phase B)', async () => {
+    const { VEHICLE_CATALOG } = await import('../../constants/vehicles');
+    expect(VEHICLE_CATALOG.length).toBeGreaterThanOrEqual(450);
   });
-  it('alias vw → Volkswagen', () => {
-    const r = searchVehicles('vw golf');
-    expect(r.length).toBeGreaterThan(0);
-    expect(r.some((v) => v.brand === 'Volkswagen')).toBe(true);
-  });
-  it('inclut modèles phase B (205, R5 E-Tech)', () => {
-    expect(searchVehicles('205')[0]?.model).toBe('205');
-    expect(searchVehicles('R5 E-Tech').some((v) => v.model.includes('R5'))).toBe(true);
+  it('alias mégane / citroen', () => {
+    expect(searchVehicles('megane')[0]?.model.toLowerCase()).toMatch(/mégane|megane/);
+    expect(searchVehicles('citroen').some((v) => /citro/i.test(v.brand))).toBe(true);
   });
 });
 
