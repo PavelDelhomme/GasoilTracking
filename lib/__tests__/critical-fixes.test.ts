@@ -78,6 +78,14 @@ describe('vehicles search', () => {
     const p = searchVehicles('208')[0]!;
     expect(presetDisplayName(p)).toMatch(/208 · \d{4}/);
   });
+  it('catalogue enrichi (phase B)', async () => {
+    const { VEHICLE_CATALOG } = await import('../../constants/vehicles');
+    expect(VEHICLE_CATALOG.length).toBeGreaterThanOrEqual(450);
+  });
+  it('alias mégane / citroen', () => {
+    expect(searchVehicles('megane')[0]?.model.toLowerCase()).toMatch(/mégane|megane/);
+    expect(searchVehicles('citroen').some((v) => /citro/i.test(v.brand))).toBe(true);
+  });
 });
 
 describe('decideSyncAction', () => {

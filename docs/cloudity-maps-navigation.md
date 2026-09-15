@@ -35,16 +35,18 @@ Gasoil **alimente** Maps (trajets, conso, places) via API / export ; Maps **ne r
 
 ## 4. Intégration « un écosystème », pas un monolithe
 
-Déjà décidé côté Cloudity :
+Déjà en place côté Cloudity :
 
 1. Stacks Portainer **séparées** (`gasoil-tracking`, `cloudity`, …).
-2. Submodule Git `products/fuel` → `GasoilTracking.git` (quand prêt) — **sans** toucher `gasoil_api_data` (~9 Go).
-3. SSO Cloudity ID = **opt-in** plus tard.
-4. Tester flavors / appareils labo **sur le produit** (Samsung QA, etc.), pas en fusionnant les serveurs.
+2. Submodule Git `products/GasoilTracking` → `GasoilTracking.git` (**actif**, alias `products/fuel`) — **sans** toucher `gasoil_api_data`.
+   Chemin de travail canonique : `/home/pactivisme/Documents/Dev/Perso/Cloudity/Cloudity/products/GasoilTracking`.
+3. Placeholder `products/maps/` (README) — repo Maps à créer plus tard.
+4. SSO Cloudity ID = **opt-in** plus tard.
+5. Tester flavors / appareils labo **sur le produit**, pas en fusionnant les serveurs.
 
-Commencer doucement aujourd’hui =
+Commencer doucement =
 
-- Docs + lien workspace (fait).
+- Docs + workspace + submodule fuel (fait).
 - Garder `prod` / `preprod` / `dev` Gasoil.
 - Ne **pas** copier l’API Gasoil dans le gateway Go Cloudity.
 - Quand Maps existe : Intent / URL scheme `cloudity-maps://navigate?...` + fallback OSM dans Gasoil.
@@ -52,11 +54,11 @@ Commencer doucement aujourd’hui =
 ## 5. Ordre de travaux recommandé
 
 1. ~~Stabiliser Maps GPS Gasoil (1.4.136)~~  
-2. **Catalogue véhicules B + API C** (ce sprint)  
-3. Submodule `products/fuel` (ops Git, zéro migration data)  
-4. Boutons « Ouvrir dans Waze / OsmAnd / Organic Maps »  
-5. MVP Cloudity Maps (repo `products/maps`)  
-6. SSO / hub tuile Fuel
+2. ~~Catalogue véhicules B + API C~~ (2026-09-15)  
+3. Boutons « Ouvrir dans Waze / OsmAnd / Organic Maps »  
+4. MVP Cloudity Maps (repo `products/maps`)  
+5. SSO / hub tuile Fuel  
+6. Phase D catalogue (import ADEME)
 
 ## 6. Waze — détails
 

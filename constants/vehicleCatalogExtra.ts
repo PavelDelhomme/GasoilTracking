@@ -27,6 +27,17 @@ export const VEHICLE_SEARCH_ALIASES: Record<string, string[]> = {
   twingo: ['twingo', 'twingo 3', 'twingo iii'],
   '206+': ['206+', '206 plus'],
   partner: ['partner', 'partner tepee', 'rifter'],
+  citroen: ['citroën', 'citroen'],
+  volkswagen: ['volkswagen', 'vw', 'volkswagon'],
+  mercedes: ['mercedes', 'mercedes-benz', 'benz'],
+  'roland garros': ['roland garros', '806 roland', '806 rg'],
+  clio: ['clio', 'clio v', 'clio 5', 'clio iv', 'clio 4'],
+  yaris: ['yaris', 'yaris hybrid'],
+  duster: ['duster', 'dacia duster'],
+  tucson: ['tucson', 'hyundai tucson'],
+  qashqai: ['qashqai', 'qashkai'],
+  'c-hr': ['c-hr', 'chr', 'c hr'],
+  'e-208': ['e-208', 'e208', '208 electrique', '208 électrique'],
 };
 
 export const VEHICLE_CATALOG_EXTRA: VehiclePreset[] = [
