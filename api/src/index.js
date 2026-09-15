@@ -46,8 +46,6 @@ function isManagerEmail(email) {
   if (!e) return false;
   if (e === ADMIN_EMAIL) return true;
   if (PERSONAL_MAIL && e === PERSONAL_MAIL) return true;
-  // Fallback si PERSONAL_MAIL n’est pas injecté en prod
-  if (e === 'paveldelhomme@gmail.com') return true;
   return false;
 }
 
@@ -1600,10 +1598,13 @@ function requireReleaseToken(req, res) {
  */
 app.post('/api/ci/personal-commute', async (req, res) => {
   if (!requireReleaseToken(req, res)) return;
-  const email = String(req.body?.email || 'paveldelhomme@gmail.com')
+  const allowed = [PERSONAL_MAIL, ADMIN_EMAIL, process.env.CI_PERSONAL_EMAIL]
+    .filter(Boolean)
+    .map((e) => String(e).toLowerCase().trim());
+  const email = String(req.body?.email || allowed[0] || '')
     .toLowerCase()
     .trim();
-  if (email !== 'paveldelhomme@gmail.com') {
+  if (!email || !allowed.includes(email)) {
     return res.status(403).json({ error: 'Email non autorisé pour ce patch' });
   }
   const user = db.prepare('SELECT id, email FROM users WHERE email = ?').get(email);
@@ -1645,10 +1646,13 @@ app.post('/api/ci/personal-commute', async (req, res) => {
  */
 app.post('/api/ci/personal-fillup', async (req, res) => {
   if (!requireReleaseToken(req, res)) return;
-  const email = String(req.body?.email || 'paveldelhomme@gmail.com')
+  const allowed = [PERSONAL_MAIL, ADMIN_EMAIL, process.env.CI_PERSONAL_EMAIL]
+    .filter(Boolean)
+    .map((e) => String(e).toLowerCase().trim());
+  const email = String(req.body?.email || allowed[0] || '')
     .toLowerCase()
     .trim();
-  if (email !== 'paveldelhomme@gmail.com') {
+  if (!email || !allowed.includes(email)) {
     return res.status(403).json({ error: 'Email non autorisé pour ce patch' });
   }
   const user = db.prepare('SELECT id, email FROM users WHERE email = ?').get(email);
@@ -1805,7 +1809,7 @@ async function sendDownloadInviteEmail({ to, url, fromName, inviteCode, webUrl, 
 async function notifyManagersPendingRegistration({ email, name, platform }) {
   const recipients = [
     ...new Set(
-      [ADMIN_EMAIL, PERSONAL_MAIL, 'paveldelhomme@gmail.com'].filter(Boolean).map((e) =>
+      [ADMIN_EMAIL, PERSONAL_MAIL].filter(Boolean).map((e) =>
         String(e).toLowerCase().trim()
       )
     ),
