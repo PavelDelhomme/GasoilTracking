@@ -103,6 +103,10 @@ function RootNavigation() {
           }}
         />
         <Stack.Screen
+          name="lab-session"
+          options={{ title: 'Session labo', headerShown: false, presentation: 'modal' }}
+        />
+        <Stack.Screen
           name="reset-password"
           options={{
             title: 'Nouveau mot de passe',
