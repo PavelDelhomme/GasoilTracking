@@ -6,7 +6,7 @@
 |--|--|
 | Repo | `PavelDelhomme/GasoilTracking` |
 | Clone | `/home/pactivisme/Documents/Dev/Perso/GasoilTracking` |
-| Sous Cloudity (cible) | `products/fuel/` (submodule à créer) |
+| Sous Cloudity (cible) | `products/GasoilTracking/` (submodule à créer) |
 | Branches | `dev` · `preprod` · `prod` |
 | Stack VPS | `gasoil-tracking` (`api` + `web` 1.4.136) |
 
@@ -20,7 +20,7 @@
 
 ```bash
 cd /home/pactivisme/Documents/Dev/Perso/GasoilTracking && cursor .
-# Plus tard : Cloudity/products/fuel
+# Plus tard : Cloudity/products/GasoilTracking
 ```
 
 SSO / Maps Cloudity = **après** décisions D1–D10. Données trajets/pleins **conservées**.
