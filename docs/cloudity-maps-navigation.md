@@ -10,7 +10,7 @@
 | **Battre Waze** dans Gasoil seul | **Non réaliste** court terme (trafic live, communauté, police). |
 | **OsmAnd-like (F-Droid, OSM offline)** | **Cible Cloudity Maps** (produit dédié), pas fusion dans Gasoil. |
 | **Mappy / Google** | Deep link / Intent externes OK ; pas de clone légal de leurs moteurs. |
-| **Intégration Gasoil ↔ Cloudity** | **Oui, doucement** : submodule `products/fuel` + stacks **séparées** ; Maps = `products/maps` plus tard. |
+| **Intégration Gasoil ↔ Cloudity** | **Oui, doucement** : submodule `products/GasoilTracking` (+ alias `fuel`) + stacks **séparées** ; Maps = `products/maps` plus tard. |
 
 Gasoil garde son **suivi conso + GPS** (Leaflet/OSM + OSRM déjà en place). Cloudity Maps apportera la **nav / cartes suite** ; Gasoil s’y branchera (deep link ou SDK interne) sans fusionner les DB.
 
@@ -26,7 +26,7 @@ OSRM alternatives, offline partiel, deep link Waze/OsmAnd/Organic Maps en bouton
 ## 3. Cloudity Maps (cible)
 
 Chemin monorepo : `/home/pactivisme/Documents/Dev/Perso/Cloudity/Cloudity`  
-Placeholder : `products/maps/` (à créer) — **pas** un merge du repo Gasoil.
+Placeholder : `products/maps/` (README dans Cloudity, **pas encore de repo Git**) — **pas** un merge du repo Gasoil.
 
 Inspirations : OsmAnd / Organic Maps / Mappy UX — stack **OSM + OSRM/Valhalla + tuiles** (self-host ou provider).  
 F-Droid : possible si stack libre (pas de Play Services obligatoires) — décision suite Cloudity.
@@ -46,7 +46,7 @@ Déjà en place côté Cloudity :
 
 Commencer doucement =
 
-- Docs + workspace + submodule fuel (fait).
+- Docs + workspace + submodule `GasoilTracking` (fait).
 - Garder `prod` / `preprod` / `dev` Gasoil.
 - Ne **pas** copier l’API Gasoil dans le gateway Go Cloudity.
 - Quand Maps existe : Intent / URL scheme `cloudity-maps://navigate?...` + fallback OSM dans Gasoil.
