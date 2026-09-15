@@ -549,7 +549,7 @@ export function manageQaLab(action: 'create' | 'reset' | 'delete' | 'status', pa
   }>;
 }
 
-/** Gestionnaires : admin@… + paveldelhomme@gmail.com (+ EXPO_PUBLIC / extra). */
+/** Gestionnaires : ADMIN / PERSONAL_MAIL / EXPO_PUBLIC (env). */
 export function isManagerEmail(email?: string | null, userFlag?: boolean | null): boolean {
   if (userFlag === true) return true;
   const e = String(email || '')
@@ -557,7 +557,6 @@ export function isManagerEmail(email?: string | null, userFlag?: boolean | null)
     .trim();
   if (!e) return false;
   if (e === 'admin@delhomme.ovh') return true;
-  if (e === 'paveldelhomme@gmail.com') return true;
   const personal = (
     process.env.EXPO_PUBLIC_PERSONAL_MAIL ||
     Constants.expoConfig?.extra?.personalMail ||

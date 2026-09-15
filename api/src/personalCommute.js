@@ -8,16 +8,16 @@ export const WORK = { latitude: 47.9483893, longitude: -1.2237387 };
 export const VIA = { latitude: 48.04867, longitude: -1.50282 };
 
 export const DEFAULT_OPTS = {
-  email: 'paveldelhomme@gmail.com',
+  email: process.env.PERSONAL_MAIL || process.env.CI_PERSONAL_EMAIL || '',
   vehicleModel: '206',
   odometerKm: 121575,
   fuelFraction: 0.25,
   day: '2026-09-12',
   startLocal: '07:45',
-  originName: 'Domicile — 1 Rue Camille Saint-Saëns, Thorigné-Fouillard',
-  destinationName: 'Intermarché La Guerche de Bretagne',
-  originAddress: '1 Rue Camille Saint-Saëns, 35235 Thorigné-Fouillard',
-  destinationAddress: 'Intermarché, Faubourg de Vitré, 35130 La Guerche-de-Bretagne',
+  originName: 'Domicile',
+  destinationName: 'Destination travail',
+  originAddress: '',
+  destinationAddress: '',
 };
 
 function nextId(rows) {

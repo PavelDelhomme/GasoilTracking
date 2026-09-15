@@ -76,7 +76,7 @@ export default function AdminScreen() {
       <View style={[styles.wrap, { backgroundColor: colors.background, padding: 16 }]}>
         <Text style={{ color: colors.danger, fontSize: 16, textAlign: 'center' }}>
           Accès réservé aux comptes gestionnaires (admin@delhomme.ovh et
-          paveldelhomme@gmail.com).
+          PERSONAL_MAIL / admin).
         </Text>
         <Button title="Retour" onPress={() => router.back()} style={{ marginTop: 16 }} />
       </View>
