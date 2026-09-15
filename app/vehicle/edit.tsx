@@ -116,7 +116,6 @@ export default function EditVehicleScreen() {
     });
   }, [vehicleId]);
 
-  const [status, setStatus] = useState('');
   const [catalogTick, setCatalogTick] = useState(0);
 
   useEffect(() => {
