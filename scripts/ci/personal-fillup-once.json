@@ -4,8 +4,8 @@
   "odometerKm": 121575,
   "day": "2026-09-12",
   "startLocal": "11:55",
-  "originName": "Domicile — 1 Rue Camille Saint-Saëns, Thorigné-Fouillard",
-  "destinationName": "Intermarché La Guerche de Bretagne",
+  "originName": "Domicile",
+  "destinationName": "Destination",
   "fillUpAt": "2026-09-12T12:50:00+02:00",
   "fillUp": {
     "liters": 34.62,

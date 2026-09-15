@@ -5,6 +5,6 @@
   "fuelFraction": 0.25,
   "day": "2026-09-12",
   "startLocal": "07:45",
-  "originName": "Domicile — 1 Rue Camille Saint-Saëns, Thorigné-Fouillard",
-  "destinationName": "Intermarché La Guerche de Bretagne"
+  "originName": "Domicile",
+  "destinationName": "Destination"
 }
