@@ -429,10 +429,18 @@ export default function HomeScreen() {
                   onChange={setHomeFuelDraft}
                   onChangeEnd={async (L) => {
                     setHomeFuelDraft(L);
-                    await setFuelLiters(activeVehicle, L);
+                    const adj = await setFuelLiters(activeVehicle, L);
                     await refresh();
                     await reloadStats(activeVehicle.id);
-                    notify('Réservoir', `${L.toFixed(1)} L · conso recalibrée si possible`);
+                    notify(
+                      'Réservoir',
+                      adj.tripsAdjusted > 0
+                        ? `${adj.liters.toFixed(1)} L · ${adj.tripsAdjusted} trajet(s) réajustés` +
+                            (adj.measuredL100 != null
+                              ? ` · ~${adj.measuredL100.toFixed(1)} L/100`
+                              : '')
+                        : `${adj.liters.toFixed(1)} L enregistrés`
+                    );
                     // Push forcé : un syncPreferNewer peut PULL un cloud sans jauge et tout effacer.
                     try {
                       const r = await pushLocalNow();

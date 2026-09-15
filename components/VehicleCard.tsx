@@ -53,7 +53,7 @@ export function VehicleCard({
   }, [vehicle.id, vehicle.estimatedFuelLiters]);
 
   const commitFuel = async (liters: number) => {
-    const next = await setFuelLiters(vehicle, liters);
+    const { liters: next } = await setFuelLiters(vehicle, liters);
     setDraftLiters(next);
     notify('Réservoir', `${vehicle.name} · ${next.toFixed(1)} L`);
     onFuelUpdated?.();

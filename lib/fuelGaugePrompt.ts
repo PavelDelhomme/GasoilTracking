@@ -73,9 +73,9 @@ export async function askFuelGaugeApprox(
     if (!Number.isFinite(n) || n < 0) {
       return { liters: vehicle.estimatedFuelLiters ?? 0, skipped: true };
     }
-    const liters = await setFuelLiters(vehicle, n <= 1 ? n * vehicle.tankCapacity : n);
+    const saved = await setFuelLiters(vehicle, n <= 1 ? n * vehicle.tankCapacity : n);
     await markGaugeAsked(vehicle.id);
-    return { liters, skipped: false };
+    return { liters: saved.liters, skipped: false };
   }
 
   const result = await new Promise<FuelGaugeResult>((resolve) => {

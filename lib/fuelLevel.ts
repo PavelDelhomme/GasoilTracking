@@ -133,12 +133,13 @@ export async function reapplyFillUpFuelEstimate(
 }
 
 /**
- * Jauge manuelle = ancre : recalibre L/100 + redistribue la conso des trajets
- * depuis le dernier plein complet.
+ * Jauge manuelle = ancre : recalibre L/100 + redistribue conso/coût des trajets
+ * depuis le dernier plein (complet ou partiel).
  */
 export async function recalibrateFromManualGauge(
   vehicleId: number,
-  currentLiters: number
+  currentLiters: number,
+  opts?: { previousLiters?: number | null }
 ): Promise<{ measuredL100: number; nextL100: number; tripsAdjusted: number } | null> {
   const vehicle = await getVehicleById(vehicleId);
   if (!vehicle || vehicle.fuelType === 'electrique') return null;
@@ -147,7 +148,6 @@ export async function recalibrateFromManualGauge(
   const fills = await getFillUps(vehicleId);
   if (!fills.length) return null;
   const last = [...fills].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
-  if (!last.isFull) return null;
 
   const trips = await getTrips(vehicleId, { omitRoutePoints: true });
   const since = trips.filter(
@@ -158,55 +158,66 @@ export async function recalibrateFromManualGauge(
       String(t.startTime) > String(last.date)
   );
   const tripKm = since.reduce((s, t) => s + (t.distanceKm || 0), 0);
-  if (tripKm < 8) return null;
-
-  const actualBurn = Math.max(0, vehicle.tankCapacity - currentLiters);
-  if (actualBurn < 0.4) return null;
-
-  const measured = (actualBurn / tripKm) * 100;
-  if (!isSaneConsumptionSample(measured, vehicle.fuelType)) return null;
-
-  const prev = vehicle.consumptionPer100 > 0 ? vehicle.consumptionPer100 : measured;
-  // Garde-fou : une jauge approximative ne doit pas envoyer une 206 à 10–13 L/100.
-  // Au-delà de ~+35 % / 9,5 L/100 essence → on ignore la conso catalogue (jauge seule).
-  const maxEssence = vehicle.fuelType === 'diesel' ? 11 : 9.5;
-  if (measured > maxEssence || measured > prev * 1.4) {
-    return null;
-  }
-  const nextL100 = Math.round((measured * 0.4 + prev * 0.6) * 10) / 10;
-  const learn =
-    prev > 0.5 ? Math.round(Math.min(1.35, Math.max(0.7, measured / prev)) * 1000) / 1000 : 1;
-  await updateVehicle(vehicleId, {
-    consumptionPer100: nextL100,
-    consumptionLearnFactor: learn,
-  });
+  if (tripKm < 2 || since.length === 0) return null;
 
   let estTotal = since.reduce((s, t) => s + (t.estimatedFuelUsed || 0), 0);
-  if (estTotal < 0.2) {
+  if (estTotal < 0.15) {
     estTotal = since.reduce(
       (s, t) => s + estimateTripFuelLiters(vehicle, t.distanceKm || 0),
       0
     );
   }
+  if (estTotal < 0.15) return null;
+
+  const prevL = opts?.previousLiters;
+  const atFill = last.isFull
+    ? vehicle.tankCapacity
+    : Math.min(
+        vehicle.tankCapacity,
+        Math.max(
+          last.liters,
+          (prevL != null && Number.isFinite(prevL) ? prevL : currentLiters) + estTotal
+        )
+      );
+  const actualBurn = Math.max(0, Math.round((atFill - currentLiters) * 10) / 10);
+  if (actualBurn < 0.1) return null;
+
+  const measured = (actualBurn / tripKm) * 100;
+  const prev = vehicle.consumptionPer100 > 0 ? vehicle.consumptionPer100 : measured;
+  const maxCap = vehicle.fuelType === 'diesel' ? 14 : 12;
+  const catalogueOk =
+    isSaneConsumptionSample(measured, vehicle.fuelType) &&
+    measured <= maxCap &&
+    measured <= prev * 1.55;
+
+  let nextL100 = prev;
+  if (catalogueOk) {
+    nextL100 = Math.round((measured * 0.45 + prev * 0.55) * 10) / 10;
+    const learn =
+      prev > 0.5 ? Math.round(Math.min(1.4, Math.max(0.65, measured / prev)) * 1000) / 1000 : 1;
+    await updateVehicle(vehicleId, {
+      consumptionPer100: nextL100,
+      consumptionLearnFactor: learn,
+    });
+  }
+
+  const factor = actualBurn / estTotal;
+  const price =
+    last.pricePerLiter > 0
+      ? last.pricePerLiter
+      : vehicle.defaultFuelPrice > 0
+        ? vehicle.defaultFuelPrice
+        : 0;
   let tripsAdjusted = 0;
-  if (estTotal > 0.2) {
-    const factor = actualBurn / estTotal;
-    const price =
-      last.pricePerLiter > 0
-        ? last.pricePerLiter
-        : vehicle.defaultFuelPrice > 0
-          ? vehicle.defaultFuelPrice
-          : 0;
-    for (const t of since) {
-      const base =
-        (t.estimatedFuelUsed || 0) > 0
-          ? t.estimatedFuelUsed
-          : estimateTripFuelLiters(vehicle, t.distanceKm || 0);
-      const fuel = Math.round(base * factor * 100) / 100;
-      const cost = price > 0 ? Math.round(fuel * price * 100) / 100 : t.estimatedCost;
-      await updateTrip(t.id, { estimatedFuelUsed: fuel, estimatedCost: cost });
-      tripsAdjusted += 1;
-    }
+  for (const t of since) {
+    const base =
+      (t.estimatedFuelUsed || 0) > 0
+        ? t.estimatedFuelUsed
+        : estimateTripFuelLiters(vehicle, t.distanceKm || 0);
+    const fuel = Math.round(base * factor * 100) / 100;
+    const cost = price > 0 ? Math.round(fuel * price * 100) / 100 : t.estimatedCost;
+    await updateTrip(t.id, { estimatedFuelUsed: fuel, estimatedCost: cost });
+    tripsAdjusted += 1;
   }
 
   return {
@@ -243,19 +254,35 @@ export async function setFuelFraction(vehicle: Vehicle, fraction: number): Promi
   return next;
 }
 
-/** Fixe un niveau en litres + recalibre conso depuis le dernier plein si possible. */
-export async function setFuelLiters(vehicle: Vehicle, liters: number): Promise<number> {
+export type SetFuelLitersResult = {
+  liters: number;
+  tripsAdjusted: number;
+  measuredL100: number | null;
+};
+
+/** Fixe un niveau en litres + redistribue conso/coûts des trajets depuis le dernier plein. */
+export async function setFuelLiters(
+  vehicle: Vehicle,
+  liters: number
+): Promise<SetFuelLitersResult> {
   const next = Math.min(
     vehicle.tankCapacity,
     Math.max(0, Math.round(liters * 10) / 10)
   );
+  const previousLiters = vehicle.estimatedFuelLiters;
   await updateVehicle(vehicle.id, { estimatedFuelLiters: next });
+  let tripsAdjusted = 0;
+  let measuredL100: number | null = null;
   try {
-    await recalibrateFromManualGauge(vehicle.id, next);
+    const r = await recalibrateFromManualGauge(vehicle.id, next, { previousLiters });
+    if (r) {
+      tripsAdjusted = r.tripsAdjusted;
+      measuredL100 = r.measuredL100;
+    }
   } catch {
     /* jauge seule suffit */
   }
-  return next;
+  return { liters: next, tripsAdjusted, measuredL100 };
 }
 
 /**

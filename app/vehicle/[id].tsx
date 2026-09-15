@@ -183,10 +183,15 @@ export default function VehicleDetailScreen() {
           onChange={setDraftFuel}
           onChangeEnd={async (L) => {
             setDraftFuel(L);
-            await setFuelLiters(vehicle, L);
+            const adj = await setFuelLiters(vehicle, L);
             await refresh();
             await load();
-            notify('Réservoir', `${L.toFixed(1)} L · conso recalibrée si plein connu`);
+            notify(
+              'Réservoir',
+              adj.tripsAdjusted > 0
+                ? `${adj.liters.toFixed(1)} L · ${adj.tripsAdjusted} trajet(s) réajustés`
+                : `${adj.liters.toFixed(1)} L · conso recalibrée si plein connu`
+            );
             void pushLocalNow().then(async (r) => {
               if (r?.ok) showToast('Jauge synchronisée');
               await refresh();

@@ -253,6 +253,7 @@ type TripTab = 'live' | 'history';
 type StartMode = 'free' | 'nav';
 
 const START_MODE_KEY = 'gasoil_trip_start_mode';
+const HISTORY_SCOPE_KEY = 'gasoil_history_vehicle_scope';
 const SMART_DISMISS_KEY = 'gasoil_smart_dismiss_window';
 function smartWindowKey(): string {
   const d = new Date();
@@ -302,6 +303,8 @@ export default function TripScreen() {
   const mapRef = useRef<TripMapRef>(null);
   const autoStartDone = useRef(false);
   const resetHandledRef = useRef<string | null>(null);
+  const appliedVehicleParamRef = useRef<string | null>(null);
+  const historyScopeReadyRef = useRef(false);
   const [tab, setTab] = useState<TripTab>('live');
   const [startMode, setStartMode] = useState<StartMode>('free');
   const [destination, setDestination] = useState('');
@@ -375,8 +378,9 @@ export default function TripScreen() {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [rangeMode, setRangeMode] = useState(false);
   const [calMonth, setCalMonth] = useState(() => currentMonthKey());
-  /** null = Toutes ; sinon filtre véhicule (aligné selectVehicle pour un id précis) */
+  /** null = Toutes ; sinon filtre véhicule (indépendant du véhicule actif global) */
   const [historyAllVehicles, setHistoryAllVehicles] = useState(false);
+  const [historyVehicleId, setHistoryVehicleId] = useState<number | null>(null);
   const [recentDests, setRecentDests] = useState<RecentDestination[]>([]);
   const [mapVisibleIds, setMapVisibleIds] = useState<Set<number>>(() => new Set());
   const onHistoryViewable = useRef(
@@ -418,7 +422,10 @@ export default function TripScreen() {
   const isWeb = Platform.OS === 'web';
 
   const loadLists = useCallback(async () => {
-    if (!activeVehicle && !historyAllVehicles) {
+    const scopeId = historyAllVehicles
+      ? undefined
+      : historyVehicleId ?? activeVehicle?.id ?? undefined;
+    if (scopeId == null && !historyAllVehicles) {
       setHistory([]);
       setPending([]);
       setSinceFill(null);
@@ -427,11 +434,12 @@ export default function TripScreen() {
     }
     setHistoryLoading(true);
     try {
-    const vehicleId = historyAllVehicles ? undefined : activeVehicle?.id;
+    const vehicleId = scopeId;
+    const sinceVehicleId = historyVehicleId ?? activeVehicle?.id;
     const [trips, pend, since, pl] = await Promise.all([
-      getTrips(vehicleId, { omitRoutePoints: true }),
-      getPendingTrips(vehicleId),
-      activeVehicle ? getSinceLastFillStats(activeVehicle.id) : Promise.resolve(null),
+      getTrips(historyAllVehicles ? undefined : vehicleId, { omitRoutePoints: true }),
+      getPendingTrips(historyAllVehicles ? undefined : vehicleId),
+      sinceVehicleId ? getSinceLastFillStats(sinceVehicleId) : Promise.resolve(null),
       getPlaces(),
     ]);
     const hist = trips.filter((t) => !t.isActive);
@@ -464,11 +472,56 @@ export default function TripScreen() {
     } finally {
       setHistoryLoading(false);
     }
-  }, [activeVehicle, colors.accent, historyAllVehicles]);
+  }, [activeVehicle, colors.accent, historyAllVehicles, historyVehicleId]);
+
+  // Restaure le filtre véhicule historique (indépendant du véhicule actif)
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(HISTORY_SCOPE_KEY);
+        if (cancelled) return;
+        if (raw === 'all') {
+          setHistoryAllVehicles(true);
+          setHistoryVehicleId(null);
+        } else if (raw && /^\d+$/.test(raw)) {
+          setHistoryAllVehicles(false);
+          setHistoryVehicleId(Number(raw));
+        } else if (activeVehicle?.id != null) {
+          setHistoryAllVehicles(false);
+          setHistoryVehicleId(activeVehicle.id);
+        }
+      } catch {
+        if (!cancelled && activeVehicle?.id != null) {
+          setHistoryVehicleId(activeVehicle.id);
+        }
+      } finally {
+        if (!cancelled) historyScopeReadyRef.current = true;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap once
+  }, []);
+
+  const persistHistoryScope = useCallback((all: boolean, vehicleId: number | null) => {
+    const value = all ? 'all' : vehicleId != null ? String(vehicleId) : '';
+    void AsyncStorage.setItem(HISTORY_SCOPE_KEY, value).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     void loadLists();
-  }, [historyAllVehicles, activeVehicle?.id, loadLists]);
+  }, [historyAllVehicles, historyVehicleId, activeVehicle?.id, loadLists]);
+
+  // Si aucun filtre histo explicite après bootstrap, suivre le véhicule actif (1ʳᵉ fois)
+  useEffect(() => {
+    if (!historyScopeReadyRef.current) return;
+    if (!historyAllVehicles && historyVehicleId == null && activeVehicle?.id != null) {
+      setHistoryVehicleId(activeVehicle.id);
+      persistHistoryScope(false, activeVehicle.id);
+    }
+  }, [activeVehicle?.id, historyAllVehicles, historyVehicleId, persistHistoryScope]);
 
   useEffect(() => {
     void (async () => {
@@ -552,12 +605,17 @@ export default function TripScreen() {
         setRangeMode(nextFilter === 'range');
         if (fromYmd) setCalMonth(fromYmd.slice(0, 7));
       }
+      const rawVid = Array.isArray(params.vehicleId)
+        ? params.vehicleId[0]
+        : params.vehicleId;
+      const vidKey = rawVid != null && String(rawVid).length ? String(rawVid) : null;
       const vid = parseVehicleIdParam(params.vehicleId);
-      if (vid != null) {
+      // N’applique vehicleId URL qu’une fois par valeur — sinon le focus écrase le chip
+      if (vid != null && vidKey && appliedVehicleParamRef.current !== vidKey) {
+        appliedVehicleParamRef.current = vidKey;
         setHistoryAllVehicles(false);
-        if (activeVehicle?.id !== vid) {
-          void selectVehicle(vid);
-        }
+        setHistoryVehicleId(vid);
+        persistHistoryScope(false, vid);
       }
       const resetFlag = Array.isArray(params.reset) ? params.reset[0] : params.reset;
       const resetNonce = Array.isArray(params.r) ? params.r[0] : params.r;
@@ -591,6 +649,8 @@ export default function TripScreen() {
       params.to,
       params.reset,
       params.r,
+      params.vehicleId,
+      persistHistoryScope,
     ])
   );
 
@@ -2712,50 +2772,64 @@ export default function TripScreen() {
                   </Card>
                 ) : (
                   <View style={styles.activeBtnRow}>
-                    <Pressable
-                      onPress={() => {
-                        if (paused) {
-                          router.push({
-                            pathname: '/fillup/add' as never,
-                            params: { tripId: String(activeTrip.id), fromTrip: '1' },
-                          });
-                        } else {
-                          void handlePause(true);
-                        }
-                      }}
-                      style={[
-                        styles.activeBtn,
-                        { borderColor: colors.border, backgroundColor: colors.card },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="Plein"
-                    >
-                      <Text style={{ color: colors.text, fontWeight: '800', fontSize: 13 }}>
-                        Plein
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => void (paused ? handleResume() : handlePause(false))}
-                      style={[
-                        styles.activeBtn,
-                        {
-                          borderColor: paused ? colors.accent : colors.border,
-                          backgroundColor: paused ? colors.accent + '22' : colors.card,
-                        },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel={paused ? 'Reprendre' : 'Pause'}
-                    >
-                      <Text
-                        style={{
-                          color: paused ? colors.accent : colors.text,
-                          fontWeight: '800',
-                          fontSize: 13,
-                        }}
+                    {paused ? (
+                      <>
+                        <Pressable
+                          onPress={() =>
+                            router.push({
+                              pathname: '/fillup/add' as never,
+                              params: { tripId: String(activeTrip.id), fromTrip: '1' },
+                            })
+                          }
+                          style={[
+                            styles.activeBtn,
+                            { borderColor: colors.border, backgroundColor: colors.card },
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel="Plein"
+                        >
+                          <Text style={{ color: colors.text, fontWeight: '800', fontSize: 13 }}>
+                            Plein
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => void handleResume()}
+                          style={[
+                            styles.activeBtn,
+                            {
+                              borderColor: colors.accent,
+                              backgroundColor: colors.accent + '22',
+                            },
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel="Reprendre"
+                        >
+                          <Text
+                            style={{
+                              color: colors.accent,
+                              fontWeight: '800',
+                              fontSize: 13,
+                            }}
+                          >
+                            Reprendre
+                          </Text>
+                        </Pressable>
+                      </>
+                    ) : (
+                      <Pressable
+                        onPress={() => void handlePause(false)}
+                        style={[
+                          styles.activeBtn,
+                          { borderColor: colors.border, backgroundColor: colors.card },
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Pause"
                       >
-                        {paused ? 'Reprendre' : 'Pause'}
-                      </Text>
-                    </Pressable>
+                        <Text style={{ color: colors.text, fontWeight: '800', fontSize: 13 }}>
+                          Pause
+                        </Text>
+                      </Pressable>
+                    )}
                     <Pressable
                       onPress={() => void handleStopTrip()}
                       disabled={isStopping}
@@ -3301,7 +3375,7 @@ export default function TripScreen() {
           ) : null}
           </TutorialAnchor>
         </>
-      ) : !activeVehicle && !historyAllVehicles ? (
+      ) : !historyAllVehicles && historyVehicleId == null && !activeVehicle ? (
         <View style={[styles.panel, styles.panelContent]}>
           <Card>
             <Text style={[styles.warning, { color: colors.warning }]}>
@@ -3354,6 +3428,8 @@ export default function TripScreen() {
                   <Pressable
                     onPress={() => {
                       setHistoryAllVehicles(true);
+                      setHistoryVehicleId(null);
+                      persistHistoryScope(true, null);
                     }}
                     style={[
                       styles.filterChip,
@@ -3376,13 +3452,14 @@ export default function TripScreen() {
                     </Text>
                   </Pressable>
                   {vehicles.map((v) => {
-                    const selected = !historyAllVehicles && activeVehicle?.id === v.id;
+                    const selected = !historyAllVehicles && historyVehicleId === v.id;
                     return (
                       <Pressable
                         key={v.id}
                         onPress={() => {
                           setHistoryAllVehicles(false);
-                          void selectVehicle(v.id);
+                          setHistoryVehicleId(v.id);
+                          persistHistoryScope(false, v.id);
                         }}
                         style={[
                           styles.filterChip,
@@ -3508,9 +3585,14 @@ export default function TripScreen() {
                           onChange={() => undefined}
                           onChangeEnd={async (L) => {
                             if (!activeVehicle) return;
-                            await setFuelLiters(activeVehicle, L);
+                            const adj = await setFuelLiters(activeVehicle, L);
                             await refresh();
-                            notify('Réservoir', `${L.toFixed(1)} L enregistrés`);
+                            notify(
+                              'Réservoir',
+                              adj.tripsAdjusted > 0
+                                ? `${adj.liters.toFixed(1)} L · ${adj.tripsAdjusted} trajet(s) réajustés`
+                                : `${adj.liters.toFixed(1)} L enregistrés`
+                            );
                           }}
                         />
                         <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }}>

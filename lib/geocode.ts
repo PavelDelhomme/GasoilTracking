@@ -34,13 +34,16 @@ export async function reverseGeocodeDetails(
     const url =
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2` +
       `&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
+    const ctrl = new AbortController();
+    const kill = setTimeout(() => ctrl.abort(), 4000);
     const res = await fetch(url, {
+      signal: ctrl.signal,
       headers: {
         Accept: 'application/json',
         // Nominatim demande un User-Agent identifiable
         'User-Agent': 'GasoilTracking/1.4 (personal fuel app)',
       },
-    });
+    }).finally(() => clearTimeout(kill));
     if (!res.ok) return null;
     const data = (await res.json()) as {
       display_name?: string;
@@ -92,12 +95,15 @@ export async function forwardGeocode(
     const url =
       `https://nominatim.openstreetmap.org/search?format=jsonv2` +
       `&q=${encodeURIComponent(q)}&limit=1&addressdetails=1&countrycodes=fr`;
+    const ctrl = new AbortController();
+    const kill = setTimeout(() => ctrl.abort(), 5000);
     const res = await fetch(url, {
+      signal: ctrl.signal,
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'GasoilTracking/1.3 (personal fuel app)',
+        'User-Agent': 'GasoilTracking/1.4 (personal fuel app)',
       },
-    });
+    }).finally(() => clearTimeout(kill));
     if (!res.ok) return null;
     const data = (await res.json()) as Array<{
       lat?: string;

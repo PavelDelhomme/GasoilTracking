@@ -1,5 +1,6 @@
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { BACKGROUND_LOCATION_TASK } from '@/constants/Colors';
 import {
@@ -282,6 +283,16 @@ export async function requestLocationPermissions(): Promise<boolean> {
 
   if (Platform.OS === 'web') return true;
 
+  // Android 13+ : sans POST_NOTIFICATIONS la FGS tourne parfois sans notif visible.
+  try {
+    const cur = await Notifications.getPermissionsAsync();
+    if (cur.status !== 'granted') {
+      await Notifications.requestPermissionsAsync();
+    }
+  } catch {
+    /* iOS / web / module absent */
+  }
+
   const { status: background } = await Location.requestBackgroundPermissionsAsync();
   return background === 'granted';
 }
@@ -361,8 +372,8 @@ export async function startBackgroundTracking(opts?: {
           deferredUpdatesInterval: 4000,
           showsBackgroundLocationIndicator: true,
           foregroundService: {
-            notificationTitle: 'Gasoil Tracking — trajet',
-            notificationBody: 'Suivi GPS en arrière-plan',
+            notificationTitle: 'Gasoil Tracking — suivi en cours',
+            notificationBody: 'Trajet GPS en arrière-plan · ouvrez l’app pour Terminer',
             notificationColor: '#e94560',
           },
           pausesUpdatesAutomatically: false,
@@ -417,28 +428,44 @@ export function clearLivePointsAfterFinish(): void {
 export async function getCurrentLocation(opts?: {
   /** Pour démarrer un trajet : frais + précis, pas last-known lâche. */
   fresh?: boolean;
+  /** Timeout ms (faible réseau / GPS lent) — fallback last-known. */
+  timeoutMs?: number;
 }): Promise<Location.LocationObject | null> {
   const { status } = await Location.requestForegroundPermissionsAsync();
   if (status !== 'granted') return null;
 
-  if (!opts?.fresh) {
+  const readLast = async () => {
     try {
-      const last = await Location.getLastKnownPositionAsync({
-        maxAge: 45_000,
-        requiredAccuracy: 80,
+      return await Location.getLastKnownPositionAsync({
+        maxAge: opts?.fresh ? 120_000 : 45_000,
+        requiredAccuracy: opts?.fresh ? 150 : 80,
       });
-      if (last && (last.coords.accuracy == null || last.coords.accuracy <= 80)) {
-        return last;
-      }
     } catch {
-      /* ignore */
+      return null;
+    }
+  };
+
+  if (!opts?.fresh) {
+    const last = await readLast();
+    if (last && (last.coords.accuracy == null || last.coords.accuracy <= 80)) {
+      return last;
     }
   }
 
-  return Location.getCurrentPositionAsync({
-    accuracy: opts?.fresh ? Location.Accuracy.High : Location.Accuracy.Balanced,
-    mayShowUserSettingsDialog: true,
-  });
+  const timeoutMs = opts?.timeoutMs ?? (opts?.fresh ? 8000 : 12_000);
+  try {
+    const fix = await Promise.race([
+      Location.getCurrentPositionAsync({
+        accuracy: opts?.fresh ? Location.Accuracy.High : Location.Accuracy.Balanced,
+        mayShowUserSettingsDialog: true,
+      }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+    if (fix) return fix;
+  } catch {
+    /* ignore */
+  }
+  return readLast();
 }
 
 /** Ouvre Google Maps pour la navigation vers une destination */

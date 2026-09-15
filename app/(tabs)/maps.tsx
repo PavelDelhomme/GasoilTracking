@@ -564,8 +564,8 @@ export default function MapsScreen() {
         } else {
           showToast(
             dest
-              ? `Guidage vers ${dest.label} — suivi actif sur Maps.`
-              : 'Suivi GPS démarré — restez sur Maps.'
+              ? `Guidage vers ${dest.label} — suivi actif (notif arrière-plan).`
+              : 'Suivi GPS démarré — notif « suivi en cours » en arrière-plan.'
           );
         }
       } finally {
@@ -650,8 +650,25 @@ export default function MapsScreen() {
         showToast(ok ? 'Suivi repris' : 'Vérifiez les permissions localisation.');
       } else {
         await pauseGpsTrip(tripId, refresh);
-        showToast('Pause — le tracé est figé.');
+        showToast('Pause — Reprendre ou enregistrer un plein.');
       }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onFillUpDuringTrip = async () => {
+    const tripId = activeTrip?.id ?? sessionTripId;
+    if (!tripId) return;
+    setBusy(true);
+    try {
+      if (!paused) {
+        await pauseGpsTrip(tripId, refresh);
+      }
+      router.push({
+        pathname: '/fillup/add' as never,
+        params: { tripId: String(tripId), fromTrip: '1' },
+      });
     } finally {
       setBusy(false);
     }
@@ -1020,22 +1037,47 @@ export default function MapsScreen() {
 
         <View style={styles.actions}>
           {tracking ? (
-            <>
-              <Button
-                title={paused ? 'Reprendre' : 'Pause'}
-                variant="outline"
-                onPress={() => void onPauseResume()}
-                disabled={busy}
-                style={{ flex: 1 }}
-              />
-              <Button
-                title="Terminer"
-                variant="danger"
-                onPress={() => void onStop()}
-                disabled={busy}
-                style={{ flex: 1 }}
-              />
-            </>
+            paused ? (
+              <>
+                <Button
+                  title="Reprendre"
+                  variant="outline"
+                  onPress={() => void onPauseResume()}
+                  disabled={busy}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  title="Plein"
+                  onPress={() => void onFillUpDuringTrip()}
+                  disabled={busy}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  title="Terminer"
+                  variant="danger"
+                  onPress={() => void onStop()}
+                  disabled={busy}
+                  style={{ flex: 1 }}
+                />
+              </>
+            ) : (
+              <>
+                <Button
+                  title="Pause"
+                  variant="outline"
+                  onPress={() => void onPauseResume()}
+                  disabled={busy}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  title="Terminer"
+                  variant="danger"
+                  onPress={() => void onStop()}
+                  disabled={busy}
+                  style={{ flex: 1 }}
+                />
+              </>
+            )
           ) : (
             <>
               <Button
@@ -1185,7 +1227,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     maxWidth: 180,
   },
-  actions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4 },
   activeBanner: {
     flexDirection: 'row',
     alignItems: 'center',

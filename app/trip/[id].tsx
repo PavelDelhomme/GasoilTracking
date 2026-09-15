@@ -19,7 +19,11 @@ import {
   formatDurationMinutes,
 } from '@/lib/consumptionModel';
 import { formatDateSlash } from '@/lib/dates';
-import { reverseGeocode, tripPlaceLabel, tripSourceLabel } from '@/lib/geocode';
+import { tripSourceLabel } from '@/lib/geocode';
+import {
+  disambiguateSameEndpoints,
+  resolveTripEndpointLabel,
+} from '@/lib/placeLabels';
 import { notify, confirm } from '@/lib/notify';
 import { useApp } from '@/context/AppContext';
 import { getPlaces } from '@/lib/database';
@@ -40,6 +44,7 @@ export default function TripDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [originLabel, setOriginLabel] = useState('');
   const [destLabel, setDestLabel] = useState('');
+  const [endpointAddresses, setEndpointAddresses] = useState<string | null>(null);
   const [displayPoints, setDisplayPoints] = useState<
     { latitude: number; longitude: number }[]
   >([]);
@@ -65,19 +70,31 @@ export default function TripDetailScreen() {
     const start = pts[0];
     const end = pts.length > 1 ? pts[pts.length - 1] : null;
 
-    let o = tripPlaceLabel(t.originName, start, 'origin');
-    let d = tripPlaceLabel(t.destinationName, end, 'destination');
-
-    if (start && (!t.originName || /lieu de départ|^départ$/i.test(t.originName))) {
-      const geo = await reverseGeocode(start.latitude, start.longitude);
-      if (geo) o = geo;
-    }
-    if (end && (!t.destinationName || /lieu d.arrivée|^arrivée$/i.test(t.destinationName))) {
-      const geo = await reverseGeocode(end.latitude, end.longitude);
-      if (geo) d = geo;
-    }
-    setOriginLabel(o);
-    setDestLabel(d);
+    let origin = await resolveTripEndpointLabel({
+      places,
+      coords: start,
+      existingName: t.originName,
+      role: 'origin',
+      geocodeTimeoutMs: 2500,
+    });
+    let destination = await resolveTripEndpointLabel({
+      places,
+      coords: end,
+      existingName: t.destinationName,
+      role: 'destination',
+      geocodeTimeoutMs: 2500,
+    });
+    ({ origin, destination } = disambiguateSameEndpoints(
+      origin,
+      destination,
+      t.distanceKm || 0
+    ));
+    setOriginLabel(origin.displayName);
+    setDestLabel(destination.displayName);
+    const addrBits = [origin.detailAddress, destination.detailAddress]
+      .filter(Boolean)
+      .filter((a, i, arr) => arr.indexOf(a) === i);
+    setEndpointAddresses(addrBits.length ? addrBits.join(' → ') : null);
   }, [tripId]);
 
   useEffect(() => {
@@ -233,6 +250,11 @@ export default function TripDetailScreen() {
               Arrivée
             </Text>
             <Text style={[styles.place, { color: colors.text }]}>{destLabel}</Text>
+            {endpointAddresses ? (
+              <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 8, lineHeight: 17 }}>
+                Adresse exacte : {endpointAddresses}
+              </Text>
+            ) : null}
             <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 12 }}>
               {formatDateSlash(trip.startTime)}
               {(() => {

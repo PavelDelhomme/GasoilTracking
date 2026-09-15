@@ -9,11 +9,11 @@ import {
   createTrip,
   getActiveTrip,
   getActiveTripLite,
+  getPlaces,
   getTripById,
   getVehicleById,
   updateTrip,
 } from '@/lib/database';
-import { reverseGeocode } from '@/lib/geocode';
 import { clearLiveTripBuffer, seedLiveTripBuffer } from '@/lib/liveTripBuffer';
 import {
   calculateRouteDistance,
@@ -33,6 +33,10 @@ import {
   clearLivePointsAfterFinish,
 } from '@/lib/locationService';
 import { freeTripNote } from '@/lib/startFreeTripNote';
+import {
+  disambiguateSameEndpoints,
+  resolveTripEndpointLabel,
+} from '@/lib/placeLabels';
 
 export type GpsTripStartResult =
   | { ok: true; tripId: number; trackingStarted: boolean }
@@ -161,7 +165,7 @@ export async function startGpsTrip(opts: {
       /* ne bloque pas le départ GPS */
     }
 
-    const loc = await getCurrentLocation({ fresh: true });
+    const loc = await getCurrentLocation({ fresh: true, timeoutMs: 7000 });
     const startPoint = loc
       ? [
           {
@@ -173,10 +177,22 @@ export async function startGpsTrip(opts: {
         ]
       : [];
 
-    const originName = loc
-      ? (await reverseGeocode(loc.coords.latitude, loc.coords.longitude).catch(() => null)) ||
-        'Position de départ'
-      : 'Position de départ';
+    // Places + reverse géocode court — ne bloque pas hors-ligne / réseau pourri
+    let originName = 'Position de départ';
+    try {
+      const places = await getPlaces().catch(() => []);
+      const origin = await resolveTripEndpointLabel({
+        places,
+        coords: loc
+          ? { latitude: loc.coords.latitude, longitude: loc.coords.longitude }
+          : null,
+        role: 'origin',
+        geocodeTimeoutMs: 2000,
+      });
+      originName = origin.displayName;
+    } catch {
+      /* offline OK */
+    }
 
     const isWeb = Platform.OS === 'web';
     const destName = opts.destinationName?.trim() || undefined;
@@ -296,6 +312,43 @@ export async function stopGpsTripLite(opts: {
     }
   }
 
+  // Libellés : places enregistrées > reverse geocode (timeout court = offline OK)
+  let originName = trip?.originName || null;
+  let destinationName = trip?.destinationName || null;
+  let noteExtra: string | null = null;
+  try {
+    const places = await getPlaces().catch(() => []);
+    const startPt = pts[0] || null;
+    const endPt = pts.length > 1 ? pts[pts.length - 1] : startPt;
+    let origin = await resolveTripEndpointLabel({
+      places,
+      coords: startPt,
+      existingName: originName,
+      role: 'origin',
+      geocodeTimeoutMs: 2500,
+    });
+    let destination = await resolveTripEndpointLabel({
+      places,
+      coords: endPt,
+      existingName: destinationName,
+      role: 'destination',
+      geocodeTimeoutMs: 2500,
+    });
+    ({ origin, destination } = disambiguateSameEndpoints(origin, destination, distanceKm));
+    originName = origin.displayName;
+    destinationName = destination.displayName;
+    const details = [origin.detailAddress, destination.detailAddress]
+      .filter(Boolean)
+      .filter((a, i, arr) => arr.indexOf(a) === i);
+    if (details.length) {
+      noteExtra = `Adresses : ${details.join(' → ')}`;
+    }
+  } catch {
+    /* ignore naming */
+  }
+
+  const mergedNote = [trip?.note, noteExtra].filter(Boolean).join('\n') || undefined;
+
   await updateTrip(opts.tripId, {
     isActive: false,
     isPaused: false,
@@ -304,6 +357,9 @@ export async function stopGpsTripLite(opts: {
     estimatedFuelUsed,
     estimatedCost: estimatedCostVal,
     status: tiny ? 'rejected' : 'confirmed',
+    originName: originName || trip?.originName || undefined,
+    destinationName: destinationName || trip?.destinationName || undefined,
+    note: mergedNote,
   });
   if (!tiny && distanceKm > 0) {
     await addTrackedKm(opts.vehicleId, distanceKm).catch(() => undefined);
