@@ -23,6 +23,7 @@ import { isQaLabDevice } from '@/lib/qaLabAccess';
 import {
   askMapsAppPreference,
   getPreferredMapsApp,
+  mapsAppLabel,
   type MapsAppChoice,
 } from '@/lib/mapsNavigation';
 import { QrPairDevicePanel } from '@/components/QrPairDevicePanel';
@@ -41,7 +42,6 @@ export default function AccountScreen() {
   const showQaLab = isQaLabDevice();
 
   useEffect(() => {
-    if (Platform.OS !== 'ios') return;
     void getPreferredMapsApp().then(setMapsPref);
   }, []);
 
@@ -77,29 +77,24 @@ export default function AccountScreen() {
         </Text>
       </Card>
 
-      {Platform.OS === 'ios' && (
-        <Card style={{ marginBottom: 12 }}>
-          <Text style={[styles.section, { color: colors.text }]}>Navigation</Text>
-          <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 10 }}>
-            App utilisée pour les trajets guidés
-            {mapsPref === 'apple'
-              ? ' : Plans (Apple)'
-              : mapsPref === 'google'
-                ? ' : Google Maps'
-                : ' (demande au premier trajet)'}.
-          </Text>
-          <Button
-            title="Changer Google Maps / Plans"
-            variant="secondary"
-            onPress={() => {
-              void askMapsAppPreference().then((app) => {
-                setMapsPref(app);
-                showToast(app === 'apple' ? 'Plans Apple sélectionné' : 'Google Maps sélectionné');
-              });
-            }}
-          />
-        </Card>
-      )}
+      <Card style={{ marginBottom: 12 }}>
+        <Text style={[styles.section, { color: colors.text }]}>Navigation</Text>
+        <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 10 }}>
+          App pour les trajets guidés
+          {mapsPref ? ` : ${mapsAppLabel(mapsPref)}` : ' (demande au premier trajet)'}.
+          {'\n'}Waze / OsmAnd / Organic Maps = deep link (pas d’API embarquée).
+        </Text>
+        <Button
+          title="Choisir Google / Waze / OsmAnd…"
+          variant="secondary"
+          onPress={() => {
+            void askMapsAppPreference().then((app) => {
+              setMapsPref(app);
+              showToast(`${mapsAppLabel(app)} sélectionné`);
+            });
+          }}
+        />
+      </Card>
 
       <Card style={{ marginBottom: 12 }}>
         <Text style={[styles.section, { color: colors.text }]}>Synchronisation cloud</Text>

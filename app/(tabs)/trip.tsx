@@ -63,7 +63,11 @@ import {
   clearLiveTripBuffer,
   readLiveTripBuffer,
 } from '@/lib/liveTripBuffer';
-import { buildViaWaypoints, launchGoogleMapsNavigation } from '@/lib/mapsNavigation';
+import {
+  buildViaWaypoints,
+  launchGoogleMapsNavigation,
+  openDestinationInChooser,
+} from '@/lib/mapsNavigation';
 import {
   appendRoutePoint,
   calculateRouteDistance,
@@ -1982,8 +1986,21 @@ export default function TripScreen() {
       opened = false;
     }
     if (!opened) {
-      notify('Google Maps', 'Impossible d’ouvrir Maps. Vérifiez qu’il est installé.');
+      notify('Navigation', 'Impossible d’ouvrir l’app Maps. Vérifiez qu’elle est installée.');
     }
+  };
+
+  /** Feuille Google / Waze / OsmAnd / Organic (deep link) — sans changer la préférence Compte. */
+  const handleOpenInChooser = () => {
+    if (!destCoords) {
+      notify('Destination', 'Indiquez une destination avec coordonnées pour ouvrir une app tierce.');
+      return;
+    }
+    void openDestinationInChooser({
+      destination: destCoords,
+      origin: userLocation,
+      label: destination.trim() || activeTrip?.destinationName?.trim() || 'Destination',
+    });
   };
 
   /** Simulateur voiture (tests).
@@ -3349,6 +3366,16 @@ export default function TripScreen() {
                         icon: 'map' as const,
                         onPress: () => void handleOpenGoogleMaps(),
                       },
+                      ...(destCoords
+                        ? [
+                            {
+                              key: 'maps-chooser',
+                              label: 'Ouvrir dans…',
+                              icon: 'navigate-outline' as const,
+                              onPress: () => handleOpenInChooser(),
+                            },
+                          ]
+                        : []),
                     ]
                   : [
                       {
