@@ -16,6 +16,7 @@ import QRCode from 'qrcode';
 import { compareSemver, pickLatestRelease } from './semver.js';
 import { assertApkIdentity } from './apkMeta.js';
 import { applyPersonalCommute, applyPersonalFillUp, fetchCommuteRoute } from './personalCommute.js';
+import { huberaLegacyStatus, huberaNotice, pingFromRequest } from './huberaLegacy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4000);
@@ -736,7 +737,12 @@ app.get('/api/vehicle-catalog', (_req, res) => {
   }
 });
 
-app.get('/api/version', (_req, res) => {
+app.get('/api/hubera/legacy-status', (_req, res) => {
+  res.json(huberaLegacyStatus());
+});
+
+app.get('/api/version', (req, res) => {
+  pingFromRequest(req.query || {}, String(req.headers['user-agent'] || ''));
   const rows = db
     .prepare('SELECT * FROM app_releases WHERE apk_filename IS NOT NULL')
     .all();
@@ -789,6 +795,7 @@ app.get('/api/version', (_req, res) => {
       iosPwa: true,
       iosAppStore: false,
     },
+    hubera: huberaNotice(),
   });
 });
 

@@ -569,6 +569,15 @@ export function isManagerEmail(email?: string | null, userFlag?: boolean | null)
   return Boolean(personal && e === personal);
 }
 
+export type HuberaNotice = {
+  brand?: string;
+  message?: string;
+  canonical_url?: string;
+  legacy_url?: string;
+  keep_package?: string;
+  channel?: string;
+};
+
 export type AppVersionInfo = {
   version: string;
   minVersion: string;
@@ -593,10 +602,31 @@ export type AppVersionInfo = {
     iosPwa: boolean;
     iosAppStore: boolean;
   };
+  hubera?: HuberaNotice | null;
 };
 
+const HUBERA_INSTALL_KEY = 'hubera_install_id';
+
+async function huberaInstallId(): Promise<string> {
+  const existing = await AsyncStorage.getItem(HUBERA_INSTALL_KEY);
+  if (existing) return existing;
+  const created =
+    (globalThis.crypto && 'randomUUID' in globalThis.crypto
+      ? globalThis.crypto.randomUUID()
+      : `g-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  await AsyncStorage.setItem(HUBERA_INSTALL_KEY, created);
+  return created;
+}
+
 export async function fetchAppVersion(): Promise<AppVersionInfo> {
-  const res = await fetch(`${API_URL}/api/version`);
+  const install = await huberaInstallId();
+  const qs = new URLSearchParams({
+    clientVersion: getLocalAppVersion(),
+    clientVersionCode: String(getLocalVersionCode()),
+    install,
+    huberaAware: '1',
+  });
+  const res = await fetch(`${API_URL}/api/version?${qs.toString()}`);
   if (!res.ok) throw new Error('Impossible de vérifier la version');
   return res.json();
 }

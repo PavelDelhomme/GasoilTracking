@@ -70,6 +70,11 @@ export function AppUpdateModal({
               ? ' Vous pouvez reporter 4 h (plusieurs fois si besoin), puis la MAJ reviendra.'
               : ' Rappel dans 6 h si vous reportez (répétable).'}
           </Text>
+          {!!info.hubera?.message && (
+            <Text style={[styles.safe, { color: colors.text, marginTop: 8 }]}>
+              {info.hubera.message}
+            </Text>
+          )}
 
           {busy && (
             <View style={styles.progressBlock}>

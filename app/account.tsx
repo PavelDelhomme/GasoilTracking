@@ -241,6 +241,10 @@ export default function AccountScreen() {
       <Card style={{ marginBottom: 12 }}>
         <Text style={[styles.section, { color: colors.text }]}>Mise à jour</Text>
         <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 10, lineHeight: 18 }}>
+          {info?.hubera?.message ||
+            'GasoilTracking fait partie de Hubera. Tes données restent. Nouveau domaine : gasoil-tracking.hubera.cloud.'}
+        </Text>
+        <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 10, lineHeight: 18 }}>
           {updateAvailable
             ? `Nouvelle version ${info?.version} disponible — installation dans l’app.`
             : info?.buildingVersion
