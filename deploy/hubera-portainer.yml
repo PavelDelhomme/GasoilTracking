@@ -1,0 +1,14 @@
+# Overlay Hubera — documentation exécutable (extension Compose).
+# NE PAS créer une nouvelle stack. NE PAS down -v.
+# NE PAS renommer gasoil-tracking-web / gasoil-tracking-api ni gasoil_api_data.
+# Updates: https://hubera.cloud/updates/fuel.json
+
+x-hubera:
+  slug: fuel
+  update_channel: fuel
+  update_url: https://hubera.cloud/updates/fuel.json
+  immutable_volumes:
+    - gasoil_api_data
+  live_containers:
+    - gasoil-tracking-web
+    - gasoil-tracking-api
