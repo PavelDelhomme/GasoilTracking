@@ -71,6 +71,17 @@ export default function AccountScreen() {
         <Text style={[styles.section, { color: colors.text }]}>Profil</Text>
         <Text style={{ color: colors.text, fontWeight: '700' }}>{user.name}</Text>
         <Text style={{ color: colors.accent, marginTop: 4 }}>{user.email}</Text>
+        {user.huberaLink?.cloudity_email ? (
+          <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 8, lineHeight: 18 }}>
+            Identité Hubera ID : {user.huberaLink.cloudity_email}. Les trajets restent sur ce
+            compte (même id). Ancien gmail = alias de secours — rien n’est copié ni effacé.
+          </Text>
+        ) : (
+          <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 8, lineHeight: 18 }}>
+            Plus tard : tu pourras lier ce compte à Hubera ID (opt-in). Pas obligatoire pour
+            l’usage local.
+          </Text>
+        )}
         <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 8 }}>
           App locale v{getLocalAppVersion()}
           {info?.version ? ` · prod v${info.version}` : ''}

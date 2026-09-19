@@ -18,11 +18,19 @@ export async function getRefreshToken(): Promise<string | null> {
   return AsyncStorage.getItem(REFRESH_KEY);
 }
 
+export type HuberaIdentityLink = {
+  cloudity_email: string;
+  cloudity_user_id?: string | null;
+  satellite_email?: string | null;
+  linked_at: string;
+};
+
 export type AuthUser = {
   id: string;
   email: string;
   name: string;
   isManager?: boolean;
+  huberaLink?: HuberaIdentityLink | null;
 };
 
 export async function setSession(

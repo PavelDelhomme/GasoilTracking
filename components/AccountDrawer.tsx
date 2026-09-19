@@ -113,6 +113,10 @@ export function AccountDrawer() {
                 v{getLocalAppVersion()}
                 {info?.version ? ` · serveur ${info.version}` : ''}
               </Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8, lineHeight: 16 }}>
+                {info?.hubera?.message ||
+                  'GasoilTracking fait partie de Hubera. Tes données restent. Nouveau domaine : gasoil-tracking.hubera.cloud — l’ancien gasoil-tracking.delhomme.ovh continue.'}
+              </Text>
             </View>
             <Pressable
               onPress={closeDrawer}
@@ -205,8 +209,9 @@ export function AccountDrawer() {
                 <Text style={[styles.section, { color: colors.textSecondary }]}>Connexion</Text>
                 <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
                   <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 10 }}>
-                    Hors ligne / non connecté : vos données restent sur{' '}
-                    gasoil-tracking.delhomme.ovh. Connectez-vous pour les recharger ici.
+                    Hors ligne / non connecté : vos données restent. Ancien domaine
+                    gasoil-tracking.delhomme.ovh et nouveau gasoil-tracking.hubera.cloud
+                    continuent tous les deux. Connectez-vous pour les recharger ici.
                   </Text>
                   <Button
                     title="Connexion"

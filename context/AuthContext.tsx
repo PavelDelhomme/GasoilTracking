@@ -66,6 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: me.user.email,
         name: me.user.name,
         isManager: !!me.user.isManager,
+        huberaLink: me.user.huberaLink || null,
       };
       setUser(next);
       const refresh = await getRefreshToken();
@@ -220,6 +221,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           email: me.user.email,
           name: me.user.name,
           isManager: !!me.user.isManager,
+          huberaLink: me.user.huberaLink || null,
         };
         setUser(u);
         const token = await getToken();

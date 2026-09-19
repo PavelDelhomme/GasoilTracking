@@ -47,6 +47,7 @@ function isManagerEmail(email) {
   if (PERSONAL_MAIL && e === PERSONAL_MAIL) return true;
   // Fallback si PERSONAL_MAIL n’est pas injecté en prod
   if (e === 'paveldelhomme@gmail.com') return true;
+  if (e === 'paul@delhomme.ovh') return true;
   return false;
 }
 
@@ -136,6 +137,19 @@ db.exec(`
     ip TEXT,
     user_agent TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+  );
+  CREATE TABLE IF NOT EXISTS hubera_identity_links (
+    user_id TEXT PRIMARY KEY,
+    cloudity_email TEXT NOT NULL,
+    cloudity_user_id TEXT,
+    satellite_email TEXT,
+    linked_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS user_email_aliases (
+    email TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 `);
 
@@ -823,7 +837,7 @@ app.post('/api/auth/register', authLimiter, registerLimiter, async (req, res) =>
     if (String(password).length < 8 || String(password).length > 128) {
       return res.status(400).json({ error: 'Mot de passe : 8 à 128 caractères' });
     }
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(cleanEmail);
+    const existing = emailTaken(cleanEmail);
     if (existing) {
       return res.status(409).json({ error: 'Email déjà utilisé' });
     }
@@ -990,7 +1004,7 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ error: 'email et password requis' });
   }
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  const user = findUserByLoginEmail(email);
   // message générique anti-énumération
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
     return res.status(401).json({ error: 'Identifiants invalides' });
@@ -1240,6 +1254,54 @@ app.post('/api/auth/logout', auth, (req, res) => {
   res.json({ ok: true });
 });
 
+function findUserByLoginEmail(email) {
+  const e = String(email || '')
+    .toLowerCase()
+    .trim();
+  if (!e) return undefined;
+  const primary = db.prepare('SELECT * FROM users WHERE email = ?').get(e);
+  if (primary) return primary;
+  try {
+    return db
+      .prepare(
+        `SELECT u.* FROM users u
+         JOIN user_email_aliases a ON a.user_id = u.id
+         WHERE a.email = ?`
+      )
+      .get(e);
+  } catch {
+    return undefined;
+  }
+}
+
+function emailTaken(email) {
+  const e = String(email || '')
+    .toLowerCase()
+    .trim();
+  if (!e) return false;
+  if (db.prepare('SELECT id FROM users WHERE email = ?').get(e)) return true;
+  try {
+    if (db.prepare('SELECT user_id FROM user_email_aliases WHERE email = ?').get(e)) return true;
+  } catch {
+    /* table absente */
+  }
+  return false;
+}
+
+function huberaLinkForUser(userId) {
+  try {
+    return (
+      db
+        .prepare(
+          'SELECT cloudity_email, cloudity_user_id, satellite_email, linked_at FROM hubera_identity_links WHERE user_id = ?'
+        )
+        .get(userId) || null
+    );
+  } catch {
+    return null;
+  }
+}
+
 app.get('/api/auth/me', auth, (req, res) => {
   const user = db
     .prepare('SELECT id, email, name, created_at, email_verified FROM users WHERE id = ?')
@@ -1256,10 +1318,12 @@ app.get('/api/auth/me', auth, (req, res) => {
       .all();
     pendingRegistrationsCount = pendingRegistrations.length;
   }
+  const huberaLink = huberaLinkForUser(user.id);
   res.json({
     user: {
       ...user,
       isManager: manager,
+      huberaLink,
     },
     pendingRegistrationsCount,
     pendingRegistrations,
@@ -1299,7 +1363,7 @@ app.post('/api/auth/forgot-password', authLimiter, registerLimiter, async (req, 
     if (!email || !isValidEmail(email)) {
       return res.status(400).json({ error: 'Email invalide' });
     }
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    const user = findUserByLoginEmail(email);
     if (!user) {
       return res.json({ ok: true, message: generic });
     }
