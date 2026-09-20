@@ -449,7 +449,7 @@ export default function TripScreen() {
     setSinceFill(since);
     setPlaces(pl);
     // Précharge géométrie + images mini-cartes (ne bloque pas l’UI)
-    void preloadHistoryMaps(hist.slice(0, 8), pl, colors.accent);
+    void preloadHistoryMaps(hist.slice(0, 2), pl, colors.accent);
     void (async () => {
       const stored = await getRecentDestinations(6);
       if (stored.length) {

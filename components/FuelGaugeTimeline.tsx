@@ -13,6 +13,8 @@ type Props = {
   tripId?: number;
   compact?: boolean;
   title?: string;
+  /** Nombre max de lectures (hors trajet unique). Défaut 20. */
+  limit?: number;
 };
 
 function formatWhen(iso: string): string {
@@ -26,20 +28,21 @@ function formatWhen(iso: string): string {
   }
 }
 
-export function FuelGaugeTimeline({ vehicleId, tripId, compact, title }: Props) {
+export function FuelGaugeTimeline({ vehicleId, tripId, compact, title, limit }: Props) {
   const { colors } = useTheme();
   const [rows, setRows] = useState<FuelGaugeReading[]>([]);
+  const cap = limit ?? (compact ? 20 : 20);
 
   const load = useCallback(async () => {
     try {
       const list = tripId
         ? await getTripGaugeReadings(tripId)
-        : await getFuelGaugeReadings(vehicleId, { limit: compact ? 12 : 80 });
-      setRows(list);
+        : await getFuelGaugeReadings(vehicleId, { limit: cap });
+      setRows(tripId ? list.slice(-cap) : list);
     } catch {
       setRows([]);
     }
-  }, [vehicleId, tripId, compact]);
+  }, [vehicleId, tripId, compact, cap]);
 
   useFocusEffect(
     useCallback(() => {
@@ -52,6 +55,11 @@ export function FuelGaugeTimeline({ vehicleId, tripId, compact, title }: Props) 
   return (
     <Card>
       <Text style={[styles.section, { color: colors.text }]}>{heading}</Text>
+      {!tripId && rows.length > 0 && (
+        <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
+          Les plus récentes
+        </Text>
+      )}
       {rows.length === 0 ? (
         <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
           Aucune jauge enregistrée pour l’instant

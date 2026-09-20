@@ -22,6 +22,9 @@ type Props = {
   showMap?: boolean;
   /** Tous les trajets pour moyennes / comparaison */
   allTrips?: Trip[];
+  /** Si fournis, pas de SQL jauge supplémentaire. */
+  startLiters?: number;
+  endLiters?: number;
 };
 
 let placesCache: { at: number; places: Place[] } | null = null;
@@ -46,6 +49,8 @@ function TripHistoryCardInner({
   onDelete,
   showMap = true,
   allTrips = [],
+  startLiters,
+  endLiters,
 }: Props) {
   const { colors } = useTheme();
   const stored = useMemo(() => parseRoutePoints(trip.routePoints), [trip.routePoints]);
@@ -78,6 +83,9 @@ function TripHistoryCardInner({
   const durationMin = tripDurationMinutes(trip);
 
   useEffect(() => {
+    if (startLiters != null && endLiters != null && Number.isFinite(startLiters) && Number.isFinite(endLiters)) {
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -90,7 +98,7 @@ function TripHistoryCardInner({
     return () => {
       cancelled = true;
     };
-  }, [trip.id]);
+  }, [trip.id, startLiters, endLiters]);
 
   useEffect(() => {
     if (!showMap) return;
@@ -140,6 +148,16 @@ function TripHistoryCardInner({
   const sourceFr = tripSourceLabel(trip.source);
 
   const gaugeChip = (() => {
+    if (
+      startLiters != null &&
+      endLiters != null &&
+      Number.isFinite(startLiters) &&
+      Number.isFinite(endLiters)
+    ) {
+      const a = Math.round(startLiters);
+      const b = Math.round(endLiters);
+      return a === b ? `${a} L` : `${a} L → ${b} L`;
+    }
     if (!gaugeReadings.length) return null;
     const chrono = [...gaugeReadings].sort((a, b) =>
       String(a.recordedAt).localeCompare(String(b.recordedAt))

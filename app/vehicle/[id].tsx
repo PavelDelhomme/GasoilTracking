@@ -208,7 +208,7 @@ export default function VehicleDetailScreen() {
         )}
       </Card>
 
-      <FuelGaugeTimeline vehicleId={vehicle.id} />
+      <FuelGaugeTimeline vehicleId={vehicle.id} compact limit={24} />
 
       <Card>
         <Text style={[styles.section, { color: colors.text }]}>Derniers pleins</Text>
