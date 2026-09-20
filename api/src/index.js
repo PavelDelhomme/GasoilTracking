@@ -27,6 +27,22 @@ const MIN_VERSION = process.env.MIN_APP_VERSION || '1.0.0';
 const INVITE_CODE = process.env.INVITE_CODE || '';
 const RELEASE_UPLOAD_TOKEN = process.env.RELEASE_UPLOAD_TOKEN || '';
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://gasoil-tracking.delhomme.ovh').replace(/\/$/, '');
+
+/** Dual alias Hubera : les liens OTA suivent l’hôte de la requête (même stack, même volume). */
+function requestPublicUrl(req) {
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '')
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+  if (
+    host === 'gasoil-tracking.hubera.cloud' ||
+    host === 'fuel.hubera.cloud' ||
+    host === 'gasoil-tracking.delhomme.ovh'
+  ) {
+    return `https://${host}`;
+  }
+  return PUBLIC_URL;
+}
 const APP_SCHEME = process.env.APP_SCHEME || 'gasoiltracking';
 const TRUST_PROXY = process.env.TRUST_PROXY !== '0';
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || 'admin@delhomme.ovh')
@@ -763,8 +779,9 @@ app.get('/api/version', (req, res) => {
   const latest = pickLatestRelease(rows);
   const version = latest?.version || APP_VERSION;
   const apkAvailable = Boolean(latest?.apk_filename);
+  const pub = requestPublicUrl(req);
   const apkUrl = apkAvailable
-    ? `${PUBLIC_URL}/api/download/${latest.apk_filename}`
+    ? `${pub}/api/download/${latest.apk_filename}`
     : null;
 
   let buildingVersion = null;
@@ -795,10 +812,10 @@ app.get('/api/version', (req, res) => {
     apkSha256: latest?.apk_sha256 || null,
     apkSize: latest?.apk_size || null,
     versionCode: latest?.version_code || null,
-    webUrl: PUBLIC_URL,
+    webUrl: pub,
     /** Hub multi-plateformes (Android APK + iPhone PWA + web) */
-    downloadPage: `${PUBLIC_URL}/download`,
-    iosInstallUrl: `${PUBLIC_URL}/download#ios`,
+    downloadPage: `${pub}/download`,
+    iosInstallUrl: `${pub}/download#ios`,
     releaseNotes: latest?.release_notes || '',
     buildingVersion,
     buildingSince,
