@@ -132,7 +132,7 @@ export function QrWebLoginPanel({ onLoggedIn }: Props) {
         Connexion rapide (QR)
       </Text>
       <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 12 }}>
-        Ouvrez Gasoil Tracking sur votre téléphone (déjà connecté), puis scannez ce code.
+        Ouvrez Hubera Fuel sur votre téléphone (déjà connecté), puis scannez ce code.
       </Text>
 
       {status === 'pending' && qr?.qrDataUrl ? (

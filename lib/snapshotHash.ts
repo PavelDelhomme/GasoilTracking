@@ -77,6 +77,14 @@ export type SnapshotHashInput = {
     status: string;
   }>;
   clientPrefs?: { onboardingDoneV2?: boolean };
+  gaugeReadings?: Array<{
+    id: number;
+    vehicleId: number;
+    recordedAt: string;
+    liters: number;
+    source: string;
+    tripId?: number | null;
+  }>;
 };
 
 /**
@@ -149,6 +157,16 @@ export function snapshotContentHash(snap: SnapshotHashInput | null | undefined):
       status: m.status,
     }))
     .sort((a, b) => Number(a.id) - Number(b.id));
+  const gaugeReadings = [...(snap.gaugeReadings || [])]
+    .map((g) => ({
+      id: g.id,
+      vehicleId: g.vehicleId,
+      recordedAt: g.recordedAt,
+      liters: g.liters,
+      source: g.source,
+      tripId: g.tripId ?? null,
+    }))
+    .sort((a, b) => Number(a.id) - Number(b.id));
 
   return fnv1aHex(
     stableStringify({
@@ -160,6 +178,7 @@ export function snapshotContentHash(snap: SnapshotHashInput | null | undefined):
       places,
       recurringRoutes,
       maintenances,
+      gaugeReadings,
       clientPrefs: {
         onboardingDoneV2: !!snap.clientPrefs?.onboardingDoneV2,
       },

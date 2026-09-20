@@ -5,6 +5,7 @@ import {
   getActiveTrip,
   getActiveTripLite,
   getTripById,
+  getVehicleById,
   getVehicles,
   setActiveVehicle as dbSetActiveVehicle,
   updateTrip,
@@ -19,6 +20,7 @@ import { flushTripUpdates, stopBackgroundTracking } from '@/lib/locationService'
 import { readLiveTripBuffer } from '@/lib/liveTripBuffer';
 import { reverseGeocode } from '@/lib/geocode';
 import { applyTripFuelBurn } from '@/lib/fuelLevel';
+import { recordFuelGaugeReading } from '@/lib/fuelGaugeHistory';
 import { refreshVehicleReminders } from '@/lib/reminders';
 import { repairTripHistory } from '@/lib/repairTripHistory';
 import { repairFillUpVehiclesAndBudgets } from '@/lib/repairFillUpVehicles';
@@ -187,7 +189,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   });
 
                   if (activeVehicle && fresh.distanceKm > 0) {
-                    await applyTripFuelBurn(activeVehicle, fresh.distanceKm);
+                    await applyTripFuelBurn(activeVehicle, fresh.distanceKm, 0, {
+                      tripId: fresh.id,
+                    });
+                    const after = await getVehicleById(activeVehicle.id).catch(() => null);
+                    const endLiters = after?.estimatedFuelLiters ?? activeVehicle.estimatedFuelLiters;
+                    if (endLiters != null) {
+                      await recordFuelGaugeReading({
+                        vehicleId: activeVehicle.id,
+                        liters: endLiters,
+                        source: 'trip_end',
+                        tripId: fresh.id,
+                      });
+                    }
                   }
                   if (fresh.distanceKm > 0) {
                     await addTrackedKm(fresh.vehicleId, fresh.distanceKm);

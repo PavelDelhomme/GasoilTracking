@@ -22,6 +22,7 @@ import {
 } from '@/lib/calculations';
 import { estimateTripFuelLiters } from '@/lib/consumptionModel';
 import { applyTripFuelBurn, setFuelLiters } from '@/lib/fuelLevel';
+import { recordFuelGaugeReading } from '@/lib/fuelGaugeHistory';
 import { askFuelGaugeApprox } from '@/lib/fuelGaugePrompt';
 import {
   flushTripUpdates,
@@ -85,7 +86,17 @@ async function closeActiveTripSafely(tripId: number): Promise<void> {
     if (vehicle && distanceKm > 0) {
       estimatedFuelUsed = estimateTripFuelLiters(vehicle, distanceKm, { points: pts });
       estimatedCostVal = estimateCost(estimatedFuelUsed, vehicle.defaultFuelPrice);
-      await applyTripFuelBurn(vehicle, distanceKm);
+      await applyTripFuelBurn(vehicle, distanceKm, 0, { tripId });
+      const after = await getVehicleById(trip.vehicleId).catch(() => vehicle);
+      const endLiters = after?.estimatedFuelLiters ?? vehicle.estimatedFuelLiters;
+      if (endLiters != null) {
+        await recordFuelGaugeReading({
+          vehicleId: trip.vehicleId,
+          liters: endLiters,
+          source: 'trip_end',
+          tripId,
+        });
+      }
     }
   } catch {
     /* ignore conso */
@@ -214,6 +225,19 @@ export async function startGpsTrip(opts: {
       note: destName ? undefined : freeTripNote(isWeb),
     });
 
+    if (opts.vehicle.estimatedFuelLiters != null) {
+      const v = await getVehicleById(opts.vehicle.id).catch(() => opts.vehicle);
+      const liters = v?.estimatedFuelLiters ?? opts.vehicle.estimatedFuelLiters;
+      if (liters != null) {
+        await recordFuelGaugeReading({
+          vehicleId: opts.vehicle.id,
+          liters,
+          source: 'trip_start',
+          tripId,
+        });
+      }
+    }
+
     seedLivePointsCache(tripId, opts.vehicle.id, startPoint);
     await seedLiveTripBuffer({
       tripId,
@@ -305,7 +329,17 @@ export async function stopGpsTripLite(opts: {
       if (vehicle) {
         estimatedFuelUsed = estimateTripFuelLiters(vehicle, distanceKm, { points: pts });
         estimatedCostVal = estimateCost(estimatedFuelUsed, vehicle.defaultFuelPrice);
-        await applyTripFuelBurn(vehicle, distanceKm);
+        await applyTripFuelBurn(vehicle, distanceKm, 0, { tripId: opts.tripId });
+        const after = await getVehicleById(opts.vehicleId).catch(() => vehicle);
+        const endLiters = after?.estimatedFuelLiters ?? vehicle.estimatedFuelLiters;
+        if (endLiters != null) {
+          await recordFuelGaugeReading({
+            vehicleId: opts.vehicleId,
+            liters: endLiters,
+            source: 'trip_end',
+            tripId: opts.tripId,
+          });
+        }
       }
     } catch {
       /* ignore */

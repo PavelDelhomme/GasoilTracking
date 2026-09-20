@@ -64,7 +64,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: 'gauge',
         title: 'Jauge de carburant',
         body:
-          'La jauge est une estimation : elle baisse avec les trajets et remonte aux pleins. Au départ d’un trajet, vous pouvez l’ajuster. Si elle semble fausse, corrigez-la sur l’accueil ou après un plein complet.',
+          'La jauge est une estimation : elle baisse avec les trajets et remonte aux pleins. Au départ d’un trajet, vous pouvez l’ajuster. Si elle semble fausse, corrigez-la sur l’accueil ou après un plein complet. Chaque véhicule garde un historique des jauges (départ/arrivée, pleins, saisies).',
         link: { label: 'Accueil', href: '/(tabs)' },
       },
       {

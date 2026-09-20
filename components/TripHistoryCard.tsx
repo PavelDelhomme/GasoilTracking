@@ -8,10 +8,10 @@ import { formatDistance, formatEuro, parseRoutePoints } from '@/lib/calculations
 import { formatDurationMinutes } from '@/lib/consumptionModel';
 import { formatDateSlash, formatRelativeDay } from '@/lib/dates';
 import { tripPlaceLabel, tripSourceLabel } from '@/lib/geocode';
-import { getPlaces, getTripById } from '@/lib/database';
+import { getPlaces, getTripById, getTripGaugeReadings } from '@/lib/database';
 import { getCachedTripRoute, resolveTripRouteCached, setCachedTripRoute } from '@/lib/tripMapCache';
 import { computeSimilarTripStats } from '@/lib/similarTrips';
-import type { Place, Trip } from '@/types';
+import type { FuelGaugeReading, Place, Trip } from '@/types';
 import type { RouteCoord } from '@/components/TripMap.types';
 
 type Props = {
@@ -53,6 +53,7 @@ function TripHistoryCardInner({
   const [displayPts, setDisplayPts] = useState<RouteCoord[]>(
     cached && cached.length ? cached : stored
   );
+  const [gaugeReadings, setGaugeReadings] = useState<FuelGaugeReading[]>([]);
 
   const similar = useMemo(
     () => (allTrips.length ? computeSimilarTripStats(allTrips, trip, { excludeId: trip.id }) : null),
@@ -75,6 +76,21 @@ function TripHistoryCardInner({
   const origin = tripPlaceLabel(trip.originName, start, 'origin');
   const dest = tripPlaceLabel(trip.destinationName, end, 'destination');
   const durationMin = tripDurationMinutes(trip);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await getTripGaugeReadings(trip.id);
+        if (!cancelled) setGaugeReadings(rows);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [trip.id]);
 
   useEffect(() => {
     if (!showMap) return;
@@ -122,6 +138,22 @@ function TripHistoryCardInner({
   })();
 
   const sourceFr = tripSourceLabel(trip.source);
+
+  const gaugeChip = (() => {
+    if (!gaugeReadings.length) return null;
+    const chrono = [...gaugeReadings].sort((a, b) =>
+      String(a.recordedAt).localeCompare(String(b.recordedAt))
+    );
+    const start =
+      chrono.find((r) => r.source === 'trip_start') || chrono[0];
+    const end =
+      [...chrono].reverse().find((r) => r.source === 'trip_end') ||
+      chrono[chrono.length - 1];
+    if (!start) return null;
+    const a = Math.round(start.liters);
+    const b = Math.round(end.liters);
+    return a === b ? `${a} L` : `${a} L → ${b} L`;
+  })();
 
   return (
     <Pressable
@@ -217,6 +249,13 @@ function TripHistoryCardInner({
               </Text>
             </View>
           )}
+          {gaugeChip ? (
+            <View style={[styles.chip, { backgroundColor: colors.accent + '18', borderColor: colors.accent }]}>
+              <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 12 }}>
+                {gaugeChip}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         {similar && similar.count >= 1 && (

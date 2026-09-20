@@ -29,6 +29,7 @@ import { useApp } from '@/context/AppContext';
 import { getPlaces } from '@/lib/database';
 import { getTripDisplayRoute } from '@/lib/routeGeometry';
 import { computeSimilarTripStats } from '@/lib/similarTrips';
+import { FuelGaugeTimeline } from '@/components/FuelGaugeTimeline';
 import type { Trip } from '@/types';
 
 /** Détail d’un trajet passé : carte plein écran du tracé + stats. */
@@ -309,6 +310,8 @@ export default function TripDetailScreen() {
               />
             </View>
           )}
+
+          <FuelGaugeTimeline tripId={trip.id} title="Jauge départ → arrivée" />
 
           {similar && similar.count >= 1 && (
             <Card style={{ marginBottom: 12 }}>

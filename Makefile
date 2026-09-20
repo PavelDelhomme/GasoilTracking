@@ -7,7 +7,7 @@
 
 PROJECT_NAME := gasoil-tracking
 COMPOSE := docker compose -p $(PROJECT_NAME) -f docker-compose.local.yml
-DOMAIN ?= gasoil-tracking.delhomme.ovh
+DOMAIN ?= fuel.hubera.cloud
 REPO_URL := https://github.com/PavelDelhomme/GasoilTracking.git
 COMPOSE_PORTAINER_PATH := docker-compose.yml
 BRANCH := prod

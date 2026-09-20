@@ -3,6 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type {
   Budget,
   FillUp,
+  FuelGaugeReading,
+  FuelGaugeSource,
   Place,
   PlaceKind,
   RecurringRoute,
@@ -130,6 +132,19 @@ async function initDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS fuel_gauge_readings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vehicle_id INTEGER NOT NULL,
+      recorded_at TEXT NOT NULL,
+      liters REAL NOT NULL,
+      tank_capacity REAL NOT NULL,
+      source TEXT NOT NULL,
+      trip_id INTEGER,
+      fill_up_id INTEGER,
+      odometer REAL
+    );
+    CREATE INDEX IF NOT EXISTS idx_gauge_vehicle_at ON fuel_gauge_readings(vehicle_id, recorded_at);
   `);
 
   // Migrations douces (anciennes bases)
@@ -715,6 +730,7 @@ export async function deleteVehicle(id: number): Promise<void> {
   await database.withTransactionAsync(async () => {
     await database.runAsync('DELETE FROM fill_ups WHERE vehicle_id = ?', [id]);
     await database.runAsync('DELETE FROM trips WHERE vehicle_id = ?', [id]);
+    await database.runAsync('DELETE FROM fuel_gauge_readings WHERE vehicle_id = ?', [id]);
     await database.runAsync(
       'UPDATE budgets SET vehicle_id = NULL WHERE vehicle_id = ?',
       [id]
@@ -1062,6 +1078,83 @@ export async function deleteTrip(id: number): Promise<void> {
   await database.runAsync('DELETE FROM trips WHERE id = ?', [id]);
 }
 
+function mapFuelGaugeReading(row: unknown): FuelGaugeReading {
+  const r = row as Record<string, unknown>;
+  return {
+    id: r.id as number,
+    vehicleId: r.vehicle_id as number,
+    recordedAt: r.recorded_at as string,
+    liters: r.liters as number,
+    tankCapacity: r.tank_capacity as number,
+    source: r.source as FuelGaugeSource,
+    tripId: r.trip_id === null || r.trip_id === undefined ? null : (r.trip_id as number),
+    fillUpId: r.fill_up_id === null || r.fill_up_id === undefined ? null : (r.fill_up_id as number),
+    odometer: r.odometer === null || r.odometer === undefined ? null : (r.odometer as number),
+  };
+}
+
+export async function createFuelGaugeReading(
+  input: Omit<FuelGaugeReading, 'id'>
+): Promise<FuelGaugeReading> {
+  const database = await getDatabase();
+  const result = await database.runAsync(
+    `INSERT INTO fuel_gauge_readings (
+      vehicle_id, recorded_at, liters, tank_capacity, source, trip_id, fill_up_id, odometer
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      input.vehicleId,
+      input.recordedAt,
+      input.liters,
+      input.tankCapacity,
+      input.source,
+      input.tripId ?? null,
+      input.fillUpId ?? null,
+      input.odometer ?? null,
+    ]
+  );
+  const id = Number(result.lastInsertRowId);
+  return { ...input, id };
+}
+
+export async function getFuelGaugeReadings(
+  vehicleId?: number,
+  opts?: { tripId?: number; limit?: number }
+): Promise<FuelGaugeReading[]> {
+  const database = await getDatabase();
+  const clauses: string[] = [];
+  const params: (string | number)[] = [];
+  if (vehicleId != null) {
+    clauses.push('vehicle_id = ?');
+    params.push(vehicleId);
+  }
+  if (opts?.tripId != null) {
+    clauses.push('trip_id = ?');
+    params.push(opts.tripId);
+  }
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  if (opts?.limit != null && Number.isFinite(opts.limit) && opts.limit > 0) {
+    params.push(Math.floor(opts.limit));
+  }
+  const limitSql =
+    opts?.limit != null && Number.isFinite(opts.limit) && opts.limit > 0 ? ' LIMIT ?' : '';
+  const rows = await database.getAllAsync(
+    `SELECT * FROM fuel_gauge_readings ${where} ORDER BY recorded_at DESC${limitSql}`,
+    params
+  );
+  return (rows || []).map(mapFuelGaugeReading);
+}
+
+export async function getTripGaugeReadings(tripId: number): Promise<FuelGaugeReading[]> {
+  const database = await getDatabase();
+  const rows = await database.getAllAsync(
+    `SELECT * FROM fuel_gauge_readings
+     WHERE trip_id = ? AND source IN ('trip_start', 'trip_end')
+     ORDER BY recorded_at DESC`,
+    [tripId]
+  );
+  return (rows || []).map(mapFuelGaugeReading);
+}
+
 /** Supprime les trajets de test (simulateur) — notes / lieux « (sim) » / SIMULATEUR. */
 export async function purgeSimulatorTrips(vehicleId?: number): Promise<number> {
   const trips = await getTrips(vehicleId, { includeRejected: true });
@@ -1354,6 +1447,7 @@ export async function replaceAllData(data: {
   places: Place[];
   recurringRoutes: RecurringRoute[];
   maintenances?: VehicleMaintenance[];
+  gaugeReadings?: FuelGaugeReading[];
 }): Promise<void> {
   const database = await getDatabase();
   await database.execAsync('PRAGMA foreign_keys = OFF;');
@@ -1367,6 +1461,7 @@ export async function replaceAllData(data: {
         DELETE FROM trips;
         DELETE FROM budgets;
         DELETE FROM vehicles;
+        ${data.gaugeReadings !== undefined ? 'DELETE FROM fuel_gauge_readings;' : ''}
       `);
 
       for (const v of data.vehicles || []) {
@@ -1533,6 +1628,28 @@ export async function replaceAllData(data: {
             r.isActive ? 1 : 0,
           ]
         );
+      }
+
+      if (data.gaugeReadings !== undefined) {
+        for (const g of data.gaugeReadings || []) {
+          await runInsert(
+            database,
+            `INSERT INTO fuel_gauge_readings (
+              id, vehicle_id, recorded_at, liters, tank_capacity, source, trip_id, fill_up_id, odometer
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              g.id,
+              g.vehicleId,
+              g.recordedAt,
+              g.liters,
+              g.tankCapacity,
+              g.source,
+              g.tripId ?? null,
+              g.fillUpId ?? null,
+              g.odometer ?? null,
+            ]
+          );
+        }
       }
 
       for (const m of data.maintenances || []) {

@@ -417,6 +417,7 @@ export default function AddFillUpScreen() {
       await applyFillUpToFuelEstimate(activeVehicle, {
         liters: Math.round(derived.liters * 100) / 100,
         isFull,
+        id: fillId,
       });
 
       const adapted = await adaptVehicleConsumption(activeVehicle.id);

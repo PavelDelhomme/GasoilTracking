@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hubera Fuel",
     "slug": "gasoil-tracking",
-    "version": "1.4.140",
+    "version": "1.4.142",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "gasoiltracking",
@@ -52,7 +52,7 @@
           "apiKey": "VOTRE_CLE_GOOGLE_MAPS_ANDROID"
         }
       },
-      "versionCode": 164
+      "versionCode": 166
     },
     "web": {
       "bundler": "metro",
@@ -104,12 +104,13 @@
       "typedRoutes": true
     },
     "extra": {
-      "apiUrl": "https://gasoil-tracking.delhomme.ovh",
+      "apiUrl": "https://fuel.hubera.cloud",
       "personalMail": "paveldelhomme@gmail.com",
       "enableGpsSimulator": false,
       "eas": {
         "projectId": "d85bab84-0971-4266-8f8c-a37113bc7761"
       },
+      "whatsNew": "Historique des jauges carburant par véhicule (départ, arrivée, pleins, saisies).",
       "router": {
         "origin": false
       }

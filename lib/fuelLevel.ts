@@ -1,9 +1,10 @@
 /** Helpers niveau carburant estimé par véhicule (multi-voitures). */
 
-import type { FillUp, Vehicle } from '@/types';
+import type { FillUp, FuelGaugeSource, Vehicle } from '@/types';
 import { getFillUps, getTrips, getVehicleById, updateTrip, updateVehicle } from '@/lib/database';
 import { estimateTripFuelLiters } from '@/lib/consumptionModel';
 import { isSaneConsumptionSample } from '@/lib/calculations';
+import { recordFuelGaugeReading } from '@/lib/fuelGaugeHistory';
 
 export type FillFuelPreview = {
   beforeLiters: number | null;
@@ -106,6 +107,11 @@ export async function recomputeFuelFromLastFill(vehicleId: number): Promise<numb
   const next = Math.max(0, Math.round((atFill - burned) * 10) / 10);
   if (vehicle.estimatedFuelLiters == null || Math.abs(vehicle.estimatedFuelLiters - next) > 0.05) {
     await updateVehicle(vehicleId, { estimatedFuelLiters: next });
+    await recordFuelGaugeReading({
+      vehicleId,
+      liters: next,
+      source: 'recompute',
+    });
   }
   return next;
 }
@@ -113,10 +119,16 @@ export async function recomputeFuelFromLastFill(vehicleId: number): Promise<numb
 /** Applique un plein puis rejoue les trajets postérieurs (antidatés OK). */
 export async function applyFillUpToFuelEstimate(
   vehicle: Vehicle,
-  fill: Pick<FillUp, 'liters' | 'isFull'>
+  fill: Pick<FillUp, 'liters' | 'isFull'> & { id?: number | null }
 ): Promise<number> {
   const preview = previewFillUpFuel(vehicle, fill);
   await updateVehicle(vehicle.id, { estimatedFuelLiters: preview.afterLiters });
+  await recordFuelGaugeReading({
+    vehicleId: vehicle.id,
+    liters: preview.afterLiters,
+    source: 'fill_up',
+    fillUpId: fill.id ?? null,
+  });
   const recomputed = await recomputeFuelFromLastFill(vehicle.id);
   return recomputed ?? preview.afterLiters;
 }
@@ -232,7 +244,7 @@ export async function applyTripFuelBurn(
   vehicle: Vehicle,
   distanceKm: number,
   ascentM = 0,
-  opts?: { avgSpeedKmh?: number; idleRatio?: number }
+  opts?: { avgSpeedKmh?: number; idleRatio?: number; tripId?: number | null }
 ): Promise<number | null> {
   if (vehicle.estimatedFuelLiters == null || distanceKm <= 0) return vehicle.estimatedFuelLiters;
   const burned = estimateTripFuelLiters(vehicle, distanceKm, {
@@ -243,6 +255,12 @@ export async function applyTripFuelBurn(
   });
   const next = Math.max(0, Math.round((vehicle.estimatedFuelLiters - burned) * 10) / 10);
   await updateVehicle(vehicle.id, { estimatedFuelLiters: next });
+  await recordFuelGaugeReading({
+    vehicleId: vehicle.id,
+    liters: next,
+    source: 'model_burn',
+    tripId: opts?.tripId ?? null,
+  });
   return next;
 }
 
@@ -263,7 +281,8 @@ export type SetFuelLitersResult = {
 /** Fixe un niveau en litres + redistribue conso/coûts des trajets depuis le dernier plein. */
 export async function setFuelLiters(
   vehicle: Vehicle,
-  liters: number
+  liters: number,
+  meta?: { source?: FuelGaugeSource; tripId?: number | null; fillUpId?: number | null }
 ): Promise<SetFuelLitersResult> {
   const next = Math.min(
     vehicle.tankCapacity,
@@ -271,6 +290,13 @@ export async function setFuelLiters(
   );
   const previousLiters = vehicle.estimatedFuelLiters;
   await updateVehicle(vehicle.id, { estimatedFuelLiters: next });
+  await recordFuelGaugeReading({
+    vehicleId: vehicle.id,
+    liters: next,
+    source: meta?.source || 'manual',
+    tripId: meta?.tripId ?? null,
+    fillUpId: meta?.fillUpId ?? null,
+  });
   let tripsAdjusted = 0;
   let measuredL100: number | null = null;
   try {

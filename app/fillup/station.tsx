@@ -317,7 +317,7 @@ export default function StationTripScreen() {
           tripId: id,
         });
         if (id) await updateTrip(id, { fillUpId: fillId });
-        await applyFillUpToFuelEstimate(fresh, { liters: L, isFull });
+        await applyFillUpToFuelEstimate(fresh, { liters: L, isFull, id: fillId });
         if (ppl > 0) await updateVehicle(activeVehicle.id, { defaultFuelPrice: ppl });
         const adapted = await adaptVehicleConsumption(activeVehicle.id);
         await refreshBudgets(activeVehicle.id);

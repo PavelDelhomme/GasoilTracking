@@ -231,3 +231,23 @@ export interface VehicleMaintenance {
   photoUri?: string | null;
   createdAt: string;
 }
+
+export type FuelGaugeSource =
+  | 'trip_start'
+  | 'trip_end'
+  | 'fill_up'
+  | 'manual'
+  | 'model_burn'
+  | 'recompute';
+
+export interface FuelGaugeReading {
+  id: number;
+  vehicleId: number;
+  recordedAt: string; // ISO
+  liters: number;
+  tankCapacity: number;
+  source: FuelGaugeSource;
+  tripId?: number | null;
+  fillUpId?: number | null;
+  odometer?: number | null;
+}

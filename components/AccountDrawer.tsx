@@ -209,9 +209,10 @@ export function AccountDrawer() {
                 <Text style={[styles.section, { color: colors.textSecondary }]}>Connexion</Text>
                 <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
                   <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 10 }}>
-                    Hors ligne / non connecté : vos données restent. Ancien domaine
-                    gasoil-tracking.delhomme.ovh et nouveau gasoil-tracking.hubera.cloud
-                    continuent tous les deux. Connectez-vous pour les recharger ici.
+                    Hors ligne / non connecté : vos données restent. Site :
+                    fuel.hubera.cloud (les anciens gasoil-tracking.hubera.cloud et
+                    gasoil-tracking.delhomme.ovh restent valides). Connectez-vous pour les
+                    recharger ici.
                   </Text>
                   <Button
                     title="Connexion"

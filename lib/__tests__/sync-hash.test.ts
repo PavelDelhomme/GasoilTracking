@@ -46,6 +46,14 @@ describe('snapshotContentHash', () => {
         destinationName: 'Maison',
       },
     ],
+    gaugeReadings: [] as Array<{
+      id: number;
+      vehicleId: number;
+      recordedAt: string;
+      liters: number;
+      source: string;
+      tripId?: number | null;
+    }>,
     places: [] as Array<{ id: number; name: string; latitude: number; longitude: number }>,
     recurringRoutes: [] as Array<{ id: number; distanceKm: number; name: string }>,
     maintenances: [] as Array<{

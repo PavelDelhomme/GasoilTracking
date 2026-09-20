@@ -1,6 +1,7 @@
 import type {
   Budget,
   FillUp,
+  FuelGaugeReading,
   Place,
   RecurringRoute,
   Trip,
@@ -10,6 +11,7 @@ import type {
 import {
   getBudgets,
   getFillUps,
+  getFuelGaugeReadings,
   getMaintenances,
   getPlaces,
   getRecurringRoutes,
@@ -27,7 +29,7 @@ import {
   type ClientPrefs,
 } from '@/lib/clientPrefs';
 
-export const SNAPSHOT_SCHEMA = 1;
+export const SNAPSHOT_SCHEMA = 2;
 
 export type AppDataSnapshot = {
   schema: number;
@@ -40,22 +42,33 @@ export type AppDataSnapshot = {
   places: Place[];
   recurringRoutes: RecurringRoute[];
   maintenances: VehicleMaintenance[];
+  gaugeReadings: FuelGaugeReading[];
   /** Préférences UI (visite guidée, etc.) — sync cloud. */
   clientPrefs?: ClientPrefs;
 };
 
 export async function collectSnapshot(): Promise<AppDataSnapshot> {
-  const [vehicles, fillUps, budgets, trips, places, recurringRoutes, maintenances, clientPrefs] =
-    await Promise.all([
-      getVehicles(),
-      getFillUps(),
-      getBudgets(),
-      getTrips(undefined, { includeRejected: true }),
-      getPlaces(),
-      getRecurringRoutes(),
-      getMaintenances(),
-      collectClientPrefs(),
-    ]);
+  const [
+    vehicles,
+    fillUps,
+    budgets,
+    trips,
+    places,
+    recurringRoutes,
+    maintenances,
+    gaugeReadings,
+    clientPrefs,
+  ] = await Promise.all([
+    getVehicles(),
+    getFillUps(),
+    getBudgets(),
+    getTrips(undefined, { includeRejected: true }),
+    getPlaces(),
+    getRecurringRoutes(),
+    getMaintenances(),
+    getFuelGaugeReadings(),
+    collectClientPrefs(),
+  ]);
   return {
     schema: SNAPSHOT_SCHEMA,
     exportedAt: new Date().toISOString(),
@@ -67,6 +80,7 @@ export async function collectSnapshot(): Promise<AppDataSnapshot> {
     places,
     recurringRoutes,
     maintenances,
+    gaugeReadings,
     clientPrefs,
   };
 }
@@ -87,6 +101,9 @@ export function normalizeSnapshot(raw: unknown): AppDataSnapshot | null {
   const maintenances = Array.isArray(d.maintenances)
     ? (d.maintenances as VehicleMaintenance[])
     : [];
+  const gaugeReadings = Array.isArray(d.gaugeReadings)
+    ? (d.gaugeReadings as FuelGaugeReading[])
+    : [];
   const clientPrefs = normalizeClientPrefs(d.clientPrefs);
   if (
     vehicles.length +
@@ -94,7 +111,8 @@ export function normalizeSnapshot(raw: unknown): AppDataSnapshot | null {
       budgets.length +
       trips.length +
       places.length +
-      maintenances.length ===
+      maintenances.length +
+      gaugeReadings.length ===
       0 &&
     recurringRoutes.length === 0
   ) {
@@ -111,6 +129,7 @@ export function normalizeSnapshot(raw: unknown): AppDataSnapshot | null {
     places,
     recurringRoutes,
     maintenances,
+    gaugeReadings,
     clientPrefs,
   };
 }
@@ -130,6 +149,7 @@ export async function applySnapshot(
     places: snap.places,
     recurringRoutes: snap.recurringRoutes,
     maintenances: snap.maintenances || [],
+    gaugeReadings: snap.gaugeReadings ?? [],
   });
   // Sticky : une visite déjà faite localement reste faite même si le cloud n’a pas encore le flag.
   const merged = mergeClientPrefs(await collectClientPrefs(), snap.clientPrefs);

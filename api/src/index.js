@@ -22,7 +22,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4000);
 const DATA_DIR = process.env.DATA_DIR || './data';
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production';
-const APP_VERSION = process.env.APP_VERSION || '1.0.0';
+const SHIPPED_VERSION = '1.4.142';
+const APP_VERSION = (() => {
+  const env = process.env.APP_VERSION || SHIPPED_VERSION;
+  try {
+    if (compareSemver(SHIPPED_VERSION, env) > 0) return SHIPPED_VERSION;
+  } catch {
+    /* ignore */
+  }
+  return env;
+})();
 const MIN_VERSION = process.env.MIN_APP_VERSION || '1.0.0';
 
 function brandUserText(s) {
@@ -32,7 +41,7 @@ function brandUserText(s) {
 }
 const INVITE_CODE = process.env.INVITE_CODE || '';
 const RELEASE_UPLOAD_TOKEN = process.env.RELEASE_UPLOAD_TOKEN || '';
-const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://gasoil-tracking.delhomme.ovh').replace(/\/$/, '');
+const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://fuel.hubera.cloud').replace(/\/$/, '');
 
 /** Dual alias Hubera : les liens OTA suivent l’hôte de la requête (même stack, même volume). */
 function requestPublicUrl(req) {
@@ -40,11 +49,7 @@ function requestPublicUrl(req) {
     .split(',')[0]
     .trim()
     .toLowerCase();
-  if (
-    host === 'gasoil-tracking.hubera.cloud' ||
-    host === 'fuel.hubera.cloud' ||
-    host === 'gasoil-tracking.delhomme.ovh'
-  ) {
+  if (host.endsWith('.hubera.cloud') || host.endsWith('.delhomme.ovh')) {
     return `https://${host}`;
   }
   return PUBLIC_URL;
@@ -290,6 +295,8 @@ app.use(
   helmet({
     contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false,
+    // fuel.hubera.cloud et les alias historiques doivent pouvoir lire l’API
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
   })
 );
 
@@ -317,7 +324,13 @@ app.use(
       }
       try {
         const host = new URL(origin).hostname.toLowerCase();
-        if (allowedOriginHosts.has(host)) return cb(null, true);
+        if (
+          allowedOriginHosts.has(host) ||
+          host.endsWith('.hubera.cloud') ||
+          host.endsWith('.delhomme.ovh')
+        ) {
+          return cb(null, true);
+        }
       } catch {
         /* ignore */
       }
@@ -1081,7 +1094,7 @@ app.post('/api/auth/qr/start', authLimiter, async (req, res) => {
        VALUES (?, ?, 'pending', ?, ?, ?, ?)`
     ).run(id, hashToken(raw), expires.toISOString(), now.toISOString(), meta.ip, meta.userAgent);
 
-    const payload = `${PUBLIC_URL}/qr-login?c=${encodeURIComponent(raw)}`;
+    const payload = `${requestPublicUrl(req)}/qr-login?c=${encodeURIComponent(raw)}`;
     const qrDataUrl = await QRCode.toDataURL(payload, {
       width: 280,
       margin: 2,
@@ -1222,7 +1235,7 @@ app.post('/api/auth/qr/pair', auth, authLimiter, async (req, res) => {
       meta.userAgent
     );
 
-    const payload = `${PUBLIC_URL}/qr-login?claim=${encodeURIComponent(id)}`;
+    const payload = `${requestPublicUrl(req)}/qr-login?claim=${encodeURIComponent(id)}`;
     const qrDataUrl = await QRCode.toDataURL(payload, {
       width: 280,
       margin: 2,

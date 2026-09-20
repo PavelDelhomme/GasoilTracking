@@ -84,6 +84,7 @@ import {
   SIM_WORK,
 } from '@/lib/gpsCarSimulator';
 import { applyTripFuelBurn, fuelRemainingTone, fuelToneColor, setFuelLiters } from '@/lib/fuelLevel';
+import { recordFuelGaugeReading } from '@/lib/fuelGaugeHistory';
 import { checkNearestStationReach } from '@/lib/nearestStationReach';
 import { askFuelGaugeApprox } from '@/lib/fuelGaugePrompt';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
@@ -1219,6 +1220,15 @@ export default function TripScreen() {
               .join(' · ') || undefined,
       });
 
+      if (startFuel != null) {
+        await recordFuelGaugeReading({
+          vehicleId: activeVehicle.id,
+          liters: startFuel,
+          source: 'trip_start',
+          tripId,
+        });
+      }
+
       seedLivePointsCache(tripId, activeVehicle.id, startPoint);
       await seedLiveTripBuffer({
         tripId,
@@ -1560,7 +1570,18 @@ export default function TripScreen() {
         await applyTripFuelBurn(vehicle, trip.distanceKm, ascentM, {
           avgSpeedKmh,
           idleRatio,
+          tripId: finishedId,
         }).catch(() => null);
+        const after = await getVehicleById(vehicle.id).catch(() => null);
+        const endLiters = after?.estimatedFuelLiters ?? vehicle.estimatedFuelLiters;
+        if (endLiters != null) {
+          await recordFuelGaugeReading({
+            vehicleId: vehicle.id,
+            liters: endLiters,
+            source: 'trip_end',
+            tripId: finishedId,
+          });
+        }
       }
 
       const noteParts = [
@@ -2064,6 +2085,14 @@ export default function TripScreen() {
             ? `SIMULATEUR LIVE ×${timeScale} (~${wallMin} min mur) — cohabitation PLM`
             : 'SIMULATEUR — ne pas compter comme trajet réel',
       });
+      if (activeVehicle.estimatedFuelLiters != null) {
+        await recordFuelGaugeReading({
+          vehicleId: activeVehicle.id,
+          liters: activeVehicle.estimatedFuelLiters,
+          source: 'trip_start',
+          tripId,
+        });
+      }
       await refresh();
 
       let routeJson = JSON.stringify([
@@ -2187,8 +2216,19 @@ export default function TripScreen() {
         await applyTripFuelBurn(activeVehicle, distanceKm, 0, {
           avgSpeedKmh: stats.movingSpeedKmh > 0 ? stats.movingSpeedKmh : undefined,
           idleRatio,
+          tripId,
         }).catch(() => null);
         await addTrackedKm(activeVehicle.id, distanceKm).catch(() => null);
+        const after = await getVehicleById(activeVehicle.id).catch(() => null);
+        const endLiters = after?.estimatedFuelLiters ?? activeVehicle.estimatedFuelLiters;
+        if (endLiters != null) {
+          await recordFuelGaugeReading({
+            vehicleId: activeVehicle.id,
+            liters: endLiters,
+            source: 'trip_end',
+            tripId,
+          });
+        }
       }
       setUserLocation({
         latitude: points[points.length - 1].latitude,

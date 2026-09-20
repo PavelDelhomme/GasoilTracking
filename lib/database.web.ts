@@ -2,7 +2,17 @@
  * Stockage web : AsyncStorage — même API que database.ts
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Budget, FillUp, Place, RecurringRoute, Trip, Vehicle, VehicleMaintenance } from '@/types';
+import type {
+  Budget,
+  FillUp,
+  FuelGaugeReading,
+  FuelGaugeSource,
+  Place,
+  RecurringRoute,
+  Trip,
+  Vehicle,
+  VehicleMaintenance,
+} from '@/types';
 import { refreshMaintenanceStatus } from '@/lib/vehicleMaintenance';
 
 const STORAGE_KEY = 'gasoil_tracking_v1';
@@ -16,6 +26,7 @@ interface Store {
     places: number;
     routes: number;
     maintenances: number;
+    gaugeReadings: number;
   };
   vehicles: Vehicle[];
   fillUps: FillUp[];
@@ -24,10 +35,20 @@ interface Store {
   places: Place[];
   routes: RecurringRoute[];
   maintenances: VehicleMaintenance[];
+  gaugeReadings: FuelGaugeReading[];
 }
 
 const emptyStore = (): Store => ({
-  seq: { vehicles: 1, fillUps: 1, budgets: 1, trips: 1, places: 1, routes: 1, maintenances: 1 },
+  seq: {
+    vehicles: 1,
+    fillUps: 1,
+    budgets: 1,
+    trips: 1,
+    places: 1,
+    routes: 1,
+    maintenances: 1,
+    gaugeReadings: 1,
+  },
   vehicles: [],
   fillUps: [],
   budgets: [],
@@ -35,6 +56,7 @@ const emptyStore = (): Store => ({
   places: [],
   routes: [],
   maintenances: [],
+  gaugeReadings: [],
 });
 
 let cache: Store | null = null;
@@ -50,6 +72,7 @@ async function load(): Promise<Store> {
       parsed.places = parsed.places || [];
       parsed.routes = parsed.routes || [];
       parsed.maintenances = parsed.maintenances || [];
+      parsed.gaugeReadings = parsed.gaugeReadings || [];
       parsed.trips = (parsed.trips || []).map((t) => ({
         ...t,
         status: t.status || 'confirmed',
@@ -205,6 +228,7 @@ export async function deleteVehicle(id: number): Promise<void> {
   s.vehicles = s.vehicles.filter((v) => v.id !== id);
   s.fillUps = s.fillUps.filter((f) => f.vehicleId !== id);
   s.trips = s.trips.filter((t) => t.vehicleId !== id);
+  s.gaugeReadings = (s.gaugeReadings || []).filter((g) => g.vehicleId !== id);
   s.budgets = s.budgets.map((b) => (b.vehicleId === id ? { ...b, vehicleId: null } : b));
   s.routes = s.routes.map((r) => (r.vehicleId === id ? { ...r, vehicleId: null } : r));
   await save(s);
@@ -412,6 +436,51 @@ export async function deleteTrip(id: number): Promise<void> {
   await save(s);
 }
 
+function mapFuelGaugeReading(row: FuelGaugeReading): FuelGaugeReading {
+  return {
+    id: row.id,
+    vehicleId: row.vehicleId,
+    recordedAt: row.recordedAt,
+    liters: row.liters,
+    tankCapacity: row.tankCapacity,
+    source: row.source as FuelGaugeSource,
+    tripId: row.tripId ?? null,
+    fillUpId: row.fillUpId ?? null,
+    odometer: row.odometer ?? null,
+  };
+}
+
+export async function createFuelGaugeReading(
+  input: Omit<FuelGaugeReading, 'id'>
+): Promise<FuelGaugeReading> {
+  const s = await load();
+  if (!s.seq.gaugeReadings) s.seq.gaugeReadings = 1;
+  if (!s.gaugeReadings) s.gaugeReadings = [];
+  const id = s.seq.gaugeReadings++;
+  const row = mapFuelGaugeReading({ ...input, id });
+  s.gaugeReadings.push(row);
+  await save(s);
+  return row;
+}
+
+export async function getFuelGaugeReadings(
+  vehicleId?: number,
+  opts?: { tripId?: number; limit?: number }
+): Promise<FuelGaugeReading[]> {
+  const s = await load();
+  let list = s.gaugeReadings || [];
+  if (vehicleId != null) list = list.filter((g) => g.vehicleId === vehicleId);
+  if (opts?.tripId != null) list = list.filter((g) => g.tripId === opts.tripId);
+  const sorted = [...list].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
+  if (opts?.limit != null && opts.limit > 0) return sorted.slice(0, opts.limit);
+  return sorted;
+}
+
+export async function getTripGaugeReadings(tripId: number): Promise<FuelGaugeReading[]> {
+  const list = await getFuelGaugeReadings(undefined, { tripId });
+  return list.filter((g) => g.source === 'trip_start' || g.source === 'trip_end');
+}
+
 /** Supprime les trajets de test (simulateur). */
 export async function purgeSimulatorTrips(vehicleId?: number): Promise<number> {
   const s = await load();
@@ -532,6 +601,7 @@ export async function replaceAllData(data: {
   places: Place[];
   recurringRoutes: RecurringRoute[];
   maintenances?: VehicleMaintenance[];
+  gaugeReadings?: FuelGaugeReading[];
 }): Promise<void> {
   const vehicles = data.vehicles || [];
   const fillUps = data.fillUps || [];
@@ -540,6 +610,9 @@ export async function replaceAllData(data: {
   const places = data.places || [];
   const routes = data.recurringRoutes || [];
   const maintenances = data.maintenances || [];
+  const keepGauges = data.gaugeReadings === undefined;
+  const prev = keepGauges ? await load().catch(() => emptyStore()) : emptyStore();
+  const gaugeReadings = keepGauges ? prev.gaugeReadings || [] : data.gaugeReadings || [];
   const max = (arr: { id: number }[]) => arr.reduce((m, x) => Math.max(m, x.id || 0), 0);
   const store: Store = {
     seq: {
@@ -550,6 +623,7 @@ export async function replaceAllData(data: {
       places: max(places) + 1,
       routes: max(routes) + 1,
       maintenances: max(maintenances) + 1,
+      gaugeReadings: max(gaugeReadings) + 1,
     },
     vehicles: [...vehicles],
     fillUps: [...fillUps],
@@ -558,6 +632,7 @@ export async function replaceAllData(data: {
     places: [...places],
     routes: [...routes],
     maintenances: [...maintenances],
+    gaugeReadings: [...gaugeReadings],
   };
   cache = store;
   await save(store);

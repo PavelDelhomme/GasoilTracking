@@ -3,7 +3,7 @@ import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 import Constants from 'expo-constants';
 import type { AppVersionInfo } from '@/lib/api';
-import { getLocalVersionCode } from '@/lib/api';
+import { getApiUrl, getLocalVersionCode } from '@/lib/api';
 import { markUpdatePending, prepareDataForUpdate } from '@/lib/backup';
 import {
   isOtaFileComplete,
@@ -41,7 +41,7 @@ function resolveApkUrl(info: AppVersionInfo): string {
   if (!url) throw new Error('URL APK manquante sur le serveur');
   // Forcer HTTPS domaine prod
   if (url.startsWith('/')) {
-    return `https://gasoil-tracking.delhomme.ovh${url}`;
+    return `${getApiUrl()}${url}`;
   }
   return url;
 }

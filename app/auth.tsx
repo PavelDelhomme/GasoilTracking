@@ -101,7 +101,7 @@ export default function AuthScreen() {
             {flavor.shortName} · {flavor.label}
           </Text>
           <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
-            Package {flavor.androidPackage} — sessions séparées des autres apps Gasoil
+            Package {flavor.androidPackage} — même compte que l’app Hubera Fuel (Nothing / Android)
           </Text>
         </View>
         <Text style={[styles.sub, { color: colors.textSecondary }]}>

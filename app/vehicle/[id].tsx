@@ -17,6 +17,7 @@ import { useLocale } from '@/context/LocaleContext';
 import { Card, StatCard } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { FuelGaugeSlider } from '@/components/FuelGaugeSlider';
+import { FuelGaugeTimeline } from '@/components/FuelGaugeTimeline';
 import { FUEL_TYPE_LABELS } from '@/constants/Colors';
 import {
   displayOdometerKm,
@@ -206,6 +207,8 @@ export default function VehicleDetailScreen() {
           </Text>
         )}
       </Card>
+
+      <FuelGaugeTimeline vehicleId={vehicle.id} />
 
       <Card>
         <Text style={[styles.section, { color: colors.text }]}>Derniers pleins</Text>

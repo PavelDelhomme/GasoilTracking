@@ -52,7 +52,7 @@ export default function AdminScreen() {
   const [busy, setBusy] = useState(false);
 
   const isMgr = isManagerEmail(user?.email, user?.isManager);
-  const webUrl = data?.webUrl || 'https://gasoil-tracking.delhomme.ovh';
+  const webUrl = data?.webUrl || 'https://fuel.hubera.cloud';
   const hubUrl = data?.downloadPage || `${webUrl}/download`;
   const iosUrl = data?.iosInstallUrl || `${hubUrl}#ios`;
 

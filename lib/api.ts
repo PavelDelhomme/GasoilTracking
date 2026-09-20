@@ -5,21 +5,40 @@ function resolveApiUrl(): string {
   if (typeof window !== 'undefined' && window.location?.origin) {
     const host = window.location.hostname.toLowerCase();
     if (
-      host === 'gasoil-tracking.hubera.cloud' ||
-      host === 'fuel.hubera.cloud' ||
-      host === 'gasoil-tracking.delhomme.ovh'
+      host.endsWith('.hubera.cloud') ||
+      host.endsWith('.delhomme.ovh') ||
+      host === 'localhost' ||
+      host === '127.0.0.1'
     ) {
-      return window.location.origin;
+      return window.location.origin.replace(/\/$/, '');
     }
   }
   return (
     process.env.EXPO_PUBLIC_API_URL ||
     Constants.expoConfig?.extra?.apiUrl ||
-    'https://gasoil-tracking.delhomme.ovh'
+    'https://fuel.hubera.cloud'
   ).replace(/\/$/, '');
 }
 
-const API_URL = resolveApiUrl();
+/** Recalculé à chaque appel : le web doit rester same-origin (évite CORS fuel → gasoil-tracking). */
+export function getApiUrl(): string {
+  return resolveApiUrl();
+}
+
+/** Compat imports existants (`${API_URL}`). Toujours same-origin sur le site. */
+export const API_URL = new Proxy(
+  {},
+  {
+    get(_target, prop) {
+      const s = getApiUrl();
+      if (prop === Symbol.toPrimitive || prop === 'toString' || prop === 'valueOf') {
+        return () => s;
+      }
+      const v = (s as unknown as Record<string | symbol, unknown>)[prop];
+      return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(s) : v;
+    },
+  }
+) as unknown as string;
 
 const TOKEN_KEY = 'gasoil_auth_token';
 const REFRESH_KEY = 'gasoil_refresh_token';
@@ -105,7 +124,7 @@ async function refreshSession(): Promise<boolean> {
     const refreshToken = await getRefreshToken();
     if (!refreshToken) return false;
     try {
-      const res = await fetch(`${API_URL}/api/auth/refresh`, {
+      const res = await fetch(`${getApiUrl()}/api/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),
@@ -162,7 +181,7 @@ async function request(path: string, options: RequestInit = {}, retried = false)
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      res = await fetch(`${API_URL}${path}`, { ...options, headers });
+      res = await fetch(`${getApiUrl()}${path}`, { ...options, headers });
     } catch (e) {
       if (attempt < maxAttempts) {
         await new Promise((r) => setTimeout(r, 400 * attempt));
@@ -268,7 +287,7 @@ export type QrLoginStart = {
 };
 
 export async function startQrLogin(): Promise<QrLoginStart> {
-  const res = await fetch(`${API_URL}/api/auth/qr/start`, { method: 'POST' });
+  const res = await fetch(`${getApiUrl()}/api/auth/qr/start`, { method: 'POST' });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Impossible de créer le QR');
   return data as QrLoginStart;
@@ -288,7 +307,7 @@ export async function pollQrLogin(challengeId: string): Promise<{
   error?: string;
 }> {
   const res = await fetch(
-    `${API_URL}/api/auth/qr/poll?challengeId=${encodeURIComponent(challengeId)}`
+    `${getApiUrl()}/api/auth/qr/poll?challengeId=${encodeURIComponent(challengeId)}`
   );
   const data = await res.json().catch(() => ({}));
   if (res.status === 404) return { status: 'missing', error: data.error };
@@ -306,7 +325,7 @@ export async function statusQrLogin(challengeId: string): Promise<{
   error?: string;
 }> {
   const res = await fetch(
-    `${API_URL}/api/auth/qr/status?challengeId=${encodeURIComponent(challengeId)}`
+    `${getApiUrl()}/api/auth/qr/status?challengeId=${encodeURIComponent(challengeId)}`
   );
   const data = await res.json().catch(() => ({}));
   if (res.status === 404) return { status: 'missing', error: data.error };
@@ -362,7 +381,7 @@ export async function logoutRemote() {
   const refreshToken = await getRefreshToken();
   if (!token) return;
   try {
-    await fetch(`${API_URL}/api/auth/logout`, {
+    await fetch(`${getApiUrl()}/api/auth/logout`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -426,7 +445,7 @@ export async function pingApiHealth(timeoutMs = 4000): Promise<boolean> {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
-    const res = await fetch(`${API_URL}/health`, {
+    const res = await fetch(`${getApiUrl()}/api/health`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
       signal: ctrl.signal,
@@ -649,7 +668,7 @@ export async function fetchAppVersion(): Promise<AppVersionInfo> {
     install,
     huberaAware: '1',
   });
-  const res = await fetch(`${API_URL}/api/version?${qs.toString()}`);
+  const res = await fetch(`${getApiUrl()}/api/version?${qs.toString()}`);
   if (!res.ok) throw new Error('Impossible de vérifier la version');
   return res.json();
 }
@@ -670,5 +689,3 @@ export function getLocalVersionCode(): number {
   const n = typeof raw === 'number' ? raw : Number(raw);
   return Number.isFinite(n) ? n : 0;
 }
-
-export { API_URL };
