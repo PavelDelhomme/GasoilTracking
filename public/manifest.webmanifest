@@ -1,7 +1,8 @@
 {
-  "name": "Gasoil Tracking",
-  "short_name": "Gasoil",
-  "description": "Suivi carburant, trajets et budget — web & mobile",
+  "id": "cloud.hubera.fuel",
+  "name": "Hubera Fuel",
+  "short_name": "Fuel",
+  "description": "Hubera Fuel — suivi carburant, trajets et budget (anciennement Gasoil Tracking)",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

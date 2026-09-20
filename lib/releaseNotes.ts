@@ -16,7 +16,9 @@ export function userFacingReleaseNotes(
     /github\s*actions|eas\s*build|forceupdate|docker\s*compose|portainer|workflow|ci\/|commit\s+[a-f0-9]{7,}|sha-|vps\b|rebuild/i;
 
   if (!s || s.length < 12 || technical.test(s)) {
-    return `Corrections et améliorations — version ${version}.`;
+    return `Hubera Fuel — corrections et améliorations, version ${version}.`;
   }
-  return s;
+  return s
+    .replace(/Gasoil Tracking/gi, 'Hubera Fuel')
+    .replace(/GasoilTracking/g, 'Hubera Fuel');
 }

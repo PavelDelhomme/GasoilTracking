@@ -56,7 +56,7 @@ export async function shareMonthlyFuelCsv(
   monthKey: string
 ): Promise<'shared' | 'copied'> {
   const csv = buildMonthlyFuelCsv(fillUps, vehicles, monthKey);
-  const title = `Gasoil Tracking — pleins ${monthKey}`;
+  const title = `Hubera Fuel — pleins ${monthKey}`;
   if (Platform.OS === 'web' && typeof navigator !== 'undefined') {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(csv);

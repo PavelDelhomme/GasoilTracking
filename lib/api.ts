@@ -1,10 +1,25 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 
-const API_URL =
-  process.env.EXPO_PUBLIC_API_URL ||
-  Constants.expoConfig?.extra?.apiUrl ||
-  'https://gasoil-tracking.delhomme.ovh';
+function resolveApiUrl(): string {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    const host = window.location.hostname.toLowerCase();
+    if (
+      host === 'gasoil-tracking.hubera.cloud' ||
+      host === 'fuel.hubera.cloud' ||
+      host === 'gasoil-tracking.delhomme.ovh'
+    ) {
+      return window.location.origin;
+    }
+  }
+  return (
+    process.env.EXPO_PUBLIC_API_URL ||
+    Constants.expoConfig?.extra?.apiUrl ||
+    'https://gasoil-tracking.delhomme.ovh'
+  ).replace(/\/$/, '');
+}
+
+const API_URL = resolveApiUrl();
 
 const TOKEN_KEY = 'gasoil_auth_token';
 const REFRESH_KEY = 'gasoil_refresh_token';

@@ -24,6 +24,12 @@ const DATA_DIR = process.env.DATA_DIR || './data';
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production';
 const APP_VERSION = process.env.APP_VERSION || '1.0.0';
 const MIN_VERSION = process.env.MIN_APP_VERSION || '1.0.0';
+
+function brandUserText(s) {
+  return String(s || '')
+    .replace(/Gasoil Tracking/gi, 'Hubera Fuel')
+    .replace(/GasoilTracking/g, 'Hubera Fuel');
+}
 const INVITE_CODE = process.env.INVITE_CODE || '';
 const RELEASE_UPLOAD_TOKEN = process.env.RELEASE_UPLOAD_TOKEN || '';
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://gasoil-tracking.delhomme.ovh').replace(/\/$/, '');
@@ -289,10 +295,18 @@ app.use(
 
 const allowedOrigins = new Set([
   PUBLIC_URL,
+  'https://gasoil-tracking.hubera.cloud',
+  'https://fuel.hubera.cloud',
+  'https://gasoil-tracking.delhomme.ovh',
   'http://localhost:8081',
   'http://localhost:19006',
   'http://127.0.0.1:8081',
   'http://127.0.0.1:19006',
+]);
+const allowedOriginHosts = new Set([
+  'gasoil-tracking.hubera.cloud',
+  'fuel.hubera.cloud',
+  'gasoil-tracking.delhomme.ovh',
 ]);
 
 app.use(
@@ -300,6 +314,12 @@ app.use(
     origin(origin, cb) {
       if (!origin || allowedOrigins.has(origin) || origin.startsWith('exp://')) {
         return cb(null, true);
+      }
+      try {
+        const host = new URL(origin).hostname.toLowerCase();
+        if (allowedOriginHosts.has(host)) return cb(null, true);
+      } catch {
+        /* ignore */
       }
       return cb(null, false);
     },
@@ -421,13 +441,13 @@ function mailer() {
 async function sendVerificationEmail({ to, name, token, platform }) {
   // Page de confirmation (GET sans effet) — résiste au pré-scan Gmail/Outlook
   const verifyUrl = `${PUBLIC_URL}/api/auth/verify-email?token=${encodeURIComponent(token)}&platform=${encodeURIComponent(platform || 'web')}`;
-  const from = process.env.SMTP_FROM || 'Gasoil Tracking <noreply@maily.ovh>';
+  const from = process.env.SMTP_FROM || 'Hubera Fuel <noreply@maily.ovh>';
   const transport = mailer();
   const html = `
     <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto">
       <h2>Confirmez votre email</h2>
       <p>Bonjour ${String(name).replace(/[<>&]/g, '')},</p>
-      <p>Pour activer votre compte Gasoil Tracking, ouvrez le lien ci-dessous puis cliquez sur <strong>«&nbsp;Confirmer mon email&nbsp;»</strong> (valide 24&nbsp;h)&nbsp;:</p>
+      <p>Pour activer votre compte Hubera Fuel, ouvrez le lien ci-dessous puis cliquez sur <strong>«&nbsp;Confirmer mon email&nbsp;»</strong> (valide 24&nbsp;h)&nbsp;:</p>
       <p style="margin:28px 0">
         <a href="${verifyUrl}" style="background:#e94560;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">
           Ouvrir la page de validation
@@ -444,7 +464,7 @@ async function sendVerificationEmail({ to, name, token, platform }) {
   await transport.sendMail({
     from,
     to,
-    subject: 'Gasoil Tracking — vérifiez votre email',
+    subject: 'Hubera Fuel — vérifiez votre email',
     html,
     text: `Bonjour ${name},\n\nOuvrez ce lien puis confirmez : ${verifyUrl}\n`,
   });
@@ -459,7 +479,7 @@ function confirmEmailPageHtml({ token, platform, email, name }) {
   return `<!DOCTYPE html>
 <html lang="fr"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Confirmer votre email — Gasoil Tracking</title>
+<title>Confirmer votre email — Hubera Fuel</title>
 <style>
 body{font-family:system-ui,sans-serif;background:#0f0f1a;color:#f1f5f9;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:16px}
 .card{background:#1a1a2e;padding:28px;border-radius:16px;max-width:440px;width:100%;text-align:center}
@@ -523,7 +543,7 @@ function verifyPageHtml({ ok, message, platform, token, refreshToken, showLogin 
   return `<!DOCTYPE html>
 <html lang="fr"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Vérification email — Gasoil Tracking</title>
+<title>Vérification email — Hubera Fuel</title>
 <style>
 body{font-family:system-ui,sans-serif;background:#0f0f1a;color:#f1f5f9;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
 .card{background:#1a1a2e;padding:28px;border-radius:16px;max-width:420px;width:90%;text-align:center}
@@ -632,7 +652,7 @@ function finalizeEmailVerification(req, res, raw, platform) {
     { id: userId, email: pending.email, name: pending.name },
     sessionMeta(req)
   );
-  const msg = 'Votre email est confirmé. Bienvenue sur Gasoil Tracking !';
+  const msg = 'Votre email est confirmé. Bienvenue sur Hubera Fuel !';
   const redirect = buildVerifyRedirect({ ok: true, message: msg, platform: plat, session });
 
   if (req.method === 'POST') {
@@ -668,6 +688,15 @@ app.get('/health', (req, res) => {
     });
   }
   res.type('text').send(`ok · v${APP_VERSION} · ${uptimeSec}s`);
+});
+app.get(['/api/health', '/api/v1/health'], (req, res) => {
+  const uptimeSec = Math.floor(process.uptime());
+  res.json({
+    status: 'ok',
+    version: APP_VERSION,
+    uptimeSec,
+    time: new Date().toISOString(),
+  });
 });
 
 /** Taux FX via proxy (évite CORS web : frankfurter.app → 301 sans ACAO). */
@@ -816,10 +845,14 @@ app.get('/api/version', (req, res) => {
     /** Hub multi-plateformes (Android APK + iPhone PWA + web) */
     downloadPage: `${pub}/download`,
     iosInstallUrl: `${pub}/download#ios`,
-    releaseNotes: latest?.release_notes || '',
+    releaseNotes: (() => {
+      const notes = brandUserText(latest?.release_notes || '');
+      if (/hubera fuel/i.test(notes)) return notes;
+      return `Hubera Fuel — l’app s’appelle désormais Hubera Fuel. Tes trajets, véhicules et ton compte restent. ${notes}`.trim();
+    })(),
     buildingVersion,
     buildingSince,
-    buildingNotes,
+    buildingNotes: brandUserText(buildingNotes),
     channels: {
       android: apkAvailable,
       web: true,
@@ -1395,12 +1428,12 @@ app.post('/api/auth/forgot-password', authLimiter, registerLimiter, async (req, 
 
     const resetUrl = `${PUBLIC_URL}/reset-password?token=${encodeURIComponent(raw)}`;
     const transport = mailer();
-    const from = process.env.SMTP_FROM || 'Gasoil Tracking <noreply@maily.ovh>';
+    const from = process.env.SMTP_FROM || 'Hubera Fuel <noreply@maily.ovh>';
     if (transport) {
       await transport.sendMail({
         from,
         to: user.email,
-        subject: 'Gasoil Tracking — réinitialiser le mot de passe',
+        subject: 'Hubera Fuel — réinitialiser le mot de passe',
         html: `<div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto">
           <h2>Réinitialisation</h2>
           <p>Bonjour ${String(user.name).replace(/[<>&]/g, '')},</p>
@@ -1806,7 +1839,7 @@ function createDownloadLink({ createdBy, label, days = 14, maxUses = 50 }) {
 
 async function sendDownloadInviteEmail({ to, url, fromName, inviteCode, webUrl, downloadPage }) {
   const transport = mailer();
-  const from = process.env.SMTP_FROM || 'Gasoil Tracking <noreply@maily.ovh>';
+  const from = process.env.SMTP_FROM || 'Hubera Fuel <noreply@maily.ovh>';
   const code = String(inviteCode || INVITE_CODE || '').trim();
   const web = String(webUrl || PUBLIC_URL).replace(/\/$/, '');
   const hub = String(downloadPage || `${PUBLIC_URL}/download`);
@@ -1820,8 +1853,8 @@ async function sendDownloadInviteEmail({ to, url, fromName, inviteCode, webUrl, 
     : '';
   const html = `
     <div style="font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;color:#0f172a">
-      <h2>Gasoil Tracking — invitation</h2>
-      <p>${String(fromName || 'Un administrateur').replace(/[<>&]/g, '')} vous invite à utiliser Gasoil Tracking.</p>
+      <h2>Hubera Fuel — invitation</h2>
+      <p>${String(fromName || 'Un administrateur').replace(/[<>&]/g, '')} vous invite à utiliser Hubera Fuel.</p>
       ${codeBlock}
 
       <h3 style="margin:28px 0 10px;font-size:16px">📱 iPhone / iPad (recommandé)</h3>
@@ -1852,7 +1885,7 @@ async function sendDownloadInviteEmail({ to, url, fromName, inviteCode, webUrl, 
       <p style="color:#666;font-size:13px;margin-top:28px">Page d’installation (tous supports) : <a href="${hubWithCode}">${hubWithCode}</a></p>
     </div>`;
   const textParts = [
-    `${String(fromName || 'Un administrateur')} vous invite à Gasoil Tracking.`,
+    `${String(fromName || 'Un administrateur')} vous invite à Hubera Fuel.`,
     code ? `Code d’invitation : ${code}` : '',
     `iPhone / web : ${web}`,
     `Guide iPhone (écran d’accueil) : ${hubWithCode}#ios`,
@@ -1867,8 +1900,8 @@ async function sendDownloadInviteEmail({ to, url, fromName, inviteCode, webUrl, 
     from,
     to,
     subject: code
-      ? 'Gasoil Tracking — iPhone / Android / web + code'
-      : 'Gasoil Tracking — installer (iPhone, Android, web)',
+      ? 'Hubera Fuel — iPhone / Android / web + code'
+      : 'Hubera Fuel — installer (iPhone, Android, web)',
     html,
     text: textParts.join('\n\n') + '\n',
   });
@@ -1885,8 +1918,8 @@ async function notifyManagersPendingRegistration({ email, name, platform }) {
   ];
   if (!recipients.length) return;
   const transport = mailer();
-  const from = process.env.SMTP_FROM || 'Gasoil Tracking <noreply@maily.ovh>';
-  const subject = `Gasoil Tracking — compte à valider : ${email}`;
+  const from = process.env.SMTP_FROM || 'Hubera Fuel <noreply@maily.ovh>';
+  const subject = `Hubera Fuel — compte à valider : ${email}`;
   const html = `
     <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto">
       <h2>Nouveau compte en attente</h2>
@@ -1963,7 +1996,7 @@ app.get('/get-app', (req, res) => {
   res.type('html').send(`<!DOCTYPE html>
 <html lang="fr"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Télécharger Gasoil Tracking</title>
+<title>Télécharger Hubera Fuel</title>
 <style>
 body{font-family:system-ui,sans-serif;background:#0f0f1a;color:#f1f5f9;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:16px}
 .card{background:#1a1a2e;padding:28px;border-radius:16px;max-width:420px;width:100%;text-align:center}
@@ -1971,7 +2004,7 @@ a.btn{display:inline-block;margin-top:16px;background:#e94560;color:#fff;padding
 .muted{color:#94a3b8;font-size:13px;line-height:1.5}
 </style></head><body>
 <div class="card">
-  <h1>Gasoil Tracking</h1>
+  <h1>Hubera Fuel</h1>
   <p class="muted">Version ${String(version).replace(/[<>&]/g, '')} — lien sécurisé</p>
   <a class="btn" href="${dl}">Télécharger l’APK</a>
   <p class="muted" style="margin-top:18px">Android : ouvrez le fichier téléchargé → Autoriser l’installation depuis cette source.</p>

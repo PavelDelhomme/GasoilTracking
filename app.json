@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Gasoil Tracking",
+    "name": "Hubera Fuel",
     "slug": "gasoil-tracking",
-    "version": "1.4.138",
+    "version": "1.4.140",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "gasoiltracking",
@@ -17,9 +17,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.gasoiltracking.app",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Gasoil Tracking utilise votre position pour suivre vos trajets et calculer la consommation en temps réel.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Gasoil Tracking suit vos trajets en arrière-plan pendant la navigation pour estimer la consommation de carburant.",
-        "NSContactsUsageDescription": "Gasoil Tracking propose les adresses de vos contacts comme destinations de trajet.",
+        "NSLocationWhenInUseUsageDescription": "Hubera Fuel utilise votre position pour suivre vos trajets et calculer la consommation en temps réel.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Hubera Fuel suit vos trajets en arrière-plan pendant la navigation pour estimer la consommation de carburant.",
+        "NSContactsUsageDescription": "Hubera Fuel propose les adresses de vos contacts comme destinations de trajet.",
         "UIBackgroundModes": [
           "location"
         ]
@@ -64,7 +64,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Gasoil Tracking suit vos trajets en arrière-plan pour calculer la consommation.",
+          "locationAlwaysAndWhenInUsePermission": "Hubera Fuel suit vos trajets en arrière-plan pour calculer la consommation.",
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
         }
@@ -80,20 +80,20 @@
       [
         "expo-contacts",
         {
-          "contactsPermission": "Gasoil Tracking propose les adresses de vos contacts comme destinations."
+          "contactsPermission": "Hubera Fuel propose les adresses de vos contacts comme destinations."
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Gasoil Tracking utilise la caméra pour scanner le QR de connexion du site web.",
+          "cameraPermission": "Hubera Fuel utilise la caméra pour scanner le QR de connexion du site web.",
           "barcodeScannerEnabled": true
         }
       ],
       [
         "expo-image-picker",
         {
-          "cameraPermission": "Gasoil Tracking utilise la caméra pour photographier le CT ou la carte grise."
+          "cameraPermission": "Hubera Fuel utilise la caméra pour photographier le CT ou la carte grise."
         }
       ],
       "expo-asset",

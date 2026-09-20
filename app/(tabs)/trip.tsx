@@ -3245,7 +3245,7 @@ export default function TripScreen() {
                     onPress={() => {
                       const title = encodeURIComponent(`Trajet · ${destination.trim() || 'Navigation'}`);
                       const details = encodeURIComponent(
-                        `Ouvrir Gasoil Tracking puis Maps\ngasoiltracking://trip?dest=${encodeURIComponent(destination.trim())}`
+                        `Ouvrir Hubera Fuel puis Maps\ngasoiltracking://trip?dest=${encodeURIComponent(destination.trim())}`
                       );
                       const start = new Date();
                       start.setMinutes(0, 0, 0);

@@ -372,7 +372,7 @@ export async function startBackgroundTracking(opts?: {
           deferredUpdatesInterval: 4000,
           showsBackgroundLocationIndicator: true,
           foregroundService: {
-            notificationTitle: 'Gasoil Tracking — suivi en cours',
+            notificationTitle: 'Hubera Fuel — suivi en cours',
             notificationBody: 'Trajet GPS en arrière-plan · ouvrez l’app pour Terminer',
             notificationColor: '#e94560',
           },

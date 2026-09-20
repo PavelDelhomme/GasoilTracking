@@ -85,7 +85,7 @@ async function launchApkInstaller(fileUri: string) {
   } catch (e) {
     await openInstallPermissionSettings();
     throw new Error(
-      'Autorisez « Installer des apps inconnues » pour Gasoil Tracking, puis relancez la mise à jour.'
+      'Autorisez « Installer des apps inconnues » pour Hubera Fuel, puis relancez la mise à jour.'
     );
   }
 }

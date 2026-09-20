@@ -69,7 +69,7 @@ export default function HelpScreen() {
       >
         <Text style={[styles.hero, { color: colors.text }]}>Aide</Text>
         <Text style={{ color: colors.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: 14 }}>
-          Guide pratique de Gasoil Tracking — v{getLocalAppVersion()}. Cherchez un mot, ou ouvrez une
+          Guide pratique de Hubera Fuel — v{getLocalAppVersion()}. Cherchez un mot, ou ouvrez une
           catégorie. Un seul bouton retour (en haut à gauche) suffit pour quitter cette page.
         </Text>
 

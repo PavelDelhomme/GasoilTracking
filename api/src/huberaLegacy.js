@@ -8,14 +8,15 @@ const STALE_MS = Number(process.env.HUBERA_LEGACY_STALE_DAYS || 21) * 86400000;
 
 export function huberaNotice() {
   return {
-    brand: 'GasoilTracking',
+    brand: 'Hubera Fuel',
     channel: 'fuel',
     keep_package: 'com.gasoiltracking.app',
-    canonical_url: 'https://gasoil-tracking.hubera.cloud',
+    identity: 'cloud.hubera.fuel',
+    canonical_url: 'https://fuel.hubera.cloud',
     legacy_url: 'https://gasoil-tracking.delhomme.ovh',
     message:
-      'GasoilTracking fait partie de Hubera. Tes trajets, véhicules et ton compte restent. ' +
-      'Nouveau domaine : gasoil-tracking.hubera.cloud — l’ancien gasoil-tracking.delhomme.ovh continue. ' +
+      'Hubera Fuel s’appelle désormais Hubera Fuel. Tes trajets, véhicules et ton compte restent. ' +
+      'Nouveau domaine : fuel.hubera.cloud — gasoil-tracking.hubera.cloud et gasoil-tracking.delhomme.ovh continuent. ' +
       'Même application Android (package inchangé).',
   };
 }
@@ -90,7 +91,7 @@ export function huberaLegacyStatus() {
   const aware = active.filter((c) => c.huberaAware);
   return {
     app: 'fuel',
-    name: 'GasoilTracking',
+    name: 'Hubera Fuel',
     package: 'com.gasoiltracking.app',
     stale_days: STALE_MS / 86400000,
     active_installs: active.length,
@@ -114,7 +115,7 @@ async function maybeNotifyCleared(store) {
   const n = huberaNotice();
   try {
     await transport.sendMail({
-      from: process.env.SMTP_FROM || 'Gasoil Tracking <noreply@maily.ovh>',
+      from: process.env.SMTP_FROM || 'Hubera Fuel <noreply@maily.ovh>',
       to: to.join(', '),
       subject: 'Hubera — plus aucun client GasoilTracking sur l’ancienne app',
       text:

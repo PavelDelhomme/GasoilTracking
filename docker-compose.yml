@@ -1,4 +1,4 @@
-# Gasoil Tracking — production Portainer (branche prod)
+# Hubera Fuel — production Portainer (branche prod)
 # Domaine: https://gasoil-tracking.delhomme.ovh
 # Stack Git: Repository → docker-compose.yml → refs/heads/prod
 
@@ -37,7 +37,7 @@ services:
       DATA_DIR: /data
       JWT_SECRET: ${JWT_SECRET:-change-me-gasoil-tracking-prod}
       PUBLIC_URL: https://gasoil-tracking.delhomme.ovh
-      APP_VERSION: ${APP_VERSION:-1.4.138}
+      APP_VERSION: ${APP_VERSION:-1.4.140}
       MIN_APP_VERSION: ${MIN_APP_VERSION:-1.0.0}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@delhomme.ovh}
       PERSONAL_MAIL: ${PERSONAL_MAIL:-}
@@ -50,7 +50,7 @@ services:
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
-      SMTP_FROM: ${SMTP_FROM:-Gasoil Tracking <noreply@maily.ovh>}
+      SMTP_FROM: ${SMTP_FROM:-Hubera Fuel <noreply@maily.ovh>}
       SMTP_SECURE: ${SMTP_SECURE:-false}
       APP_SCHEME: gasoiltracking
       TRUST_PROXY: "1"

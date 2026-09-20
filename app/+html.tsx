@@ -16,10 +16,10 @@ export default function Root({ children }: PropsWithChildren) {
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <meta name="apple-mobile-web-app-title" content="Gasoil" />
+        <meta name="apple-mobile-web-app-title" content="Hubera Fuel" />
         <meta
           name="description"
-          content="Gasoil Tracking — consommation, trajets et budget carburant."
+          content="Hubera Fuel — consommation, trajets et budget carburant (anciennement Gasoil Tracking)."
         />
         <link rel="manifest" href="/manifest.webmanifest" />
         <link rel="apple-touch-icon" href="/icon.png" />

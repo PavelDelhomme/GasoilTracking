@@ -97,7 +97,7 @@ export function InstallAppHint() {
         <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 2 }}>
           {ios
             ? 'Safari → Partager → Sur l’écran d’accueil. Ensuite ça s’ouvre comme l’APK Android.'
-            : 'Ajoutez Gasoil Tracking à l’écran d’accueil pour une expérience plein écran.'}
+            : 'Ajoutez Hubera Fuel à l’écran d’accueil pour une expérience plein écran.'}
         </Text>
       </View>
       <View style={styles.actions}>

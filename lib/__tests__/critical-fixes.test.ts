@@ -65,6 +65,14 @@ describe('userFacingReleaseNotes', () => {
     );
     expect(n).toContain('itinéraire');
   });
+  it('affiche Hubera Fuel à la place de Gasoil Tracking', () => {
+    const n = userFacingReleaseNotes(
+      'Gasoil Tracking : suivi des trajets plus stable.',
+      '1.4.140'
+    );
+    expect(n).toContain('Hubera Fuel');
+    expect(n).not.toMatch(/Gasoil Tracking/i);
+  });
 });
 
 describe('vehicles search', () => {

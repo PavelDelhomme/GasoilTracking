@@ -115,7 +115,7 @@ export function AccountDrawer() {
               </Text>
               <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 8, lineHeight: 16 }}>
                 {info?.hubera?.message ||
-                  'GasoilTracking fait partie de Hubera. Tes données restent. Nouveau domaine : gasoil-tracking.hubera.cloud — l’ancien gasoil-tracking.delhomme.ovh continue.'}
+                  'Hubera Fuel (ex Gasoil Tracking). Tes données restent. fuel.hubera.cloud — l’ancien gasoil-tracking.delhomme.ovh continue.'}
               </Text>
             </View>
             <Pressable

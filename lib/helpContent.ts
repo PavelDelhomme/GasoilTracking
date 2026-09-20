@@ -28,7 +28,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
     articles: [
       {
         id: 'what',
-        title: 'À quoi sert Gasoil Tracking ?',
+        title: 'À quoi sert Hubera Fuel ?',
         body:
           'Suivre vos trajets (GPS), estimer la consommation et le coût, enregistrer vos pleins, suivre un budget carburant, et garder l’historique sur le téléphone et (si vous êtes connecté) sur le cloud.',
       },
@@ -314,7 +314,7 @@ export const HELP_KNOWN: KnownIssue[] = [
     kind: 'limit',
     title: 'Suivi en arrière-plan coupé par le téléphone',
     body:
-      'Certains constructeurs (économiseur batterie agressif) tuent le GPS en arrière-plan. Gardez l’app ouverte ou autorisez l’activité en arrière-plan / ignorez l’optimisation batterie pour Gasoil Tracking.',
+      'Certains constructeurs (économiseur batterie agressif) tuent le GPS en arrière-plan. Gardez l’app ouverte ou autorisez l’activité en arrière-plan / ignorez l’optimisation batterie pour Hubera Fuel.',
   },
   {
     id: 'stations-fr',
@@ -335,7 +335,7 @@ export const HELP_KNOWN: KnownIssue[] = [
     kind: 'tip',
     title: 'Guidage in-app vs Google Maps',
     body:
-      'Le guidage dans l’app est volontairement simple (OSRM). Pour un turn-by-turn ultra détaillé, ouvrez Google Maps depuis le trajet : le suivi conso continue dans Gasoil Tracking.',
+      'Le guidage dans l’app est volontairement simple (OSRM). Pour un turn-by-turn ultra détaillé, ouvrez Google Maps depuis le trajet : le suivi conso continue dans Hubera Fuel.',
   },
   {
     id: 'sync-conflict',
