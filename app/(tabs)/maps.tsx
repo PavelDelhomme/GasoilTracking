@@ -210,9 +210,9 @@ export default function MapsScreen() {
         } else {
           nativeSub = await Location.watchPositionAsync(
             {
-              accuracy: Location.Accuracy.Balanced,
-              timeInterval: 2000,
-              distanceInterval: 6,
+              accuracy: Location.Accuracy.High,
+              timeInterval: 1200,
+              distanceInterval: 4,
             },
             (pos) => {
               const next = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };

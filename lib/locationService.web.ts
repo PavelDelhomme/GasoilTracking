@@ -193,6 +193,10 @@ export function peekLiveTripId(): null {
   return null;
 }
 
+export async function ensureLocationEnabled(): Promise<boolean> {
+  return typeof navigator !== 'undefined' && Boolean(navigator.geolocation);
+}
+
 export async function getCurrentLocation(opts?: {
   fresh?: boolean;
 }): Promise<Location.LocationObject | null> {

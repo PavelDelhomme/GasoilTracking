@@ -1,6 +1,7 @@
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
+import * as IntentLauncher from 'expo-intent-launcher';
 import { Platform } from 'react-native';
 import { BACKGROUND_LOCATION_TASK } from '@/constants/Colors';
 import {
@@ -425,6 +426,38 @@ export function clearLivePointsAfterFinish(): void {
   clearLivePointsCache();
 }
 
+export async function ensureLocationEnabled(): Promise<boolean> {
+  try {
+    if (await Location.hasServicesEnabledAsync()) return true;
+  } catch {
+    /* ignore */
+  }
+  try {
+    await Location.enableNetworkProviderAsync();
+  } catch {
+    /* dialogue Android annulé ou indisponible */
+  }
+  try {
+    if (await Location.hasServicesEnabledAsync()) return true;
+  } catch {
+    /* ignore */
+  }
+  if (Platform.OS === 'android') {
+    try {
+      await IntentLauncher.startActivityAsync(
+        IntentLauncher.ActivityAction.LOCATION_SOURCE_SETTINGS,
+      );
+    } catch {
+      /* OEM sans écran réglages, ou utilisateur a annulé */
+    }
+  }
+  try {
+    return await Location.hasServicesEnabledAsync();
+  } catch {
+    return false;
+  }
+}
+
 export async function getCurrentLocation(opts?: {
   /** Pour démarrer un trajet : frais + précis, pas last-known lâche. */
   fresh?: boolean;
@@ -433,12 +466,13 @@ export async function getCurrentLocation(opts?: {
 }): Promise<Location.LocationObject | null> {
   const { status } = await Location.requestForegroundPermissionsAsync();
   if (status !== 'granted') return null;
+  await ensureLocationEnabled();
 
-  const readLast = async () => {
+  const readLast = async (maxAge: number, accuracy: number) => {
     try {
       return await Location.getLastKnownPositionAsync({
-        maxAge: opts?.fresh ? 120_000 : 45_000,
-        requiredAccuracy: opts?.fresh ? 150 : 80,
+        maxAge,
+        requiredAccuracy: accuracy,
       });
     } catch {
       return null;
@@ -446,13 +480,30 @@ export async function getCurrentLocation(opts?: {
   };
 
   if (!opts?.fresh) {
-    const last = await readLast();
-    if (last && (last.coords.accuracy == null || last.coords.accuracy <= 80)) {
+    const last = await readLast(30 * 60_000, 500);
+    if (last) return last;
+  } else {
+    const last = await readLast(120_000, 250);
+    if (last && (last.coords.accuracy == null || last.coords.accuracy <= 150)) {
+      // On continue quand même vers un fix frais, mais on a un fallback.
+      const timeoutMs = opts?.timeoutMs ?? 8000;
+      try {
+        const fix = await Promise.race([
+          Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.High,
+            mayShowUserSettingsDialog: true,
+          }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+        ]);
+        if (fix) return fix;
+      } catch {
+        /* ignore */
+      }
       return last;
     }
   }
 
-  const timeoutMs = opts?.timeoutMs ?? (opts?.fresh ? 8000 : 12_000);
+  const timeoutMs = opts?.timeoutMs ?? (opts?.fresh ? 10_000 : 12_000);
   try {
     const fix = await Promise.race([
       Location.getCurrentPositionAsync({
@@ -465,7 +516,7 @@ export async function getCurrentLocation(opts?: {
   } catch {
     /* ignore */
   }
-  return readLast();
+  return readLast(opts?.fresh ? 10 * 60_000 : 45 * 60_000, 800);
 }
 
 /** Ouvre Google Maps pour la navigation vers une destination */

@@ -819,8 +819,24 @@ app.get('/api/version', (req, res) => {
     .prepare('SELECT * FROM app_releases WHERE apk_filename IS NOT NULL')
     .all();
   const latest = pickLatestRelease(rows);
-  const version = latest?.version || APP_VERSION;
-  const apkAvailable = Boolean(latest?.apk_filename);
+  const clientVer = String(req.query.clientVersion || '').trim();
+  const clientVc = Number(req.query.clientVersionCode || 0) || 0;
+  const apkOlderThanClient =
+    Boolean(latest) &&
+    ((clientVer && compareSemver(latest.version, clientVer) < 0) ||
+      (clientVc > 0 &&
+        Number(latest.version_code) > 0 &&
+        Number(latest.version_code) < clientVc));
+  // Jamais proposer / forcer un APK plus vieux que le téléphone.
+  const offerApk = Boolean(latest?.apk_filename) && !apkOlderThanClient;
+  let version = offerApk ? latest.version : APP_VERSION;
+  if (clientVer && compareSemver(version, clientVer) < 0) {
+    version = clientVer;
+  }
+  if (!offerApk && compareSemver(version, APP_VERSION) < 0) {
+    version = APP_VERSION;
+  }
+  const apkAvailable = offerApk;
   const pub = requestPublicUrl(req);
   const apkUrl = apkAvailable
     ? `${pub}/api/download/${latest.apk_filename}`
@@ -848,12 +864,17 @@ app.get('/api/version', (req, res) => {
   res.json({
     version,
     minVersion: MIN_VERSION,
-    forceUpdate: Boolean(latest?.force_update),
+    forceUpdate:
+      apkAvailable &&
+      Boolean(latest?.force_update) &&
+      ((clientVc > 0 && Number(latest.version_code) > clientVc) ||
+        (clientVer && compareSemver(latest.version, clientVer) > 0) ||
+        (!clientVer && !clientVc)),
     apkUrl,
     apkAvailable,
-    apkSha256: latest?.apk_sha256 || null,
-    apkSize: latest?.apk_size || null,
-    versionCode: latest?.version_code || null,
+    apkSha256: apkAvailable ? latest?.apk_sha256 || null : null,
+    apkSize: apkAvailable ? latest?.apk_size || null : null,
+    versionCode: apkAvailable ? latest?.version_code || null : null,
     webUrl: pub,
     /** Hub multi-plateformes (Android APK + iPhone PWA + web) */
     downloadPage: `${pub}/download`,

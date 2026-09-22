@@ -6,6 +6,8 @@ import {
   Switch,
   Text,
   Pressable,
+  AppState,
+  type AppStateStatus,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp } from '@/context/AppContext';
@@ -32,7 +34,7 @@ import {
   isSaneFuelPricePerLiter,
   type FuelStationPrice,
 } from '@/lib/fuelPrices';
-import { getCurrentLocation } from '@/lib/locationService';
+import { getCurrentLocation, ensureLocationEnabled } from '@/lib/locationService';
 import { notify } from '@/lib/notify';
 import { refreshVehicleReminders } from '@/lib/reminders';
 import { useToast } from '@/context/ToastContext';
@@ -267,9 +269,17 @@ export default function AddFillUpScreen() {
       setNearby([]);
     }
     try {
-      const loc = await getCurrentLocation();
+      const gpsOn = await ensureLocationEnabled();
+      const loc = await getCurrentLocation({ fresh: true, timeoutMs: 10_000 });
       if (!loc) {
-        if (!opts?.autoPick) notify('GPS', 'Activez la localisation pour trouver la station.');
+        if (!opts?.autoPick) {
+          notify(
+            'GPS',
+            gpsOn
+              ? 'Position introuvable. Réessayez une fois dehors, GPS allumé.'
+              : 'Activez la localisation (GPS), puis revenez — la recherche relance toute seule.',
+          );
+        }
         return;
       }
       const list = await fetchCheapestStations({
@@ -313,6 +323,17 @@ export default function AddFillUpScreen() {
     void findStations({ autoPick: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeVehicle?.id, countryCode]);
+
+  useEffect(() => {
+    const onChange = (state: AppStateStatus) => {
+      if (state === 'active' && activeVehicle && nearby.length === 0 && !station) {
+        void findStations({ autoPick: true });
+      }
+    };
+    const sub = AppState.addEventListener('change', onChange);
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeVehicle?.id, nearby.length, station]);
 
   const pickStation = (s: FuelStationPrice) => {
     // Remplace entièrement la sélection précédente (pas d’empilement)

@@ -30,8 +30,8 @@ function haversineKm(
  * 32 m était trop strict : le GPS Android en FGS / arrière-plan est souvent
  * à 40–80 m → tous les points rejetés, notif allumée, 0 km enregistrés.
  */
-export const MAX_ACCURACY_M = 85;
-export const MAX_ACCURACY_FIRST_M = 160;
+export const MAX_ACCURACY_M = 120;
+export const MAX_ACCURACY_FIRST_M = 220;
 /** Distance min entre 2 points (km). */
 export const MIN_STEP_KM = 0.006; // 6 m
 /** Vitesse max ~180 km/h + marge GPS. */

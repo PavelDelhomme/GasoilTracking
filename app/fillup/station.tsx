@@ -30,7 +30,9 @@ import {
   startBackgroundTracking,
   stopBackgroundTracking,
   seedLivePointsCache,
+  ensureLocationEnabled,
 } from '@/lib/locationService';
+import { recordFuelGaugeReading } from '@/lib/fuelGaugeHistory';
 import { seedLiveTripBuffer, clearLiveTripBuffer } from '@/lib/liveTripBuffer';
 import { launchGoogleMapsNavigation } from '@/lib/mapsNavigation';
 import { fuelLabel, isSaneFuelPricePerLiter } from '@/lib/fuelPrices';
@@ -140,6 +142,7 @@ export default function StationTripScreen() {
       await stopBackgroundTracking();
       await clearLiveTripBuffer();
 
+      await ensureLocationEnabled();
       const loc = await getCurrentLocation({ fresh: true });
       const startPoint = loc
         ? [
@@ -170,6 +173,15 @@ export default function StationTripScreen() {
       });
       setTripId(tripId);
       setDistanceKm('0');
+
+      if (activeVehicle.estimatedFuelLiters != null) {
+        await recordFuelGaugeReading({
+          vehicleId: activeVehicle.id,
+          liters: activeVehicle.estimatedFuelLiters,
+          source: 'trip_start',
+          tripId,
+        });
+      }
 
       seedLivePointsCache(tripId, activeVehicle.id, startPoint);
       await seedLiveTripBuffer({
