@@ -13,6 +13,7 @@ import {
   fmtLatLng,
   type MapsLatLng,
 } from '@/lib/mapsUrl';
+import { openHuberaMapsNavigate } from '@/lib/huberaMaps';
 
 export type { MapsLatLng };
 export type MapsAppChoice = 'google' | 'apple';
@@ -216,6 +217,17 @@ export async function launchGoogleMapsNavigation(opts: {
   label?: string;
   preferGoogle?: boolean;
 }): Promise<boolean> {
+  if (!opts.preferGoogle) {
+    const hubera = await openHuberaMapsNavigate({
+      mode: 'nav',
+      toLat: opts.destination.latitude,
+      toLon: opts.destination.longitude,
+      label: opts.label,
+      fromLat: opts.origin?.latitude,
+      fromLon: opts.origin?.longitude,
+    });
+    if (hubera) return true;
+  }
   const wps = opts.waypoints || [];
   const app =
     opts.preferGoogle || wps.length > 0

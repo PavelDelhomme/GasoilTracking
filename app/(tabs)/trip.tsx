@@ -45,6 +45,7 @@ import {
   getVehicleById,
   purgeSimulatorTrips,
   getTripById,
+  getActiveTripLite,
 } from '@/lib/database';
 import {
   startBackgroundTracking,
@@ -64,6 +65,7 @@ import {
   readLiveTripBuffer,
 } from '@/lib/liveTripBuffer';
 import { buildViaWaypoints, launchGoogleMapsNavigation } from '@/lib/mapsNavigation';
+import { openHuberaMapsForTrip } from '@/lib/huberaMaps';
 import {
   appendRoutePoint,
   calculateRouteDistance,
@@ -1262,30 +1264,59 @@ export default function TripScreen() {
     // faire croire que le trajet a échoué, ni tuer le GPS). Destination seule
     // : pas d’arrêt intermédiaire. Petit délai pour laisser l’UI se stabiliser.
     try {
-      if (effectiveMode === 'nav' && mapsLabel && mapsDest) {
+      await new Promise((r) => setTimeout(r, 400));
+      const tripIdForMaps = (await getActiveTripLite())?.id;
+      if (effectiveMode === 'free' && tripIdForMaps) {
+        const opened = await openHuberaMapsForTrip({
+          tripId: tripIdForMaps,
+          vehicleId: activeVehicle.id,
+          mode: 'free',
+          fromLat: mapsOrigin?.latitude,
+          fromLon: mapsOrigin?.longitude,
+        });
+        if (!opened) {
+          notify(
+            'Hubera Maps',
+            'App Maps absente — le suivi GPS continue dans Fuel.'
+          );
+        }
+      } else if (effectiveMode === 'nav' && mapsLabel && mapsDest) {
         void pushRecentDestination({
           label: mapsLabel,
           latitude: mapsDest.latitude,
           longitude: mapsDest.longitude,
         }).then(() => getRecentDestinations(6).then(setRecentDests));
 
-        await new Promise((r) => setTimeout(r, 400));
-        const routeVias = mapsWaypointsForRoute(routeForNav);
-        const waypoints = [
-          ...(stationViaLocal ? [stationViaLocal] : []),
-          ...routeVias,
-        ];
-        const opened = await launchGoogleMapsNavigation({
-          destination: mapsDest,
-          origin: mapsOrigin,
-          waypoints,
-          label: mapsLabel,
-        });
-        if (!opened) {
-          notify(
-            'Navigation',
-            'Impossible d’ouvrir Maps. Le suivi GPS continue dans l’app.'
-          );
+        const openedHubera = tripIdForMaps
+          ? await openHuberaMapsForTrip({
+              tripId: tripIdForMaps,
+              vehicleId: activeVehicle.id,
+              mode: 'nav',
+              toLat: mapsDest.latitude,
+              toLon: mapsDest.longitude,
+              label: mapsLabel,
+              fromLat: mapsOrigin?.latitude,
+              fromLon: mapsOrigin?.longitude,
+            })
+          : false;
+        if (!openedHubera) {
+          const routeVias = mapsWaypointsForRoute(routeForNav);
+          const waypoints = [
+            ...(stationViaLocal ? [stationViaLocal] : []),
+            ...routeVias,
+          ];
+          const opened = await launchGoogleMapsNavigation({
+            destination: mapsDest,
+            origin: mapsOrigin,
+            waypoints,
+            label: mapsLabel,
+          });
+          if (!opened) {
+            notify(
+              'Navigation',
+              'Impossible d’ouvrir Maps. Le suivi GPS continue dans l’app.'
+            );
+          }
         }
         setFuelStopVia(null);
       }

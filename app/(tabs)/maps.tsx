@@ -39,6 +39,7 @@ import { searchAddressSuggestions, type SuggestHit } from '@/lib/placeSuggest';
 import { getAppFlavor } from '@/lib/appFlavor';
 import { tripHistoryNav } from '@/lib/tripHistoryNav';
 import { startGpsTrip, pauseGpsTrip, resumeGpsTrip, stopGpsTripLite } from '@/lib/startFreeTrip';
+import { openHuberaMapsForTrip } from '@/lib/huberaMaps';
 import { formatDurationMin, liveTripHudStats } from '@/lib/liveTripHud';
 import {
   fetchDrivingRouteAlternatives,
@@ -593,8 +594,19 @@ export default function MapsScreen() {
           showToast(
             dest
               ? `Guidage vers ${dest.label} — suivi actif (notif arrière-plan).`
-              : 'Suivi GPS démarré — notif « suivi en cours » en arrière-plan.'
+              : 'Suivi GPS démarré — ouverture Hubera Maps.'
           );
+        }
+        const opened = await openHuberaMapsForTrip({
+          tripId: r.tripId,
+          vehicleId: activeVehicle.id,
+          mode: dest ? 'nav' : 'free',
+          toLat: dest?.latitude,
+          toLon: dest?.longitude,
+          label: dest?.label,
+        });
+        if (!opened) {
+          showToast('Hubera Maps n’est pas installée — le suivi continue ici.');
         }
       } finally {
         setStarting(false);

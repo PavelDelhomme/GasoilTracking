@@ -2,7 +2,7 @@
   "expo": {
     "name": "Fuel",
     "slug": "gasoil-tracking",
-    "version": "1.4.145",
+    "version": "1.4.146",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "gasoiltracking",
@@ -20,6 +20,10 @@
         "NSLocationWhenInUseUsageDescription": "Hubera Fuel utilise votre position pour suivre vos trajets et calculer la consommation en temps réel.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Hubera Fuel suit vos trajets en arrière-plan pendant la navigation pour estimer la consommation de carburant.",
         "NSContactsUsageDescription": "Hubera Fuel propose les adresses de vos contacts comme destinations de trajet.",
+        "LSApplicationQueriesSchemes": [
+          "hubera-maps",
+          "cloudity-maps"
+        ],
         "UIBackgroundModes": [
           "location"
         ]
@@ -52,7 +56,7 @@
           "apiKey": "VOTRE_CLE_GOOGLE_MAPS_ANDROID"
         }
       },
-      "versionCode": 169
+      "versionCode": 170
     },
     "web": {
       "bundler": "metro",
@@ -98,6 +102,7 @@
       ],
       "expo-asset",
       "@react-native-community/datetimepicker",
+      "./plugins/withHuberaMapsQueries.js",
       "./plugins/withReleaseSigning.js"
     ],
     "experiments": {
@@ -110,7 +115,7 @@
       "eas": {
         "projectId": "d85bab84-0971-4266-8f8c-a37113bc7761"
       },
-      "whatsNew": "Historique des jauges carburant par véhicule (départ, arrivée, pleins, saisies).",
+      "whatsNew": "Export CSV (vrai fichier) et récap PDF : tous les véhicules ou un seul, selon le filtre Pleins.",
       "router": {
         "origin": false
       }

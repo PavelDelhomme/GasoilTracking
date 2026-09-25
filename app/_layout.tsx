@@ -115,6 +115,10 @@ function RootNavigation() {
         />
         <Stack.Screen name="trip/add" options={{ title: 'Trajet manuel', presentation: 'modal' }} />
         <Stack.Screen name="trip/import" options={{ title: 'Import Google Maps', presentation: 'modal' }} />
+        <Stack.Screen
+          name="trip/control"
+          options={{ title: 'Hubera Maps', headerShown: false, presentation: 'transparentModal' }}
+        />
         <Stack.Screen name="trip/[id]" options={{ title: 'Détail du trajet' }} />
         <Stack.Screen name="place/add" options={{ title: 'Nouveau lieu', presentation: 'modal' }} />
         <Stack.Screen name="place/edit" options={{ title: 'Modifier le lieu', presentation: 'modal' }} />
