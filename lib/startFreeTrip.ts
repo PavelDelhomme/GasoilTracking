@@ -126,6 +126,8 @@ export async function startGpsTrip(opts: {
   vehicle: Vehicle;
   refresh?: () => Promise<void>;
   destinationName?: string;
+  /** Maps silent : pas de modal jauge (on reste dans Maps). */
+  skipGauge?: boolean;
 }): Promise<GpsTripStartResult> {
   if (inFlight) return { ok: false, error: 'Démarrage déjà en cours' };
   if (Date.now() - lastStartAt < START_COOLDOWN_MS) {
@@ -161,19 +163,20 @@ export async function startGpsTrip(opts: {
     await stopBackgroundTracking();
     await clearLiveTripBuffer();
 
-    // Même prompt jauge que l’onglet Trajet (Maps / suivi libre / destination).
-    try {
-      const gauge = await askFuelGaugeApprox(
-        opts.vehicle,
-        'Niveau de carburant au départ',
-        'Réglez la jauge pour affiner la consommation estimée.',
-        { softSkip: true }
-      );
-      if (!gauge.skipped) {
-        await setFuelLiters(opts.vehicle, gauge.liters);
+    if (!opts.skipGauge) {
+      try {
+        const gauge = await askFuelGaugeApprox(
+          opts.vehicle,
+          'Niveau de carburant au départ',
+          'Réglez la jauge pour affiner la consommation estimée.',
+          { softSkip: true }
+        );
+        if (!gauge.skipped) {
+          await setFuelLiters(opts.vehicle, gauge.liters);
+        }
+      } catch {
+        /* ne bloque pas le départ GPS */
       }
-    } catch {
-      /* ne bloque pas le départ GPS */
     }
 
     const loc = await getCurrentLocation({ fresh: true, timeoutMs: 7000 });

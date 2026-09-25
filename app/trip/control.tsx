@@ -1,66 +1,60 @@
 /**
  * Contrôle trajet depuis Hubera Maps :
- *   gasoiltracking://trip/control?action=pause|resume|stop&tripId=
+ *   gasoiltracking://trip/control?action=pause|resume|stop|start|fill&silent=1
  */
 import { useEffect, useRef } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Linking, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
-import { getActiveTripLite } from '@/lib/database';
-import { pauseGpsTrip, resumeGpsTrip, stopGpsTripLite } from '@/lib/startFreeTrip';
-import { peekLiveRouteTail } from '@/lib/locationService';
-import { calculateRouteDistance } from '@/lib/calculations';
+import { runMapsTripControl } from '@/lib/mapsTripControl';
 
 export default function TripControlFromMaps() {
-  const params = useLocalSearchParams<{ action?: string; tripId?: string }>();
-  const { refresh, activeVehicle } = useApp();
+  const params = useLocalSearchParams<{
+    action?: string;
+    tripId?: string;
+    silent?: string;
+    liters?: string;
+    total?: string;
+    station?: string;
+    dest?: string;
+  }>();
+  const { refresh } = useApp();
   const { showToast } = useToast();
   const ran = useRef(false);
 
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
-    const action = String(params.action || '').toLowerCase();
-    const tripIdNum = Number(params.tripId);
+    const silent = params.silent === '1';
     void (async () => {
+      const result = await runMapsTripControl(
+        {
+          action: params.action,
+          tripId: params.tripId,
+          liters: params.liters,
+          total: params.total,
+          station: params.station,
+          dest: params.dest,
+        },
+        refresh
+      );
+      if (!silent) showToast(result.message);
+      const q = new URLSearchParams();
+      if (result.tripId) q.set('tripId', String(result.tripId));
+      if (result.message) q.set('msg', result.message);
+      q.set('ok', result.ok ? '1' : '0');
       try {
-        const live = await getActiveTripLite();
-        const tripId = Number.isFinite(tripIdNum) && tripIdNum > 0 ? tripIdNum : live?.id;
-        if (!tripId) {
-          showToast('Aucun trajet Fuel actif.');
-          return;
-        }
-        if (action === 'pause') {
-          await pauseGpsTrip(tripId, refresh);
-          showToast('Suivi Fuel en pause.');
-        } else if (action === 'resume') {
-          const ok = await resumeGpsTrip(tripId, refresh);
-          showToast(ok ? 'Suivi Fuel repris.' : 'Localisation refusée — suivi non repris.');
-        } else if (action === 'stop') {
-          const tail = peekLiveRouteTail() || [];
-          const km = tail.length >= 2 ? calculateRouteDistance(JSON.stringify(tail)) : 0;
-          await stopGpsTripLite({
-            tripId,
-            vehicleId: activeVehicle?.id ?? live?.vehicleId ?? 0,
-            distanceKm: km,
-            refresh,
-          });
-          showToast('Trajet Fuel terminé.');
-        } else {
-          showToast('Action Maps inconnue.');
-        }
+        await Linking.openURL(`hubera-maps://fuel?${q.toString()}`);
       } catch {
-        showToast('Impossible de commander le trajet Fuel.');
-      } finally {
-        router.replace('/(tabs)/maps');
+        if (!silent) router.replace('/(tabs)/maps' as never);
       }
     })();
-  }, [params.action, params.tripId, refresh, activeVehicle?.id, showToast]);
+  }, [params, refresh, showToast]);
 
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-      <ActivityIndicator />
+    <View style={{ flex: 1, backgroundColor: '#0f0f1a', alignItems: 'center', justifyContent: 'center' }}>
+      <ActivityIndicator color="#e94560" />
     </View>
   );
 }

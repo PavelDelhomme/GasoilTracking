@@ -50,11 +50,14 @@ type RawRoute = {
 export function formatOsrmManeuver(
   type: string | undefined,
   modifier?: string,
-  name?: string
+  name?: string,
+  exit?: number
 ): string {
   const road = name?.trim() ? ` · ${name.trim()}` : '';
   const mod = (modifier || '').toLowerCase();
   const t = (type || '').toLowerCase();
+  const ord =
+    exit && exit >= 1 ? (exit === 1 ? '1re' : `${Math.round(exit)}e`) : '';
   switch (t) {
     case 'depart':
       return `Départ${road}`;
@@ -85,7 +88,7 @@ export function formatOsrmManeuver(
       return `En bout de voie${road}`;
     case 'roundabout':
     case 'rotary':
-      return `Rond-point${road}`;
+      return ord ? `Au rond-point, prenez la ${ord} sortie${road}` : `Au rond-point${road}`;
     case 'exit roundabout':
     case 'exit rotary':
       return `Sortez du rond-point${road}`;
@@ -105,6 +108,7 @@ function parseOsrmSteps(
         type?: string;
         modifier?: string;
         location?: [number, number];
+        exit?: number;
       };
     }>;
   }>
@@ -117,8 +121,9 @@ function parseOsrmSteps(
       const type = step.maneuver?.type || 'continue';
       const modifier = step.maneuver?.modifier;
       const name = step.name || undefined;
+      const exit = step.maneuver?.exit;
       out.push({
-        instruction: formatOsrmManeuver(type, modifier, name),
+        instruction: formatOsrmManeuver(type, modifier, name, exit),
         distanceM: Math.max(0, Math.round(step.distance || 0)),
         location: { latitude: loc[1], longitude: loc[0] },
         type,
