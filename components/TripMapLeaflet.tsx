@@ -141,12 +141,17 @@ function buildHtml(
     function setUser(pt, paused) {
       if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
       if (!pt) return;
+      if (!map.getPane('mePane')) {
+        map.createPane('mePane');
+        map.getPane('mePane').style.zIndex = 650;
+      }
       userMarker = L.circleMarker(pt, {
-        radius: 9,
+        radius: 10,
         color: '#fff',
-        weight: 2,
+        weight: 3,
         fillColor: paused ? '#f59e0b' : '#3b82f6',
-        fillOpacity: 1
+        fillOpacity: 1,
+        pane: 'mePane'
       }).addTo(map).bindPopup(paused ? 'Pause' : 'Vous');
     }
 
@@ -197,7 +202,10 @@ function buildHtml(
           if (msg.refit && msg.route && msg.route.length) fit(msg.route, true);
         }
         if (msg.type === 'fit' && msg.route && msg.route.length) fit(msg.route, true);
-        if (msg.type === 'center' && msg.lat != null) map.setView([msg.lat, msg.lon], msg.zoom || map.getZoom());
+        if (msg.type === 'center' && msg.lat != null) {
+          map.invalidateSize();
+          map.flyTo([msg.lat, msg.lon], msg.zoom || 16, { duration: 0.45 });
+        }
       } catch (e) {}
     }
 

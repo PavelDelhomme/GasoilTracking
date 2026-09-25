@@ -39,7 +39,7 @@ import { searchAddressSuggestions, type SuggestHit } from '@/lib/placeSuggest';
 import { getAppFlavor } from '@/lib/appFlavor';
 import { tripHistoryNav } from '@/lib/tripHistoryNav';
 import { startGpsTrip, pauseGpsTrip, resumeGpsTrip, stopGpsTripLite } from '@/lib/startFreeTrip';
-import { openHuberaMapsForTrip } from '@/lib/huberaMaps';
+import { launchGoogleMapsNavigation, openGoogleMapsHere } from '@/lib/mapsNavigation';
 import { formatDurationMin, liveTripHudStats } from '@/lib/liveTripHud';
 import {
   fetchDrivingRouteAlternatives,
@@ -593,26 +593,26 @@ export default function MapsScreen() {
         } else {
           showToast(
             dest
-              ? `Guidage vers ${dest.label} — suivi actif (notif arrière-plan).`
-              : 'Suivi GPS démarré — ouverture Hubera Maps.'
+              ? `Guidage vers ${dest.label} — suivi Fuel + Google Maps.`
+              : 'Suivi GPS démarré — ouverture Google Maps.'
           );
         }
-        const opened = await openHuberaMapsForTrip({
-          tripId: r.tripId,
-          vehicleId: activeVehicle.id,
-          mode: dest ? 'nav' : 'free',
-          toLat: dest?.latitude,
-          toLon: dest?.longitude,
-          label: dest?.label,
-        });
+        const opened = dest
+          ? await launchGoogleMapsNavigation({
+              destination: { latitude: dest.latitude, longitude: dest.longitude },
+              origin: user,
+              label: dest.label,
+              preferGoogle: true,
+            })
+          : await openGoogleMapsHere(user || undefined);
         if (!opened) {
-          showToast('Hubera Maps n’est pas installée — le suivi continue ici.');
+          showToast('Impossible d’ouvrir Google Maps — le suivi continue ici.');
         }
       } finally {
         setStarting(false);
       }
     },
-    [activeVehicle, refresh, showToast, starting]
+    [activeVehicle, refresh, showToast, starting, user]
   );
 
   const goFreeTrack = () => {
@@ -924,6 +924,23 @@ export default function MapsScreen() {
             ) : null}
           </View>
         </View>
+        <Pressable
+          onPress={() => {
+            void (async () => {
+              const u = (await refreshLoc()) || user;
+              if (!u) {
+                showToast('Position indisponible — autorisez le GPS.');
+                return;
+              }
+              mapRef.current?.setCenter?.(u.latitude, u.longitude, 16);
+            })();
+          }}
+          style={[styles.locateFab, { backgroundColor: colors.card, borderColor: colors.border }]}
+          accessibilityLabel="Recentrer sur ma position"
+          accessibilityRole="button"
+        >
+          <Ionicons name="locate" size={22} color={colors.accent} />
+        </Pressable>
       </View>
 
       <TutorialAnchor id="maps-search">
@@ -1185,6 +1202,22 @@ export default function MapsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   mapWrap: { flex: 1, minHeight: 220 },
+  locateFab: {
+    position: 'absolute',
+    right: 14,
+    bottom: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
   routePicker: {
     position: 'absolute',
     left: 8,

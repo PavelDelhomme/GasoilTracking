@@ -33,7 +33,11 @@ import {
   formatRelativeDay,
   previousMonthKey,
 } from '@/lib/dates';
-import { shareMonthlyFuelCsv } from '@/lib/exportMonthlyFuel';
+import {
+  exportFillUpsCsvFile,
+  exportFillUpsPdfFile,
+  exportScopeLabel,
+} from '@/lib/exportMonthlyFuel';
 import { ProgressBar } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { notify } from '@/lib/notify';
@@ -169,18 +173,44 @@ export default function FillUpsScreen() {
     );
   }, [allFillUps, compareMonth, selectedMonth, activeVehicle?.fuelType]);
 
+  const exportPeriod = selectedMonth;
+  const exportHint = exportScopeLabel(exportPeriod, effectiveVehicleFilter, vehicles);
+
   const exportCsv = async () => {
-    const month = selectedMonth === 'all' ? currentMonthKey() : selectedMonth;
     try {
-      const mode = await shareMonthlyFuelCsv(allFillUps, vehicles, month);
+      const mode = await exportFillUpsCsvFile(
+        allFillUps,
+        vehicles,
+        exportPeriod,
+        effectiveVehicleFilter
+      );
       notify(
-        'Export CSV',
-        mode === 'copied'
-          ? `Pleins ${formatMonthLabel(month)} copiés dans le presse-papiers.`
-          : `Pleins ${formatMonthLabel(month)} prêts à partager.`
+        'Fichier CSV',
+        mode === 'downloaded'
+          ? `Téléchargé : récap ${exportHint}.`
+          : `Fichier CSV prêt à enregistrer (${exportHint}).`
       );
     } catch (e) {
-      notify('Export', e instanceof Error ? e.message : 'Échec de l’export');
+      notify('Export CSV', e instanceof Error ? e.message : 'Échec de l’export');
+    }
+  };
+
+  const exportPdf = async () => {
+    try {
+      const mode = await exportFillUpsPdfFile(
+        allFillUps,
+        vehicles,
+        exportPeriod,
+        effectiveVehicleFilter
+      );
+      notify(
+        'Fichier PDF',
+        mode === 'downloaded'
+          ? `Téléchargé : récap ${exportHint}.`
+          : `Fichier PDF prêt à enregistrer (${exportHint}).`
+      );
+    } catch (e) {
+      notify('Export PDF', e instanceof Error ? e.message : 'Échec de l’export');
     }
   };
 
@@ -346,26 +376,50 @@ export default function FillUpsScreen() {
                 {formatEuro(periodStats.totalCost)}
               </Text>
             </View>
-            <Pressable
-              onPress={() => void exportCsv()}
-              accessibilityRole="button"
-              accessibilityLabel="Exporter CSV du mois"
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 4,
-                paddingVertical: 8,
-                paddingHorizontal: 10,
-                borderRadius: 10,
-                borderWidth: 1,
-                borderColor: colors.border,
-                backgroundColor: colors.background,
-              }}
-            >
-              <Ionicons name="download-outline" size={16} color={colors.accent} />
-              <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 12 }}>CSV</Text>
-            </Pressable>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end' }}>
+              <Pressable
+                onPress={() => void exportCsv()}
+                accessibilityRole="button"
+                accessibilityLabel={`Télécharger le CSV pour ${exportHint}`}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingVertical: 8,
+                  paddingHorizontal: 10,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  backgroundColor: colors.background,
+                }}
+              >
+                <Ionicons name="download-outline" size={16} color={colors.accent} />
+                <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 12 }}>CSV</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void exportPdf()}
+                accessibilityRole="button"
+                accessibilityLabel={`Télécharger le PDF pour ${exportHint}`}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingVertical: 8,
+                  paddingHorizontal: 10,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  backgroundColor: colors.background,
+                }}
+              >
+                <Ionicons name="document-text-outline" size={16} color={colors.accent} />
+                <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 12 }}>PDF</Text>
+              </Pressable>
+            </View>
           </View>
+          <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 6, lineHeight: 16 }}>
+            Export {exportHint}. CSV et PDF = fichiers (tous les véhicules ou le véhicule choisi).
+          </Text>
           {monthBudgetHint && (
             <View style={{ marginTop: 8 }}>
               <Text

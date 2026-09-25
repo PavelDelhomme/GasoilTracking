@@ -64,8 +64,7 @@ import {
   clearLiveTripBuffer,
   readLiveTripBuffer,
 } from '@/lib/liveTripBuffer';
-import { buildViaWaypoints, launchGoogleMapsNavigation } from '@/lib/mapsNavigation';
-import { openHuberaMapsForTrip } from '@/lib/huberaMaps';
+import { buildViaWaypoints, launchGoogleMapsNavigation, openGoogleMapsHere } from '@/lib/mapsNavigation';
 import {
   appendRoutePoint,
   calculateRouteDistance,
@@ -1266,18 +1265,12 @@ export default function TripScreen() {
     try {
       await new Promise((r) => setTimeout(r, 400));
       const tripIdForMaps = (await getActiveTripLite())?.id;
-      if (effectiveMode === 'free' && tripIdForMaps) {
-        const opened = await openHuberaMapsForTrip({
-          tripId: tripIdForMaps,
-          vehicleId: activeVehicle.id,
-          mode: 'free',
-          fromLat: mapsOrigin?.latitude,
-          fromLon: mapsOrigin?.longitude,
-        });
+      if (effectiveMode === 'free') {
+        const opened = await openGoogleMapsHere(mapsOrigin || userLocation || undefined);
         if (!opened) {
           notify(
-            'Hubera Maps',
-            'App Maps absente — le suivi GPS continue dans Fuel.'
+            'Google Maps',
+            'Impossible d’ouvrir Google Maps — le suivi GPS continue dans Fuel.'
           );
         }
       } else if (effectiveMode === 'nav' && mapsLabel && mapsDest) {
@@ -1287,36 +1280,23 @@ export default function TripScreen() {
           longitude: mapsDest.longitude,
         }).then(() => getRecentDestinations(6).then(setRecentDests));
 
-        const openedHubera = tripIdForMaps
-          ? await openHuberaMapsForTrip({
-              tripId: tripIdForMaps,
-              vehicleId: activeVehicle.id,
-              mode: 'nav',
-              toLat: mapsDest.latitude,
-              toLon: mapsDest.longitude,
-              label: mapsLabel,
-              fromLat: mapsOrigin?.latitude,
-              fromLon: mapsOrigin?.longitude,
-            })
-          : false;
-        if (!openedHubera) {
-          const routeVias = mapsWaypointsForRoute(routeForNav);
-          const waypoints = [
-            ...(stationViaLocal ? [stationViaLocal] : []),
-            ...routeVias,
-          ];
-          const opened = await launchGoogleMapsNavigation({
-            destination: mapsDest,
-            origin: mapsOrigin,
-            waypoints,
-            label: mapsLabel,
-          });
-          if (!opened) {
-            notify(
-              'Navigation',
-              'Impossible d’ouvrir Maps. Le suivi GPS continue dans l’app.'
-            );
-          }
+        const routeVias = mapsWaypointsForRoute(routeForNav);
+        const waypoints = [
+          ...(stationViaLocal ? [stationViaLocal] : []),
+          ...routeVias,
+        ];
+        const opened = await launchGoogleMapsNavigation({
+          destination: mapsDest,
+          origin: mapsOrigin,
+          waypoints,
+          label: mapsLabel,
+          preferGoogle: true,
+        });
+        if (!opened) {
+          notify(
+            'Navigation',
+            'Impossible d’ouvrir Google Maps. Le suivi GPS continue dans l’app.'
+          );
         }
         setFuelStopVia(null);
       }
@@ -2010,10 +1990,13 @@ export default function TripScreen() {
     const coordsForNav = inFree ? null : destCoords;
 
     if (inFree || (!coordsForNav && !label)) {
-      notify(
-        'Suivi libre',
-        'Pas de destination : le suivi GPS reste dans l’app. Choisissez « Avec destination » pour ouvrir un itinéraire Maps.'
-      );
+      const openedHere = await openGoogleMapsHere(userLocation || undefined);
+      if (!openedHere) {
+        notify(
+          'Google Maps',
+          'Impossible d’ouvrir Google Maps. Le suivi GPS reste dans l’app.'
+        );
+      }
       return;
     }
 
@@ -3424,9 +3407,9 @@ export default function TripScreen() {
                   : [
                       {
                         key: 'maps-hub',
-                        label: 'Hub Maps',
+                        label: 'Google Maps',
                         icon: 'map' as const,
-                        onPress: () => router.push('/(tabs)/maps' as never),
+                        onPress: () => void handleOpenGoogleMaps(),
                       },
                     ]),
                 {

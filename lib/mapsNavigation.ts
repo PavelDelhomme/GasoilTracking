@@ -13,7 +13,6 @@ import {
   fmtLatLng,
   type MapsLatLng,
 } from '@/lib/mapsUrl';
-import { openHuberaMapsNavigate } from '@/lib/huberaMaps';
 
 export type { MapsLatLng };
 export type MapsAppChoice = 'google' | 'apple';
@@ -210,6 +209,24 @@ async function openAppleMaps(opts: {
   );
 }
 
+export async function openGoogleMapsHere(opts?: {
+  latitude?: number;
+  longitude?: number;
+}): Promise<boolean> {
+  const lat = opts?.latitude;
+  const lon = opts?.longitude;
+  const hasFix =
+    lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon);
+  if (Platform.OS === 'android') {
+    if (hasFix && (await tryOpen(`geo:${lat},${lon}?q=${lat},${lon}`))) return true;
+    if (await tryOpen('geo:0,0?q=')) return true;
+  }
+  if (hasFix) {
+    return tryOpen(`https://www.google.com/maps/@${lat},${lon},17z`);
+  }
+  return tryOpen('https://www.google.com/maps');
+}
+
 export async function launchGoogleMapsNavigation(opts: {
   destination: MapsLatLng;
   origin?: MapsLatLng | null;
@@ -217,20 +234,9 @@ export async function launchGoogleMapsNavigation(opts: {
   label?: string;
   preferGoogle?: boolean;
 }): Promise<boolean> {
-  if (!opts.preferGoogle) {
-    const hubera = await openHuberaMapsNavigate({
-      mode: 'nav',
-      toLat: opts.destination.latitude,
-      toLon: opts.destination.longitude,
-      label: opts.label,
-      fromLat: opts.origin?.latitude,
-      fromLon: opts.origin?.longitude,
-    });
-    if (hubera) return true;
-  }
   const wps = opts.waypoints || [];
   const app =
-    opts.preferGoogle || wps.length > 0
+    opts.preferGoogle || wps.length > 0 || Platform.OS === 'android'
       ? 'google'
       : await resolveMapsApp();
   if (app === 'apple' && Platform.OS === 'ios') {
