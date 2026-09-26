@@ -538,10 +538,9 @@ export default function TripScreen() {
     })();
   }, []);
 
-  /** Panneau maxspeed OSM (Overpass) pendant un trajet actif. */
+  /** Panneau maxspeed OSM (Overpass) dès qu'on a une position GPS (trajet ou pas). */
   useEffect(() => {
-    if (!activeTrip || !userLocation) {
-      if (!activeTrip) setLiveSpeedLimit(null);
+    if (!userLocation) {
       return;
     }
     let cancelled = false;
@@ -550,7 +549,9 @@ export default function TripScreen() {
       if (!cancelled && info) setLiveSpeedLimit(info);
     };
     void run();
-    const id = setInterval(() => void run(), 18_000);
+    // Pendant un trajet actif, refresh plus fréquent (18s) ; sinon 30s
+    const interval = activeTrip ? 18_000 : 30_000;
+    const id = setInterval(() => void run(), interval);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -2572,9 +2573,10 @@ export default function TripScreen() {
                 color="#fff"
               />
             </Pressable>
-            {activeTrip ? (
+            {/* HUD limite vitesse + carburant : visible dès qu'on a une position (trajet ou pas) */}
+            {(activeTrip || (userLocation && liveSpeedLimit)) ? (
               <View style={styles.mapTopHud} pointerEvents="box-none">
-                {isFreeDrive ? (
+                {(isFreeDrive || !activeTrip) ? (
                   <View style={styles.mapHudRow}>
                     {liveSpeedLimit ? (
                       <View
