@@ -1867,6 +1867,210 @@ app.get('/api/maps/stats', auth, (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HuberaID — Authentification centralisée cross-apps
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Table pour les sessions device HuberaID
+db.exec(`
+  CREATE TABLE IF NOT EXISTS hubera_device_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    token_hash TEXT NOT NULL,
+    source_app TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    expires_at TEXT,
+    last_used_at TEXT,
+    user_agent TEXT,
+    UNIQUE(device_id)
+  )
+`);
+
+/**
+ * Enregistre une session device HuberaID.
+ * Appelé quand un utilisateur se connecte sur une app Hubera.
+ * POST /api/hubera-id/session
+ */
+app.post('/api/hubera-id/session', auth, (req, res) => {
+  const { deviceId, sourceApp } = req.body;
+  
+  if (!deviceId || typeof deviceId !== 'string' || deviceId.length < 10) {
+    return res.status(400).json({ error: 'deviceId invalide' });
+  }
+  
+  const validApps = ['fuel', 'maps', 'music', 'drive', 'photos', 'notes', 'calendar'];
+  if (!sourceApp || !validApps.includes(sourceApp)) {
+    return res.status(400).json({ error: 'sourceApp invalide' });
+  }
+  
+  const token = req.headers.authorization?.replace('Bearer ', '') || '';
+  const tokenHash = require('crypto').createHash('sha256').update(token).digest('hex').slice(0, 32);
+  const userAgent = req.headers['user-agent'] || '';
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 jours
+  
+  try {
+    db.prepare(`
+      INSERT INTO hubera_device_sessions (device_id, user_id, token_hash, source_app, expires_at, last_used_at, user_agent)
+      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+      ON CONFLICT(device_id) DO UPDATE SET
+        user_id = excluded.user_id,
+        token_hash = excluded.token_hash,
+        source_app = excluded.source_app,
+        expires_at = excluded.expires_at,
+        last_used_at = CURRENT_TIMESTAMP,
+        user_agent = excluded.user_agent
+    `).run(deviceId, req.user.sub, tokenHash, sourceApp, expiresAt, userAgent);
+    
+    console.log('[HuberaID] Session registered for device', deviceId, 'user', req.user.sub, 'from', sourceApp);
+    res.json({ ok: true, expiresAt });
+  } catch (e) {
+    console.error('[HuberaID] Failed to register session:', e.message);
+    res.status(500).json({ error: 'Erreur enregistrement session' });
+  }
+});
+
+/**
+ * Vérifie si une session existe pour ce device.
+ * Appelé par une app Hubera au démarrage pour voir si l'utilisateur est déjà connecté ailleurs.
+ * GET /api/hubera-id/session?deviceId=xxx
+ */
+app.get('/api/hubera-id/session', (req, res) => {
+  const { deviceId } = req.query;
+  
+  if (!deviceId || typeof deviceId !== 'string' || deviceId.length < 10) {
+    return res.status(400).json({ error: 'deviceId invalide' });
+  }
+  
+  const row = db.prepare(`
+    SELECT hds.*, u.email, u.name, u.is_manager
+    FROM hubera_device_sessions hds
+    JOIN users u ON u.id = hds.user_id
+    WHERE hds.device_id = ? AND (hds.expires_at IS NULL OR hds.expires_at > datetime('now'))
+  `).get(deviceId);
+  
+  if (!row) {
+    return res.json({ hasSession: false });
+  }
+  
+  res.json({
+    hasSession: true,
+    account: {
+      id: String(row.user_id),
+      email: row.email,
+      name: row.name,
+      isManager: !!row.is_manager,
+    },
+    sourceApp: row.source_app,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  });
+});
+
+/**
+ * Réclame la session HuberaID pour cette app.
+ * Génère un nouveau token pour l'app appelante, validé par le deviceId.
+ * POST /api/hubera-id/claim
+ */
+app.post('/api/hubera-id/claim', authLimiter, (req, res) => {
+  const { deviceId, targetApp } = req.body;
+  
+  if (!deviceId || typeof deviceId !== 'string' || deviceId.length < 10) {
+    return res.status(400).json({ error: 'deviceId invalide' });
+  }
+  
+  const validApps = ['fuel', 'maps', 'music', 'drive', 'photos', 'notes', 'calendar'];
+  if (!targetApp || !validApps.includes(targetApp)) {
+    return res.status(400).json({ error: 'targetApp invalide' });
+  }
+  
+  // Vérifier qu'une session existe pour ce device
+  const session = db.prepare(`
+    SELECT hds.*, u.email, u.name, u.is_manager
+    FROM hubera_device_sessions hds
+    JOIN users u ON u.id = hds.user_id
+    WHERE hds.device_id = ? AND (hds.expires_at IS NULL OR hds.expires_at > datetime('now'))
+  `).get(deviceId);
+  
+  if (!session) {
+    return res.status(404).json({ error: 'Aucune session HuberaID pour ce device' });
+  }
+  
+  // Générer un nouveau token pour cette app
+  const payload = {
+    sub: session.user_id,
+    email: session.email,
+    name: session.name,
+    isManager: !!session.is_manager,
+    app: targetApp,
+    huberaId: true, // Marqueur session HuberaID
+  };
+  
+  const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+  const refreshToken = jwt.sign({ sub: session.user_id, type: 'refresh', app: targetApp }, JWT_SECRET, { expiresIn: '30d' });
+  
+  // Mettre à jour last_used_at
+  db.prepare('UPDATE hubera_device_sessions SET last_used_at = CURRENT_TIMESTAMP WHERE device_id = ?').run(deviceId);
+  
+  console.log('[HuberaID] Session claimed for', targetApp, 'by user', session.user_id);
+  
+  res.json({
+    ok: true,
+    token: accessToken,
+    refreshToken,
+    user: {
+      id: String(session.user_id),
+      email: session.email,
+      name: session.name,
+      isManager: !!session.is_manager,
+    },
+    sourceApp: session.source_app,
+  });
+});
+
+/**
+ * Supprime la session HuberaID (déconnexion globale).
+ * DELETE /api/hubera-id/session
+ */
+app.delete('/api/hubera-id/session', auth, (req, res) => {
+  const { deviceId, allDevices } = req.body;
+  
+  if (allDevices) {
+    // Déconnexion de tous les appareils
+    db.prepare('DELETE FROM hubera_device_sessions WHERE user_id = ?').run(req.user.sub);
+    console.log('[HuberaID] All sessions deleted for user', req.user.sub);
+  } else if (deviceId) {
+    // Déconnexion de cet appareil uniquement
+    db.prepare('DELETE FROM hubera_device_sessions WHERE device_id = ? AND user_id = ?').run(deviceId, req.user.sub);
+    console.log('[HuberaID] Session deleted for device', deviceId);
+  }
+  
+  res.json({ ok: true });
+});
+
+/**
+ * Liste les sessions actives de l'utilisateur (pour la page compte).
+ * GET /api/hubera-id/sessions
+ */
+app.get('/api/hubera-id/sessions', auth, (req, res) => {
+  const rows = db.prepare(`
+    SELECT device_id, source_app, created_at, last_used_at, user_agent
+    FROM hubera_device_sessions
+    WHERE user_id = ? AND (expires_at IS NULL OR expires_at > datetime('now'))
+    ORDER BY last_used_at DESC
+  `).all(req.user.sub);
+  
+  res.json({
+    sessions: rows.map(r => ({
+      deviceId: r.device_id,
+      sourceApp: r.source_app,
+      createdAt: r.created_at,
+      lastUsedAt: r.last_used_at,
+      userAgent: r.user_agent,
+    })),
+  });
+});
+
 const upload = multer({
   dest: path.join(DATA_DIR, 'apks'),
   limits: { fileSize: 120 * 1024 * 1024 },

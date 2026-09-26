@@ -11,19 +11,24 @@ import {
   setSession,
   type AuthUser,
 } from '@/lib/api';
-
-// Scheme Hubera Fuel pour demander la session
-const FUEL_SCHEME = 'gasoiltracking';
-const MAPS_SCHEME = 'hubera-maps';
+import {
+  checkHuberaIdSession,
+  claimHuberaIdSession,
+  parseSessionFromDeepLink,
+  requestSessionViaDeepLink,
+  getAppName,
+  type HuberaAccount,
+} from '@/lib/huberaId';
 
 type AuthContextType = {
   user: AuthUser | null;
   loading: boolean;
-  requestingFromFuel: boolean;
+  huberaIdAccount: HuberaAccount | null; // Compte détecté via HuberaID
+  huberaIdSourceApp: string | null; // App source (fuel, etc.)
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshMe: () => Promise<void>;
-  requestSessionFromFuel: () => Promise<boolean>;
+  connectWithHuberaId: () => Promise<boolean>; // Se connecter avec le compte HuberaID détecté
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -31,98 +36,27 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const [requestingFromFuel, setRequestingFromFuel] = useState(false);
-  const sessionRequestSent = useRef(false);
+  const [huberaIdAccount, setHuberaIdAccount] = useState<HuberaAccount | null>(null);
+  const [huberaIdSourceApp, setHuberaIdSourceApp] = useState<string | null>(null);
+  const huberaIdChecked = useRef(false);
 
-  const applySharedSession = useCallback(async (
+  const applySession = useCallback(async (
     token: string,
     refreshToken: string | null | undefined,
-    sharedUser: { id: string; email: string; name: string; isManager?: boolean }
+    account: HuberaAccount
   ) => {
     const authUser: AuthUser = {
-      id: Number(sharedUser.id),
-      email: sharedUser.email,
-      name: sharedUser.name,
-      isManager: sharedUser.isManager,
+      id: Number(account.id),
+      email: account.email,
+      name: account.name,
+      isManager: account.isManager,
     };
     await setSession(token, authUser, refreshToken);
     setUser(authUser);
-    console.log('[auth] Session applied from Hubera Fuel');
-  }, []);
-
-  const handleIncomingUrl = useCallback(async (url: string) => {
-    console.log('[auth] Incoming URL:', url);
-    
-    try {
-      const parsed = Linking.parse(url);
-      
-      // Vérifier si c'est une réponse de session de Fuel
-      if (parsed.path === 'auth/receive' || parsed.hostname === 'auth' && parsed.path === '/receive') {
-        setRequestingFromFuel(false);
-        
-        // Vérifier s'il y a une erreur
-        if (parsed.queryParams?.error) {
-          console.log('[auth] Fuel returned error:', parsed.queryParams.error);
-          setLoading(false);
-          return;
-        }
-        
-        // Parser la session
-        const sessionParam = parsed.queryParams?.session;
-        if (sessionParam && typeof sessionParam === 'string') {
-          try {
-            const session = JSON.parse(decodeURIComponent(sessionParam));
-            
-            // Vérifier le timestamp (5 minutes max)
-            if (Date.now() - session.timestamp > 5 * 60 * 1000) {
-              console.warn('[auth] Session transfer expired');
-              setLoading(false);
-              return;
-            }
-            
-            await applySharedSession(session.token, session.refreshToken, session.user);
-            setLoading(false);
-            return;
-          } catch (e) {
-            console.error('[auth] Failed to parse session:', e);
-          }
-        }
-      }
-    } catch (e) {
-      console.error('[auth] Error handling URL:', e);
-    }
-    
-    setLoading(false);
-  }, [applySharedSession]);
-
-  const requestSessionFromFuel = useCallback(async (): Promise<boolean> => {
-    if (Platform.OS === 'web') return false;
-    
-    try {
-      // Vérifier si Fuel est installé
-      const canOpen = await Linking.canOpenURL(`${FUEL_SCHEME}://`);
-      if (!canOpen) {
-        console.log('[auth] Hubera Fuel not installed');
-        return false;
-      }
-      
-      setRequestingFromFuel(true);
-      sessionRequestSent.current = true;
-      
-      // Construire l'URL de demande
-      const callback = encodeURIComponent(`${MAPS_SCHEME}://auth/receive`);
-      const requestUrl = `${FUEL_SCHEME}://auth/share?callback=${callback}&ts=${Date.now()}`;
-      
-      console.log('[auth] Requesting session from Fuel:', requestUrl);
-      await Linking.openURL(requestUrl);
-      
-      return true;
-    } catch (e) {
-      console.error('[auth] Failed to request session:', e);
-      setRequestingFromFuel(false);
-      return false;
-    }
-  }, []);
+    setHuberaIdAccount(null); // Effacer le compte détecté une fois connecté
+    setHuberaIdSourceApp(null);
+    console.log('[HuberaID] Session applied from', huberaIdSourceApp || 'unknown');
+  }, [huberaIdSourceApp]);
 
   const refreshMe = useCallback(async () => {
     const token = await getToken();
@@ -135,7 +69,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Initialisation : vérifier session locale ou demander à Fuel
+  /**
+   * Se connecter avec le compte HuberaID détecté (sans email/password).
+   */
+  const connectWithHuberaId = useCallback(async (): Promise<boolean> => {
+    if (!huberaIdAccount) {
+      console.log('[HuberaID] No account to connect with');
+      return false;
+    }
+
+    console.log('[HuberaID] Claiming session for account:', huberaIdAccount.email);
+    
+    const result = await claimHuberaIdSession();
+    
+    if (!result.ok || !result.token || !result.user) {
+      console.error('[HuberaID] Failed to claim session:', result.error);
+      return false;
+    }
+
+    await applySession(result.token, result.refreshToken, result.user);
+    return true;
+  }, [huberaIdAccount, applySession]);
+
+  // Initialisation : vérifier session locale puis HuberaID
   useEffect(() => {
     (async () => {
       // D'abord vérifier si on a déjà une session locale
@@ -153,78 +109,90 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       
-      // Pas de session locale : essayer de récupérer depuis Fuel
-      if (Platform.OS !== 'web' && !sessionRequestSent.current) {
-        const requested = await requestSessionFromFuel();
-        if (requested) {
-          // Attendre la réponse via deep link (timeout après 10s)
-          setTimeout(() => {
-            if (loading) {
-              console.log('[auth] Timeout waiting for Fuel response');
-              setRequestingFromFuel(false);
-              setLoading(false);
-            }
-          }, 10000);
-          return;
+      // Pas de session locale : vérifier HuberaID sur le serveur
+      if (Platform.OS !== 'web' && !huberaIdChecked.current) {
+        huberaIdChecked.current = true;
+        
+        console.log('[HuberaID] Checking for existing session...');
+        const check = await checkHuberaIdSession();
+        
+        if (check.hasSession && check.account) {
+          console.log('[HuberaID] Found session from', check.sourceApp, ':', check.account.email);
+          setHuberaIdAccount(check.account);
+          setHuberaIdSourceApp(check.sourceApp || null);
+        } else {
+          console.log('[HuberaID] No existing session found');
         }
       }
       
       setLoading(false);
     })();
-  }, [refreshMe, requestSessionFromFuel]);
+  }, [refreshMe]);
 
-  // Écouter les deep links
+  // Écouter les deep links pour les réponses HuberaID
   useEffect(() => {
-    // URL initiale (app ouverte via deep link)
+    const handleUrl = async (url: string) => {
+      console.log('[HuberaID] Incoming URL:', url);
+      
+      // Vérifier si c'est une réponse HuberaID
+      const parsed = Linking.parse(url);
+      const isHuberaIdResponse = 
+        parsed.path === 'hubera-id/receive' || 
+        parsed.path === 'auth/receive' ||
+        (parsed.hostname === 'hubera-id' && parsed.path === '/receive');
+      
+      if (!isHuberaIdResponse) return;
+      
+      // Vérifier les erreurs
+      if (parsed.queryParams?.error) {
+        console.log('[HuberaID] Error from source app:', parsed.queryParams.error);
+        return;
+      }
+      
+      // Parser la session
+      const session = parseSessionFromDeepLink(url);
+      if (session) {
+        await applySession(session.token, session.refreshToken, session.account);
+      }
+    };
+    
+    // URL initiale
     Linking.getInitialURL().then((url) => {
-      if (url) handleIncomingUrl(url);
+      if (url) handleUrl(url);
     });
     
     // Deep links pendant que l'app est ouverte
     const subscription = Linking.addEventListener('url', ({ url }) => {
-      handleIncomingUrl(url);
+      handleUrl(url);
     });
     
     return () => subscription.remove();
-  }, [handleIncomingUrl]);
-
-  // Quand l'app revient au premier plan après demande à Fuel
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && requestingFromFuel) {
-        // L'app est revenue au premier plan, attendre un peu pour le deep link
-        setTimeout(() => {
-          if (requestingFromFuel) {
-            console.log('[auth] App returned but no session received');
-            setRequestingFromFuel(false);
-            setLoading(false);
-          }
-        }, 2000);
-      }
-    });
-    
-    return () => subscription.remove();
-  }, [requestingFromFuel]);
+  }, [applySession]);
 
   const login = useCallback(async (email: string, password: string) => {
     const { user: loggedUser } = await apiLogin(email, password);
     setUser(loggedUser);
+    setHuberaIdAccount(null);
+    setHuberaIdSourceApp(null);
   }, []);
 
   const logout = useCallback(async () => {
     await apiLogout();
     setUser(null);
+    // Re-vérifier HuberaID au cas où il y aurait un autre compte
+    huberaIdChecked.current = false;
   }, []);
 
   return (
     <AuthContext.Provider value={{ 
       user, 
       loading, 
-      requestingFromFuel,
+      huberaIdAccount,
+      huberaIdSourceApp,
       login, 
       logout, 
       refreshMe,
-      requestSessionFromFuel,
+      connectWithHuberaId,
     }}>
       {children}
     </AuthContext.Provider>
