@@ -2574,7 +2574,7 @@ export default function TripScreen() {
               />
             </Pressable>
             {/* HUD limite vitesse + carburant : visible dès qu'on a une position (trajet ou pas) */}
-            {(activeTrip || (userLocation && liveSpeedLimit)) ? (
+            {(activeTrip || userLocation) ? (
               <View style={styles.mapTopHud} pointerEvents="box-none">
                 {(isFreeDrive || !activeTrip) ? (
                   <View style={styles.mapHudRow}>
@@ -2586,7 +2586,7 @@ export default function TripScreen() {
                         <Text style={styles.speedLimitValue}>{liveSpeedLimit.limitKmh}</Text>
                       </View>
                     ) : null}
-                    {liveFuelRemaining != null ? (
+                    {activeTrip && liveFuelRemaining != null ? (
                       <View
                         style={[
                           styles.fuelHudChip,
