@@ -123,11 +123,21 @@ async function refreshSession(): Promise<boolean> {
   refreshInFlight = (async () => {
     const refreshToken = await getRefreshToken();
     if (!refreshToken) return false;
+    
+    // Récupérer le deviceId HuberaID pour maintenir la session cross-apps
+    let deviceId: string | undefined;
+    try {
+      const huberaId = await import('@/lib/huberaId');
+      deviceId = await huberaId.getHuberaDeviceId();
+    } catch {
+      // Ignore si module non dispo
+    }
+    
     try {
       const res = await fetch(`${getApiUrl()}/api/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken }),
+        body: JSON.stringify({ refreshToken, deviceId, sourceApp: 'fuel' }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -268,10 +278,24 @@ export function deleteAccount(password: string, confirm = 'SUPPRIMER') {
   }) as Promise<{ ok: boolean; message: string }>;
 }
 
-export async function login(email: string, password: string) {
+export async function login(email: string, password: string, sourceApp: string = 'fuel') {
+  // Récupérer le deviceId HuberaID pour l'enregistrement automatique
+  const { getHuberaDeviceId } = await import('@/lib/huberaId');
+  let deviceId: string | undefined;
+  try {
+    deviceId = await getHuberaDeviceId();
+  } catch {
+    // Ignore si HuberaID non disponible (web, etc.)
+  }
+  
   const data = await request('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ 
+      email, 
+      password,
+      deviceId,
+      sourceApp,
+    }),
   });
   await setSession(data.token, data.user, data.refreshToken);
   return data;

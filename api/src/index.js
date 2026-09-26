@@ -231,9 +231,36 @@ function revokeRefreshFamily(userId) {
   ).run(new Date().toISOString(), userId);
 }
 
-function createSession(user, meta = {}) {
+function createSession(user, meta = {}, options = {}) {
   const token = issueAccessToken(user);
   const { refreshToken, refreshExpiresAt } = issueRefreshToken(user.id, meta);
+  
+  // Enregistrer automatiquement la session HuberaID si deviceId fourni
+  const { deviceId, sourceApp } = options;
+  if (deviceId && typeof deviceId === 'string' && deviceId.length >= 10) {
+    try {
+      const tokenHash = require('crypto').createHash('sha256').update(token).digest('hex').slice(0, 32);
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const app = sourceApp || 'fuel';
+      
+      db.prepare(`
+        INSERT INTO hubera_device_sessions (device_id, user_id, token_hash, source_app, expires_at, last_used_at, user_agent)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+        ON CONFLICT(device_id) DO UPDATE SET
+          user_id = excluded.user_id,
+          token_hash = excluded.token_hash,
+          source_app = excluded.source_app,
+          expires_at = excluded.expires_at,
+          last_used_at = CURRENT_TIMESTAMP,
+          user_agent = excluded.user_agent
+      `).run(deviceId, user.id, tokenHash, app, expiresAt, meta.userAgent || '');
+      
+      console.log('[HuberaID] Auto-registered session for device', deviceId, 'user', user.id, 'app', app);
+    } catch (e) {
+      console.warn('[HuberaID] Failed to auto-register:', e.message);
+    }
+  }
+  
   return {
     token,
     refreshToken,
@@ -1096,7 +1123,12 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
   if (user.email_verified === 0) {
     return res.status(403).json({ error: 'Email non vérifié. Consultez votre boîte mail.' });
   }
-  res.json(createSession(user, sessionMeta(req)));
+  
+  // HuberaID : enregistrer automatiquement la session si deviceId fourni
+  const deviceId = req.body?.deviceId || req.body?.huberaDeviceId;
+  const sourceApp = req.body?.sourceApp || req.body?.app || 'fuel';
+  
+  res.json(createSession(user, sessionMeta(req), { deviceId, sourceApp }));
 });
 
 const QR_LOGIN_TTL_MS = 2 * 60 * 1000;
@@ -1317,8 +1349,34 @@ app.post('/api/auth/refresh', authLimiter, (req, res) => {
     row.id
   );
 
+  const newToken = issueAccessToken(user);
+  
+  // HuberaID : mettre à jour la session si deviceId fourni
+  const deviceId = req.body?.deviceId || req.body?.huberaDeviceId;
+  const sourceApp = req.body?.sourceApp || req.body?.app;
+  if (deviceId && typeof deviceId === 'string' && deviceId.length >= 10) {
+    try {
+      const tokenHash = require('crypto').createHash('sha256').update(newToken).digest('hex').slice(0, 32);
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const app = sourceApp || 'fuel';
+      
+      db.prepare(`
+        INSERT INTO hubera_device_sessions (device_id, user_id, token_hash, source_app, expires_at, last_used_at, user_agent)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+        ON CONFLICT(device_id) DO UPDATE SET
+          user_id = excluded.user_id,
+          token_hash = excluded.token_hash,
+          source_app = COALESCE(excluded.source_app, source_app),
+          expires_at = excluded.expires_at,
+          last_used_at = CURRENT_TIMESTAMP
+      `).run(deviceId, user.id, tokenHash, app, expiresAt, sessionMeta(req).userAgent || '');
+    } catch (e) {
+      console.warn('[HuberaID] Failed to update on refresh:', e.message);
+    }
+  }
+
   res.json({
-    token: issueAccessToken(user),
+    token: newToken,
     refreshToken: next.refreshToken,
     expiresIn: ACCESS_TTL,
     refreshExpiresAt: next.refreshExpiresAt,
