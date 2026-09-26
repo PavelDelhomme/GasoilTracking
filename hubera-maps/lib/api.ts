@@ -23,7 +23,8 @@ export type Vehicle = {
   fuelType?: string;
   tankCapacity?: number;
   lastKnownKm?: number;
-  avgConsumption?: number;
+  consumptionPer100?: number;
+  avgConsumption?: number; // alias pour compatibilité
   licensePlate?: string;
   isDefault?: boolean;
 };
@@ -174,10 +175,19 @@ export async function login(
   email: string,
   password: string
 ): Promise<{ user: AuthUser; token: string; refreshToken?: string }> {
+  // Récupérer le deviceId HuberaID pour l'enregistrement automatique
+  const { getHuberaDeviceId } = await import('@/lib/huberaId');
+  let deviceId: string | undefined;
+  try {
+    deviceId = await getHuberaDeviceId();
+  } catch {
+    // Ignore
+  }
+  
   const res = await fetch(`${API_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, deviceId, sourceApp: 'maps' }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

@@ -33,7 +33,8 @@ const TRANSPORT_MODES: { id: TransportMode; icon: string; label: string }[] = [
 
 export default function MapScreen() {
   const { colors } = useTheme();
-  const { user } = useAuth();
+  const { user, loading: authLoading, huberaIdAccount, huberaIdSourceApp, connectWithHuberaId } = useAuth();
+  const [connectingHuberaId, setConnectingHuberaId] = useState(false);
 
   const [mode, setMode] = useState<TransportMode>('driving');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -130,21 +131,96 @@ export default function MapScreen() {
     setSearchQuery(place.name);
   };
 
+  // État de chargement auth
+  if (authLoading || connectingHuberaId) {
+    return (
+      <View style={[styles.container, styles.centerContent, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.accent} />
+        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+          {connectingHuberaId 
+            ? 'Connexion en cours...' 
+            : 'Vérification HuberaID...'}
+        </Text>
+      </View>
+    );
+  }
+
   if (!user) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.centerContent}>
           <Ionicons name="map" size={64} color={colors.textSecondary} />
           <Text style={[styles.title, { color: colors.text }]}>Hubera Maps</Text>
-          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-            Connectez-vous avec votre compte Hubera Fuel pour accéder à vos véhicules et trajets.
-          </Text>
-          <Pressable
-            style={[styles.primaryButton, { backgroundColor: colors.accent }]}
-            onPress={() => router.push('/auth')}
-          >
-            <Text style={styles.primaryButtonText}>Se connecter</Text>
-          </Pressable>
+          
+          {/* Compte HuberaID détecté */}
+          {huberaIdAccount ? (
+            <>
+              <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+                Compte Hubera détecté depuis {huberaIdSourceApp === 'fuel' ? 'Hubera Fuel' : huberaIdSourceApp}
+              </Text>
+              
+              {/* Carte du compte détecté */}
+              <View style={[styles.huberaIdCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View style={[styles.huberaIdAvatar, { backgroundColor: colors.accent }]}>
+                  <Text style={styles.huberaIdAvatarText}>
+                    {huberaIdAccount.name.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+                <View style={styles.huberaIdInfo}>
+                  <Text style={[styles.huberaIdName, { color: colors.text }]}>
+                    {huberaIdAccount.name}
+                  </Text>
+                  <Text style={[styles.huberaIdEmail, { color: colors.textSecondary }]}>
+                    {huberaIdAccount.email}
+                  </Text>
+                </View>
+              </View>
+              
+              {/* Bouton principal : continuer avec ce compte */}
+              <Pressable
+                style={[styles.primaryButton, { backgroundColor: colors.accent }]}
+                onPress={async () => {
+                  setConnectingHuberaId(true);
+                  const success = await connectWithHuberaId();
+                  if (!success) {
+                    setConnectingHuberaId(false);
+                  }
+                }}
+              >
+                <Ionicons name="checkmark-circle" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.primaryButtonText}>Continuer avec ce compte</Text>
+              </Pressable>
+              
+              {/* Bouton secondaire : utiliser un autre compte */}
+              <Pressable
+                style={[styles.secondaryButton, { borderColor: colors.border, marginTop: 12 }]}
+                onPress={() => router.push('/auth')}
+              >
+                <Text style={[styles.secondaryButtonText, { color: colors.text }]}>
+                  Utiliser un autre compte
+                </Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+                Connectez-vous avec votre compte Hubera pour accéder à vos véhicules et trajets.
+              </Text>
+              
+              {/* Bouton connexion */}
+              <Pressable
+                style={[styles.primaryButton, { backgroundColor: colors.accent }]}
+                onPress={() => router.push('/auth')}
+              >
+                <Ionicons name="log-in" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.primaryButtonText}>Se connecter</Text>
+              </Pressable>
+              
+              <Text style={[styles.hintText, { color: colors.textSecondary, marginTop: 16 }]}>
+                💡 Connectez-vous d'abord sur Hubera Fuel pour une connexion automatique
+              </Text>
+            </>
+          )}
         </View>
       </View>
     );
@@ -230,9 +306,9 @@ export default function MapScreen() {
                 <Text style={[styles.vehicleInfo, { color: colors.textSecondary }]}>
                   {v.brand} {v.model}
                 </Text>
-                {v.avgConsumption && (
+                {(v.consumptionPer100 || v.avgConsumption) && (
                   <Text style={[styles.vehicleConsumption, { color: colors.accent }]}>
-                    {v.avgConsumption.toFixed(1)} L/100
+                    {(v.consumptionPer100 || v.avgConsumption)?.toFixed(1)} L/100
                   </Text>
                 )}
               </Pressable>
@@ -340,8 +416,44 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, fontWeight: '800', marginTop: 16 },
   subtitle: { fontSize: 15, textAlign: 'center', marginTop: 8, marginBottom: 24, lineHeight: 22 },
   loadingText: { marginTop: 12, fontSize: 15 },
-  primaryButton: { paddingHorizontal: 32, paddingVertical: 14, borderRadius: 12 },
+  primaryButton: { 
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32, 
+    paddingVertical: 14, 
+    borderRadius: 12,
+  },
   primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  secondaryButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  secondaryButtonText: { fontSize: 14, fontWeight: '600' },
+  hintText: { fontSize: 13, textAlign: 'center', lineHeight: 18 },
+  huberaIdCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 20,
+    width: '100%',
+    maxWidth: 320,
+  },
+  huberaIdAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  huberaIdAvatarText: { color: '#fff', fontSize: 20, fontWeight: '700' },
+  huberaIdInfo: { marginLeft: 14, flex: 1 },
+  huberaIdName: { fontSize: 16, fontWeight: '700' },
+  huberaIdEmail: { fontSize: 13, marginTop: 2 },
   sectionTitle: { fontSize: 16, fontWeight: '700', marginBottom: 12, marginTop: 8 },
   modeRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
   modeButton: {

@@ -12,11 +12,13 @@ import {
   logoutRemote,
   register as apiRegister,
   setSession,
+  getApiUrl,
   type AuthUser,
   type PendingRegistrationSummary,
 } from '@/lib/api';
 import { applySnapshot, hasLocalUserData, normalizeSnapshot } from '@/lib/dataSnapshot';
 import { saveLocalBackup, refreshFromCloud, syncPreferNewer, forcePushLocalToCloud, type SyncPreferResult } from '@/lib/backup';
+import { getHuberaDeviceId, saveHuberaSession } from '@/lib/huberaId';
 
 type AuthContextType = {
   user: AuthUser | null;
@@ -41,6 +43,53 @@ type AuthContextType = {
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
+
+/**
+ * Enregistre la session sur le serveur HuberaID pour le partage cross-apps.
+ */
+async function registerHuberaIdSession(
+  token: string,
+  user: AuthUser,
+  refreshToken?: string | null
+): Promise<void> {
+  try {
+    const deviceId = await getHuberaDeviceId();
+    
+    // Enregistrer sur le serveur
+    const res = await fetch(`${getApiUrl()}/api/hubera-id/session`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        deviceId,
+        sourceApp: 'fuel',
+      }),
+    });
+    
+    if (!res.ok) {
+      console.warn('[HuberaID] Failed to register server session:', res.status);
+    } else {
+      console.log('[HuberaID] Server session registered');
+    }
+    
+    // Sauvegarder localement aussi (pour le deep linking fallback)
+    await saveHuberaSession({
+      account: {
+        id: String(user.id),
+        email: user.email,
+        name: user.name,
+        isManager: user.isManager,
+      },
+      token,
+      refreshToken,
+      sourceApp: 'fuel',
+    });
+  } catch (e) {
+    console.warn('[HuberaID] Failed to register session:', e);
+  }
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -227,6 +276,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const token = await getToken();
         const refresh = await getRefreshToken();
         if (token) await setSession(token, u, refresh);
+        
+        // Enregistrer la session HuberaID pour le partage cross-apps
+        if (token && Platform.OS !== 'web') {
+          registerHuberaIdSession(token, u, refresh).catch(() => {});
+        }
       }
     } catch {
       setPendingRegistrationsCount(0);
