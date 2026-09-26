@@ -20,6 +20,7 @@ import { RegisterServiceWorker } from '@/components/RegisterServiceWorker';
 import { OnboardingTutorial } from '@/components/OnboardingTutorial';
 import { TutorialProvider } from '@/context/TutorialContext';
 import { useApp } from '@/context/AppContext';
+import { useDeepLinkAuth } from '@/hooks/useDeepLinkAuth';
 
 function TutorialBridge({ children }: { children: React.ReactNode }) {
   const { refresh } = useApp();
@@ -29,6 +30,9 @@ function TutorialBridge({ children }: { children: React.ReactNode }) {
 function RootNavigation() {
   const { colors, scheme } = useTheme();
   const update = useAppUpdate();
+  
+  // Gérer les demandes de session des autres apps Hubera
+  useDeepLinkAuth();
 
   return (
     <>
