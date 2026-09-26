@@ -23,7 +23,8 @@ export type Vehicle = {
   fuelType?: string;
   tankCapacity?: number;
   lastKnownKm?: number;
-  avgConsumption?: number;
+  consumptionPer100?: number;
+  avgConsumption?: number; // alias pour compatibilité
   licensePlate?: string;
   isDefault?: boolean;
 };

@@ -230,9 +230,9 @@ export default function MapScreen() {
                 <Text style={[styles.vehicleInfo, { color: colors.textSecondary }]}>
                   {v.brand} {v.model}
                 </Text>
-                {v.avgConsumption && (
+                {(v.consumptionPer100 || v.avgConsumption) && (
                   <Text style={[styles.vehicleConsumption, { color: colors.accent }]}>
-                    {v.avgConsumption.toFixed(1)} L/100
+                    {(v.consumptionPer100 || v.avgConsumption)?.toFixed(1)} L/100
                   </Text>
                 )}
               </Pressable>
