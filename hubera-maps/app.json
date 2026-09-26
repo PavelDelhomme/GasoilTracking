@@ -1,0 +1,63 @@
+{
+  "expo": {
+    "name": "Hubera Maps",
+    "slug": "hubera-maps",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "hubera-maps",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a1a2e"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "cloud.hubera.maps",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Hubera Maps utilise votre position pour la navigation et le suivi de trajets.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Hubera Maps suit vos trajets en arrière-plan.",
+        "LSApplicationQueriesSchemes": [
+          "gasoiltracking",
+          "hubera-fuel"
+        ]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1a1a2e"
+      },
+      "package": "cloud.hubera.maps",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Hubera Maps suit vos trajets."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "fuelApiUrl": "https://fuel.hubera.cloud",
+      "router": {
+        "origin": false
+      }
+    }
+  }
+}

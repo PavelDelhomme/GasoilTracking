@@ -1560,6 +1560,313 @@ app.put('/api/sync', auth, syncLimiter, (req, res) => {
   res.json({ ok: true, updatedAt: now });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Hubera Maps API — endpoints pour l'app Maps externe
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Récupère les véhicules de l'utilisateur (pour sélection dans Maps). */
+app.get('/api/maps/vehicles', auth, (req, res) => {
+  const row = db.prepare('SELECT payload FROM sync_data WHERE user_id = ?').get(req.user.sub);
+  if (!row) return res.json({ vehicles: [] });
+  try {
+    const data = JSON.parse(row.payload);
+    const vehicles = (data.vehicles || []).map((v) => ({
+      id: v.id,
+      name: v.name,
+      brand: v.brand,
+      model: v.model,
+      year: v.year,
+      fuelType: v.fuelType,
+      tankCapacity: v.tankCapacity,
+      lastKnownKm: v.lastKnownKm,
+      avgConsumption: v.avgConsumption,
+      licensePlate: v.licensePlate,
+      isDefault: v.isDefault,
+    }));
+    res.json({ vehicles });
+  } catch {
+    res.status(500).json({ error: 'Données véhicules corrompues' });
+  }
+});
+
+/** Récupère l'historique des trajets (tous modes). */
+app.get('/api/maps/trips', auth, (req, res) => {
+  const row = db.prepare('SELECT payload FROM sync_data WHERE user_id = ?').get(req.user.sub);
+  if (!row) return res.json({ trips: [] });
+  try {
+    const data = JSON.parse(row.payload);
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const offset = Number(req.query.offset) || 0;
+    const mode = req.query.mode; // 'driving', 'walking', 'transit', ou undefined pour tous
+    
+    let trips = data.trips || [];
+    
+    // Filtre par mode si spécifié
+    if (mode) {
+      trips = trips.filter((t) => t.mode === mode || (!t.mode && mode === 'driving'));
+    }
+    
+    // Tri par date décroissante
+    trips.sort((a, b) => new Date(b.startTime || b.date || 0) - new Date(a.startTime || a.date || 0));
+    
+    // Pagination
+    const total = trips.length;
+    trips = trips.slice(offset, offset + limit);
+    
+    // Enrichit avec données véhicule si trajet voiture
+    const vehiclesById = Object.fromEntries((data.vehicles || []).map((v) => [v.id, v]));
+    
+    const enriched = trips.map((t) => {
+      const vehicle = t.vehicleId ? vehiclesById[t.vehicleId] : null;
+      return {
+        id: t.id,
+        mode: t.mode || 'driving',
+        startTime: t.startTime || t.date,
+        endTime: t.endTime,
+        startLocation: t.startLocation,
+        endLocation: t.endLocation || t.destinationName,
+        distance: t.distance,
+        duration: t.duration,
+        fuelUsed: t.fuelUsed,
+        avgSpeed: t.avgSpeed,
+        maxSpeed: t.maxSpeed,
+        // Données véhicule
+        vehicleId: t.vehicleId,
+        vehicleName: vehicle?.name,
+        vehicleBrand: vehicle?.brand,
+        vehicleModel: vehicle?.model,
+        // Consommation
+        consumption: t.fuelUsed && t.distance > 0 
+          ? ((t.fuelUsed / t.distance) * 100).toFixed(2) 
+          : null,
+        // Route GPS (optionnel, peut être volumineux)
+        hasRoute: !!(t.route && t.route.length > 0),
+        routePointCount: t.route?.length || 0,
+      };
+    });
+    
+    res.json({ 
+      trips: enriched, 
+      total, 
+      limit, 
+      offset,
+      hasMore: offset + limit < total,
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Données trajets corrompues' });
+  }
+});
+
+/** Récupère un trajet spécifique avec route GPS complète. */
+app.get('/api/maps/trips/:id', auth, (req, res) => {
+  const row = db.prepare('SELECT payload FROM sync_data WHERE user_id = ?').get(req.user.sub);
+  if (!row) return res.status(404).json({ error: 'Trajet non trouvé' });
+  try {
+    const data = JSON.parse(row.payload);
+    const trip = (data.trips || []).find((t) => String(t.id) === String(req.params.id));
+    if (!trip) return res.status(404).json({ error: 'Trajet non trouvé' });
+    
+    const vehicle = trip.vehicleId 
+      ? (data.vehicles || []).find((v) => v.id === trip.vehicleId) 
+      : null;
+    
+    res.json({
+      ...trip,
+      vehicle: vehicle ? {
+        id: vehicle.id,
+        name: vehicle.name,
+        brand: vehicle.brand,
+        model: vehicle.model,
+        fuelType: vehicle.fuelType,
+        tankCapacity: vehicle.tankCapacity,
+      } : null,
+      consumption: trip.fuelUsed && trip.distance > 0 
+        ? ((trip.fuelUsed / trip.distance) * 100).toFixed(2) 
+        : null,
+    });
+  } catch {
+    res.status(500).json({ error: 'Données trajet corrompues' });
+  }
+});
+
+/** Récupère les lieux enregistrés (domicile, travail, favoris). */
+app.get('/api/maps/places', auth, (req, res) => {
+  const row = db.prepare('SELECT payload FROM sync_data WHERE user_id = ?').get(req.user.sub);
+  if (!row) return res.json({ places: [] });
+  try {
+    const data = JSON.parse(row.payload);
+    const places = (data.places || []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      address: p.address,
+      latitude: p.latitude,
+      longitude: p.longitude,
+      type: p.type, // 'home', 'work', 'favorite', 'recent'
+      visitCount: p.visitCount || 0,
+      lastVisit: p.lastVisit,
+    }));
+    res.json({ places });
+  } catch {
+    res.status(500).json({ error: 'Données lieux corrompues' });
+  }
+});
+
+/** Démarre un trajet depuis Maps (crée l'entrée dans Fuel). */
+app.post('/api/maps/trips/start', auth, (req, res) => {
+  const row = db.prepare('SELECT payload, updated_at FROM sync_data WHERE user_id = ?').get(req.user.sub);
+  const data = row ? JSON.parse(row.payload) : { vehicles: [], trips: [], places: [], fillUps: [] };
+  
+  const { mode, vehicleId, startLocation, destination, destinationCoords } = req.body || {};
+  
+  // Valide le véhicule si mode voiture
+  if (mode === 'driving' && vehicleId) {
+    const vehicle = (data.vehicles || []).find((v) => String(v.id) === String(vehicleId));
+    if (!vehicle) return res.status(400).json({ error: 'Véhicule non trouvé' });
+  }
+  
+  const tripId = Date.now();
+  const newTrip = {
+    id: tripId,
+    mode: mode || 'driving',
+    vehicleId: mode === 'driving' ? vehicleId : null,
+    startTime: new Date().toISOString(),
+    startLocation: startLocation || null,
+    destinationName: destination || null,
+    destinationLat: destinationCoords?.latitude,
+    destinationLon: destinationCoords?.longitude,
+    status: 'active',
+    route: [],
+    distance: 0,
+    duration: 0,
+    fuelUsed: null,
+  };
+  
+  data.trips = data.trips || [];
+  data.trips.push(newTrip);
+  
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO sync_data (user_id, payload, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`
+  ).run(req.user.sub, JSON.stringify(data), now);
+  
+  res.status(201).json({ 
+    ok: true, 
+    tripId,
+    trip: newTrip,
+    // Deep link pour ouvrir Fuel et commencer le tracking GPS
+    fuelDeepLink: `gasoiltracking://trip/control?action=start&tripId=${tripId}&vehicleId=${vehicleId || ''}&mode=${mode || 'driving'}`,
+  });
+});
+
+/** Met à jour un trajet (pause, stop, position). */
+app.put('/api/maps/trips/:id', auth, (req, res) => {
+  const row = db.prepare('SELECT payload FROM sync_data WHERE user_id = ?').get(req.user.sub);
+  if (!row) return res.status(404).json({ error: 'Trajet non trouvé' });
+  
+  try {
+    const data = JSON.parse(row.payload);
+    const tripIndex = (data.trips || []).findIndex((t) => String(t.id) === String(req.params.id));
+    if (tripIndex === -1) return res.status(404).json({ error: 'Trajet non trouvé' });
+    
+    const { action, position, endLocation, fuelUsed } = req.body || {};
+    const trip = data.trips[tripIndex];
+    
+    if (action === 'pause') {
+      trip.status = 'paused';
+      trip.pausedAt = new Date().toISOString();
+    } else if (action === 'resume') {
+      trip.status = 'active';
+      delete trip.pausedAt;
+    } else if (action === 'stop') {
+      trip.status = 'completed';
+      trip.endTime = new Date().toISOString();
+      if (endLocation) trip.endLocation = endLocation;
+      if (fuelUsed != null) trip.fuelUsed = fuelUsed;
+      // Calcule durée
+      if (trip.startTime) {
+        trip.duration = Math.round((new Date(trip.endTime) - new Date(trip.startTime)) / 1000);
+      }
+    }
+    
+    // Ajoute position à la route si fournie
+    if (position && position.latitude && position.longitude) {
+      trip.route = trip.route || [];
+      trip.route.push({
+        lat: position.latitude,
+        lon: position.longitude,
+        ts: Date.now(),
+        speed: position.speed,
+      });
+    }
+    
+    data.trips[tripIndex] = trip;
+    
+    const now = new Date().toISOString();
+    db.prepare(
+      `UPDATE sync_data SET payload = ?, updated_at = ? WHERE user_id = ?`
+    ).run(JSON.stringify(data), now, req.user.sub);
+    
+    res.json({ ok: true, trip });
+  } catch {
+    res.status(500).json({ error: 'Erreur mise à jour trajet' });
+  }
+});
+
+/** Statistiques trajets pour le dashboard Maps. */
+app.get('/api/maps/stats', auth, (req, res) => {
+  const row = db.prepare('SELECT payload FROM sync_data WHERE user_id = ?').get(req.user.sub);
+  if (!row) return res.json({ stats: { totalTrips: 0, totalDistance: 0, totalDuration: 0 } });
+  
+  try {
+    const data = JSON.parse(row.payload);
+    const trips = data.trips || [];
+    const period = req.query.period || 'all'; // 'week', 'month', 'year', 'all'
+    
+    let filtered = trips;
+    const now = Date.now();
+    if (period === 'week') {
+      filtered = trips.filter((t) => new Date(t.startTime || t.date) > now - 7 * 24 * 60 * 60 * 1000);
+    } else if (period === 'month') {
+      filtered = trips.filter((t) => new Date(t.startTime || t.date) > now - 30 * 24 * 60 * 60 * 1000);
+    } else if (period === 'year') {
+      filtered = trips.filter((t) => new Date(t.startTime || t.date) > now - 365 * 24 * 60 * 60 * 1000);
+    }
+    
+    const byMode = {
+      driving: filtered.filter((t) => !t.mode || t.mode === 'driving'),
+      walking: filtered.filter((t) => t.mode === 'walking'),
+      transit: filtered.filter((t) => t.mode === 'transit'),
+      cycling: filtered.filter((t) => t.mode === 'cycling'),
+    };
+    
+    const modeStats = (arr) => ({
+      count: arr.length,
+      distance: arr.reduce((s, t) => s + (t.distance || 0), 0),
+      duration: arr.reduce((s, t) => s + (t.duration || 0), 0),
+      fuelUsed: arr.reduce((s, t) => s + (t.fuelUsed || 0), 0),
+    });
+    
+    res.json({
+      stats: {
+        totalTrips: filtered.length,
+        totalDistance: filtered.reduce((s, t) => s + (t.distance || 0), 0),
+        totalDuration: filtered.reduce((s, t) => s + (t.duration || 0), 0),
+        totalFuelUsed: filtered.reduce((s, t) => s + (t.fuelUsed || 0), 0),
+        byMode: {
+          driving: modeStats(byMode.driving),
+          walking: modeStats(byMode.walking),
+          transit: modeStats(byMode.transit),
+          cycling: modeStats(byMode.cycling),
+        },
+      },
+      period,
+    });
+  } catch {
+    res.status(500).json({ error: 'Erreur calcul statistiques' });
+  }
+});
+
 const upload = multer({
   dest: path.join(DATA_DIR, 'apks'),
   limits: { fileSize: 120 * 1024 * 1024 },
