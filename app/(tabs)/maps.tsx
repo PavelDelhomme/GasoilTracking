@@ -55,7 +55,8 @@ type PendingDest = { label: string; latitude: number; longitude: number };
 
 export default function MapsScreen() {
   const { colors } = useTheme();
-  const { activeTrip, activeVehicle, refresh } = useApp();
+  const { activeTrip, activeVehicle, vehicles, selectVehicle, refresh } = useApp();
+  const [showVehiclePicker, setShowVehiclePicker] = useState(false);
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
@@ -1137,6 +1138,71 @@ export default function MapsScreen() {
             )
           ) : (
             <>
+              {/* Sélecteur de véhicule */}
+              {vehicles.length > 0 && (
+                <Pressable
+                  style={[
+                    styles.vehicleSelector,
+                    { backgroundColor: colors.card, borderColor: colors.border },
+                  ]}
+                  onPress={() => setShowVehiclePicker(!showVehiclePicker)}
+                >
+                  <Ionicons name="car-sport" size={18} color={colors.accent} />
+                  <Text style={[styles.vehicleSelectorText, { color: colors.text }]} numberOfLines={1}>
+                    {activeVehicle?.name || 'Sélectionner un véhicule'}
+                  </Text>
+                  <Ionicons
+                    name={showVehiclePicker ? 'chevron-up' : 'chevron-down'}
+                    size={16}
+                    color={colors.textSecondary}
+                  />
+                </Pressable>
+              )}
+              {showVehiclePicker && vehicles.length > 1 && (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.vehiclePickerScroll}
+                  contentContainerStyle={styles.vehiclePickerContent}
+                >
+                  {vehicles.map((v) => (
+                    <Pressable
+                      key={v.id}
+                      style={[
+                        styles.vehicleChip,
+                        {
+                          backgroundColor: activeVehicle?.id === v.id ? colors.accent : colors.card,
+                          borderColor: activeVehicle?.id === v.id ? colors.accent : colors.border,
+                        },
+                      ]}
+                      onPress={async () => {
+                        await selectVehicle(v.id);
+                        setShowVehiclePicker(false);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.vehicleChipText,
+                          { color: activeVehicle?.id === v.id ? '#fff' : colors.text },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {v.name}
+                      </Text>
+                      {v.consumptionPer100 ? (
+                        <Text
+                          style={[
+                            styles.vehicleChipSub,
+                            { color: activeVehicle?.id === v.id ? 'rgba(255,255,255,0.8)' : colors.textSecondary },
+                          ]}
+                        >
+                          {v.consumptionPer100.toFixed(1)} L/100
+                        </Text>
+                      ) : null}
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              )}
               <Button
                 title={
                   !activeVehicle
@@ -1309,5 +1375,44 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 10,
     marginBottom: 10,
+  },
+  vehicleSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  vehicleSelectorText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  vehiclePickerScroll: {
+    marginBottom: 8,
+    maxHeight: 70,
+  },
+  vehiclePickerContent: {
+    gap: 8,
+    paddingHorizontal: 2,
+  },
+  vehicleChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    minWidth: 80,
+  },
+  vehicleChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  vehicleChipSub: {
+    fontSize: 10,
+    marginTop: 2,
   },
 });
